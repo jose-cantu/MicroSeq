@@ -1,0 +1,15 @@
+import unittest
+import subprocess
+
+class TestHelloArgs(unittest.TestCase):
+    def test_default_name(self):
+        result = subprocess.check_output(["python", "hello_microseq_argparse.py"]).decode()
+        self.assertIn("Hey there Cutie x) ", result)
+    
+    def test_custome_name(self):
+        result = subprocess.check_output(["python", "hello_microseq_argparse.py", "--name", "TestUser"]).decode()
+        self.assertIn("Hey there Hottie x)", result) 
+
+if __name__ == "__main__":
+    unittest.main()    
+
