@@ -1,0 +1,6 @@
+logging:
+  level: DEBUG
+tools:
+  trimmomatic: "/path/to/trimmomatic"
+  cap3: "/path/to/cap3"
+  
