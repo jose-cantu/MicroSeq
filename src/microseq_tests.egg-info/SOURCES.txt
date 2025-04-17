@@ -1,0 +1,17 @@
+README.MD
+pyproject.toml
+src/microseq_tests/__init__.py
+src/microseq_tests.egg-info/PKG-INFO
+src/microseq_tests.egg-info/SOURCES.txt
+src/microseq_tests.egg-info/dependency_links.txt
+src/microseq_tests.egg-info/top_level.txt
+src/microseq_tests/assembly/__init__.py
+src/microseq_tests/assembly/de_novo_assembly.py
+src/microseq_tests/gui/__init__.py
+src/microseq_tests/gui/main_window.py
+src/microseq_tests/trimming/__init__.py
+src/microseq_tests/trimming/quality_trim.py
+src/microseq_tests/utility/__init__.py
+src/microseq_tests/utility/utils.py
+tests/test_microseq_arg_copy.py
+tests/test_utils.py

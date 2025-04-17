@@ -1,0 +1,9 @@
+# config/config.yaml tells my code where things live and how to behave at runtime (think log level, executable paths, pipeline parameters) - load_config() helper points to this file 
+
+logging:
+  level: DEBUG 
+tools:
+  trimmomatic: trimmomatic # already on path so commands names here are just fine taking into account command calls 
+  blastn: blastn 
+  cap3: cap3 
+
