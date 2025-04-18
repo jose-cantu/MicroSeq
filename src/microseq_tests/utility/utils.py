@@ -22,4 +22,7 @@ def setup_logging(log_dir="logs", log_file_prefix="microseq"):
                 ]
             )
     logging.info(f"Logging to {file_path}") 
-            
+           
+def expand_db_path(template: str) -> str:
+    db_home = os.environ.get("MICROSEQ_DB_HOME", os.path.expanduser("~/.microseq_dbs"))
+    return template.replace("${MICROSEQ_DB_HOME}", db_home) 

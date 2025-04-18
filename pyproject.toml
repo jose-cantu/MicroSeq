@@ -18,4 +18,7 @@ dependencies = [
 package-dir = {"" = "src"}     # tells setuptools hey my code lives here in src/ 
 
 [tools.setuptools.packages.find]
-where = ["src"]    # find all packages unders src/ 
+where = ["src"]    # find all packages unders src/
+
+[project.scripts]
+microseq = "microseq_tests.microseq:main" 
