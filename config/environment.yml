@@ -13,8 +13,10 @@ dependencies:
   # python libraries imported 
   - pyyaml 
   - pytest   # test runner 
-  - pyqt     # GUI 
-  - pip      # pip-install extras 
+  - pyside6     # GUI 
+  - pip # pip-install extras 
+  - pynvim
+  - typing_extensions 
 
   # external bio-tools
   - trimmomatic    # adds trimmomatic to $CONDA_PREFIX/bin  
