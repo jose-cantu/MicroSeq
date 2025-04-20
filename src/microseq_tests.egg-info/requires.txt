@@ -1,0 +1,3 @@
+pyyaml>=6
+biopython>=1.8
+PySide6

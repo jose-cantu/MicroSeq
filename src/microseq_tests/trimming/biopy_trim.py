@@ -1,7 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
-from Bio import SeqIO                         # Biopython
+from Bio import SeqIO                         
 import logging, shutil
 
 # ----------------------------------------------------------------------
@@ -47,12 +47,12 @@ def trim_folder(
     combined_tsv: str | Path | None = None,
 ) -> None:
     """
-    For every *.fastq in *input_dir*:
+    For every *.fastq in input_dir ....
 
-    • keep reads whose sliding‑window core avg Q ≥ *per_base_q*
-    • write per‑read stats to *_avg_qual.txt*
-    • if file avg Q ≥ *file_q_threshold*  → trimmed FASTQ in *passed_qc_fastq/*
-      else                                  move FASTQ to *failed_qc_fastq/*
+    • keep reads whose sliding‑window core avg Q ≥ per_base_q
+    • write per‑read stats to *_avg_qual.txt
+    • if file avg Q ≥ file_q_threshold  → trimmed FASTQ in passed_qc_fastq/
+      else                                  move FASTQ to failed_qc_fastq/
     • append one summary row to *combined_tsv* (if provided)
     """
     input_dir  = Path(input_dir)

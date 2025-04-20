@@ -4,5 +4,7 @@ __pycache__/
 test.log
 # Large reference DBs (created by fetch_dbs.py)
 microseq_dbs/ 
-!.keep 
+!.keep
+# please do not put an __init__.py in repo root =) 
+/__init__.py 
 

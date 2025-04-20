@@ -4,3 +4,8 @@ Version: 0.0.1
 Summary: MicroSeq sandbox package
 Requires-Python: >=3.9
 Description-Content-Type: text/markdown
+Requires-Dist: pyyaml>=6
+Requires-Dist: biopython>=1.8
+Requires-Dist: PySide6
+
+MicroSeq's GUI uses PySide6 / Qt 6, licensed under the LGPL v3. See LICENSES/Qt_LGPLv3.txt for details. 

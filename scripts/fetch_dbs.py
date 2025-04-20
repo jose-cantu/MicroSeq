@@ -14,7 +14,7 @@ Each DB direcotry ends up with BLAST-ready indices (makeblastdb -dbtype nucl).
 Run this once, then point config/config.yaml at the same MICROSEQ_DB_HOME.
 """
 
-import os, pathlib, subprocess, urllib.request, tarfile, sys, zipfile, shutil 
+import os, pathlib, subprocess, urllib.request, tarfile, sys, zipfile, shutil, gzip  
 
 DB_HOME = pathlib.Path(os.environ.get("MICROSEQ_DB_HOME", "~/.microseq_dbs")).expanduser()
 DB_HOME.mkdir(parents=True, exist_ok=True) # path check 
@@ -100,12 +100,12 @@ def fetch_silva() -> None:
     
     fasta = silva_dir / "SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta"
     if not fasta.exists():
-        log("→ gunzip SILVA fasta")
-        run(["gunzip", "-c", str(gz), ">", str(fasta)])  # works on Linux/Mac
-        # If gunzip -c > file doesn't work on some shells,
-        # you can use Python gzip module instead (omitted for brevity).
-        
-    makeblastdb(fasta, silva_dir / "silva_db")
+        log("→ extracting SILVA with Python gzip")
+        with gzip.open(gz, "rb") as fin, open(fasta, "wb") as fout:
+            shutil.copyfileobj(fin, fout)
+
+    # Build BLAST index  
+    makeblastdb(fasta, silva_dir / "silva_db")  
     
     
 #  NCBI 16S_ribosomal_RNA  (pre‑built BLAST db tar.gz)

@@ -14,13 +14,15 @@ def run_blast(query_fa: str, db_key: str, out_tsv: str) -> None:
     blastdb = expand_db_path(tmpl) 
 
     pathlib.Path(out_tsv).parent.mkdir(parents=True, exist_ok=True)
-    outfmt = "6 qseqid sseqid pident length evalue bitscore stitle"
-    cmd=["blastn", 
+    outfmt = "6 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle"
+    cmd=["blastn",
+         "-task", "blastn", # why not? 
          "-query", query_fa,
          "-db", blastdb, 
+         "-qcov_hsp_perc", "80",     # here I am requiring ≥ 80% of query to align.... 
          "-out", out_tsv,
          "-outfmt", outfmt,
          ]
 
-    logging.info("RUN BLAST:%s", "".join(cmd))
+    logging.info("RUN BLAST:%s", " ".join(cmd))
     subprocess.run(cmd, check=True) 

@@ -1,23 +1,37 @@
-import argparse
-import subprocess 
+import argparse, subprocess, pathlib, logging 
 from microseq_tests.utility.utils import load_config, setup_logging 
 
-def quality_trim(input_file, output_file):
+def quality_trim(input_file: str, output_file: str) -> pathlib.Path:
     """
-    Run Trimmomatic to quality-trim reads.
-    """
-    config = load_config() # loads 'config.yaml'
-    trimmomatic_executable = config["tools"]["trimmomatic"] 
+    Run Trimmomatic single-end mode. 
 
-    # Example usuage: using some deafult config-based parameters 
-    cmd = [
-            trimmomatic_executable, "SE", "-phred33", # quality scores are in PHRED + 33 encoding 
-            input_file, output_file,
-            "SLIDINGWINDOW:5:20", # sliding window algorithm used 
-            "MINLEN:200"  # length bp less than 200 after QC trimmed then toss it 
-            ]
+    Returns here: 
 
-    subprocess.run(cmd, check=True) # Check process "if Trimmomatic exits with a non-zero status raise process error!"  
+    pathlib.Path
+        Soo this is the absulute path to the trimmed FASTA/FASTQ file so downstream functions (assembly, GUI, tests) can chain w/o guessing. 
+        """
+    cfg = load_config()
+    trimm = cfg["tools"]["trimmomatic"]
+
+    cmd = [ 
+        trimm, "SE", "-phred33",
+        input_file, output_file,
+        "SLIDINGWINDOW:5:20",
+        "MINLEN:200",
+        ]
+
+    logging.info("RUN Trimmomatic: %s", " ".join(cmd))
+    try:
+        subprocess.run(cmd, check=True, stderr=subprocess.PIPE, text=True)
+    except subprocess.CalledProcessError as e:
+        logging.error("Trimmomatic failed (exit %s):\n%s", e.returncode, e.stderr)
+        raise 
+
+    out_path = pathlib.Path(output_file).resolve()
+    if not out_path.exists():
+        raise FileNotFoundError(out_path)
+    return out_path 
+
 
 def main():
     setup_logging() # Logging set up to capture all later messages aka Python's root logger (format, level, file handler) 

@@ -16,7 +16,9 @@ dependencies:
   - pyside6     # GUI 
   - pip # pip-install extras 
   - pynvim
-  - typing_extensions 
+  - typing_extensions
+  - biom-format # Needed for BIOM 
+  - h5py # necessary for BIOM 
 
   # external bio-tools
   - trimmomatic    # adds trimmomatic to $CONDA_PREFIX/bin  

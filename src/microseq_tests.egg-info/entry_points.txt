@@ -1,0 +1,2 @@
+[console_scripts]
+microseq = microseq_tests.microseq:main

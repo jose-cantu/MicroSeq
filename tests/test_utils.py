@@ -1,21 +1,25 @@
-import unittest
-import os 
-from utils import load_config, setup_logging
-import logging 
+from __future__ import annotations 
+import sys, inspect
+print("DEBUG python:", sys.executable)
+import microseq_tests, importlib.util
+print("DEBUG pkg:", inspect.getfile(microseq_tests))
+print("DEBUG spec:", importlib.util.find_spec("microseq_tests.utility"))
+import os, logging, pathlib, pytest 
+from microseq_tests.utility.utils import load_config, setup_logging
 
-class TestUtils(unittest.TestCase):
-    def test_load_config(self):
-        config = load_config("config.yaml")
-        self.assertIn("tools", config) # Just an example to check if tools is in yaml otherwise fails test
+def test_load_config(): 
+    cfg = load_config("config/config.yaml")
+    assert "tools" in cfg 
 
-    def test_setup_logging(self):
-        test_log_file = "test.log"
-        if os.path.exists(test_log_file):
-            os.remove(test_log_file)
-        setup_logging(test_log_file)
-        logging.info("Test log message")
+def test_setup_logging(tmp_path: pathlib.Path):
+    """
+    tmp_path is a py test fixture that yields a fresh, auto-cleaned path. 
+    """
+    setup_logging(log_dir=str(tmp_path), log_file_prefix="test", force=True)
+    logging.info("hello")
 
-        self.assertTrue(os.path.exists(test_log_file))
+    logging.shutdown() 
 
-if __name__ == "__main__":
-    unittest.main()
+    logs = list(tmp_path.glob("test_*.log"))
+    assert logs, "no log file created" 
+

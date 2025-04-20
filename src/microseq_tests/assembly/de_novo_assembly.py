@@ -14,25 +14,42 @@ import subprocess
 import logging 
 from microseq_tests.utility.utils import load_config, setup_logging 
 
-def de_novo_assembly(input_fasta: str, output_dir: str) -> None:
+def de_novo_assembly(input_fasta: str, output_dir: str) -> Path: 
     """
-    Run CAP3 and place results in output_dir
-    """
+    Run CAP3 on input_fasta. 
+
+    Parameters
+    input_fasta : str 
+        Trimmed reads in FASTA format here. 
+    output_dir: str 
+        Folder where CAP3 files are written in. 
+
+    Returns
+    pathlib.Path
+        Absolute path to ''*.cap.contigs''.
+        """
     cfg = load_config()
-    cap3_exe = cfg["tools"]["cap3"] # keeps executable path outisde code; edits once in config.yaml 
-    
+    cap3_exe = cfg["tools"]["cap3"] # path comes from config file 
+
     in_path = Path(input_fasta).resolve()
     out_dir = Path(output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # CAP3 writes files in CWD wiht the same base name, so change CWD to out_dir and pass only basename. 
-    cmd = [cap3_exe, str(in_path)]
+    cmd = [cap3_exe, str(in_path)] 
+    logging.info("RUN CAP3: %s (cwd=%s)", " ".join(cmd), out_dir)
 
-    logging.info("RUN CAP3 -> %s", out_dir)
-    subprocess.run(cmd, check=True, cwd=out_dir) #CAP3 always writes basename.cap.* in CWD; helps keep project clean 
+    try:
+        subprocess.run(cmd, check=True, cwd=out_dir, stderr=subprocess.PIPE, text=True) 
+    except subprocess.CalledProcessError as exc:
+        logging.error("CAP3 failed (exit %s):\n%s". exc.returncode, exc.stderr)
+        raise 
 
-    logging.info("CAP3 finished' contigs are in %s.cap.contigs", in_path.name) 
+    contig_path = out_dir / f"{in_path.name}.cap.contigs"
+    if not contig_path.exists():
+        raise FileNotFoundError(contig_path)
 
+    logging.info("CAP3 finished; contigs file: %s", contig_path) 
+    return contig_path 
 
 # optional CLI to call file directly 
 if __name__ == "__main__":
