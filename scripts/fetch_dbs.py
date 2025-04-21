@@ -45,55 +45,67 @@ def makeblastdb(fasta: pathlib.Path, out_prefix: pathlib.Path) -> None:
     run(
         ["makeblastdb", "-in", str(fasta), "-dbtype", "nucl", "-out", str(out_prefix)]
     )
-    
-    
 
-#  Greengenes 2  (2022.10 backbone full‑length)
+def extract_member(zip_path: pathlib.Path, pattern: str, out_path: pathlib.Path):
+    """
+    Copy the first file in *zip_path* whose name ends‑with *pattern* to *out_path*.
+    Works even when QIIME2 wraps files in random UUID folders.
+    """
+    with zipfile.ZipFile(zip_path) as zf:
+        try:
+            member = next(n for n in zf.namelist() if n.endswith(pattern))
+        except StopIteration:
+            raise ValueError(f"{pattern} not found inside {zip_path.name}")
+        with zf.open(member) as fin, open(out_path, "wb") as fout:
+            shutil.copyfileobj(fin, fout)
+
+    
 def fetch_gg2() -> None:
-    gg_dir = DB_HOME / "greengenes2"
+    """ Download Greengenes 2 (2024‑09 backbone full‑length) and build BLAST    db. """
+    gg_dir = DB_HOME / "gg2"
     gg_dir.mkdir(exist_ok=True)
-    
-    # Download the QIIME2 artifact (a ZIP)
-    url = (
-        "https://ftp.microbio.me/greengenes/greengenes2/2024.09/"
-        "2024.09.backbone.full-length.fna.qza"
-    )
-    qza = gg_dir / "gg2_2024.09_full.qza"
-    dl(url, qza)
-    
-    # Extract dna-sequences.fasta from the QZA (ZIP)
+
+    # Use HTTP to dodge the incomplete‑TLS‑chain problem
+    BASE  = "http://ftp.microbio.me/greengenes_release/2024.09"
+    FILES = {
+        "backbone_fasta": "2024.09.backbone.full-length.fna.qza",
+        "taxonomy":       "2024.09.backbone.tax.qza",
+    }
+
+    # ── download & extract dna‑sequences.fasta ────────────────────────────────
+    backbone_qza = gg_dir / FILES["backbone_fasta"]
+    dl(f"{BASE}/{FILES['backbone_fasta']}", backbone_qza)
+
     fasta = gg_dir / "dna-sequences.fasta"
     if not fasta.exists():
         log("→ extracting dna‑sequences.fasta from QZA")
-        with zipfile.ZipFile(qza, "r") as zf:
-            # inside the zip it is data/dna-sequences.fasta
-            with zf.open("data/dna-sequences.fasta") as fin, open(fasta, "wb") as fout:
-                shutil.copyfileobj(fin, fout)
-                
-    # Download taxonomy.tsv to support post‑BLAST parsing
-    tax_url = (
-        "https://ftp.microbio.me/greengenes/greengenes2/2024.09/"
-        "2024.09.taxonomy.asv.tsv.qza"
-    )
-    tax_qza = gg_dir / "taxonomy_2024.09.tsv.qza"
+        extract_member(backbone_qza, "dna-sequences.fasta", fasta)
+
+
+    # ── taxonomy table ────────────────────────────────────────────────────────
+    tax_qza = gg_dir / FILES["taxonomy"]
+    dl(f"{BASE}/{FILES['taxonomy']}", tax_qza)
+    
     taxonomy_tsv = gg_dir / "taxonomy.tsv"
-    dl(tax_url, tax_qza)
     if not taxonomy_tsv.exists():
         log("→ extracting taxonomy.tsv from QZA")
-        with zipfile.ZipFile(tax_qza, "r") as zf:
-            with zf.open("data/taxonomy.tsv") as fin, open(taxonomy_tsv, "wb") as fout:
-                shutil.copyfileobj(fin, fout)
-                
-    # Build BLAST index
+        extract_member(tax_qza, "taxonomy.tsv", taxonomy_tsv)
+    
+
+    # ── build BLAST index (creates .nsq/.nin/.nhr) ────────────────────────────
     makeblastdb(fasta, gg_dir / "greengenes2_db")
+# ─────────────────────────────────────────────────────────────────────────────
+
+
     
     
 # SILVA 138.1 SSU NR99 (truncated fasta)
 def fetch_silva() -> None:
     silva_dir = DB_HOME / "silva"
     silva_dir.mkdir(exist_ok=True)
+    
     url = (
-        "https://ftp.arb-silva.de/release_138.1/Exports/"
+        "ftp://ftp.arb-silva.de/release_138.1/Exports/"
         "SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta.gz"
     )
     gz = silva_dir / "SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta.gz"
@@ -113,7 +125,7 @@ def fetch_silva() -> None:
 def fetch_ncbi16s() -> None:
     ncbi_dir = DB_HOME / "ncbi"
     ncbi_dir.mkdir(exist_ok=True)
-    url = "https://ftp.ncbi.nih.gov/blast/db/16S_ribosomal_RNA.tar.gz"
+    url = "ftp://ftp.ncbi.nlm.nih.gov/blast/db/16S_ribosomal_RNA.tar.gz"
     tar_file = ncbi_dir / "16S_ribosomal_RNA.tar.gz"
     dl(url, tar_file)
     
