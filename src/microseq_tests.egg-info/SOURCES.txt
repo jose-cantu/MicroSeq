@@ -2,6 +2,7 @@ README.MD
 pyproject.toml
 src/microseq_tests/__init__.py
 src/microseq_tests/microseq.py
+src/microseq_tests/post_blast_analysis.py
 src/microseq_tests.egg-info/PKG-INFO
 src/microseq_tests.egg-info/SOURCES.txt
 src/microseq_tests.egg-info/dependency_links.txt
@@ -21,4 +22,6 @@ src/microseq_tests/trimming/quality_trim.py
 src/microseq_tests/utility/__init__.py
 src/microseq_tests/utility/utils.py
 tests/test_ab1_convert.py
+tests/test_postblast.py
+tests/test_trim_pipeline.py
 tests/test_utils.py

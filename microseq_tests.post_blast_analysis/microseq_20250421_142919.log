@@ -1,0 +1,5 @@
+2025-04-21 14:29:19,685 INFO: Logging to microseq_tests.post_blast_analysis/microseq_20250421_142919.log
+2025-04-21 14:29:19,790 INFO: [PASS] 39764269.fastq → /private/var/folders/3j/xb8vjkbd4vgcqx940q7q55q80000gn/T/pytest-of-josecantu/pytest-0/test_ab1_trim_to_fasta0/run_581e97ca35694bd38cb9171f732135af/passed_qc_fastq/39764269_trimmed.fastq (avgQ 55.43)
+2025-04-21 14:29:19,791 INFO: [PASS] 39764278.fastq → /private/var/folders/3j/xb8vjkbd4vgcqx940q7q55q80000gn/T/pytest-of-josecantu/pytest-0/test_ab1_trim_to_fasta0/run_581e97ca35694bd38cb9171f732135af/passed_qc_fastq/39764278_trimmed.fastq (avgQ 54.90)
+2025-04-21 14:29:19,791 INFO: [PASS] 39764260.fastq → /private/var/folders/3j/xb8vjkbd4vgcqx940q7q55q80000gn/T/pytest-of-josecantu/pytest-0/test_ab1_trim_to_fasta0/run_581e97ca35694bd38cb9171f732135af/passed_qc_fastq/39764260_trimmed.fastq (avgQ 52.11)
+2025-04-21 14:29:19,792 INFO: [PASS] 39764266.fastq → /private/var/folders/3j/xb8vjkbd4vgcqx940q7q55q80000gn/T/pytest-of-josecantu/pytest-0/test_ab1_trim_to_fasta0/run_581e97ca35694bd38cb9171f732135af/passed_qc_fastq/39764266_trimmed.fastq (avgQ 46.67)

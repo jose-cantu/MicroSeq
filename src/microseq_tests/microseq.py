@@ -8,7 +8,7 @@ from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq 
 from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta 
-# from microseq_tests.blast.post_blast_analysis import build_biom
+from microseq_tests.post_blast_analysis import run as postblast_run  
 
 def main() -> None:
     setup_logging() # sets up logging from here... 
@@ -37,10 +37,10 @@ def main() -> None:
     p_blast.add_argument("-o", "--output", required=True)
 
     # postblast BIOM 
-    p_BIOM = sp.add_parser("postblast", help="Parse BLAST + build BIOM (stud)")
-    p_BIOM.add_argument("-b", "--blast_file", required=True)
-    p_BIOM.add_argument("-d", "--db", choices=db_choices, required=True)
-    p_BIOM.add_argument("-o", "--output_biom", required=True)
+    p_BIOM = sp.add_parser("postblast", help="Join BLAST + metadata -> BIOM(+CSV)")
+    p_BIOM.add_argument("-b", "--blast_file", required=True, help="BLAST hits TSV produced by MicroSeq blast =)")
+    p_BIOM.add_argument("-m", "--metadata", required=True, help="Metadata TSV (must have the sample_id column)")
+    p_BIOM.add_argument("-o", "--output_biom", required=True, help="Output .biom path; .csv written alongside")
     
     # parse out arguments 
     args = ap.parse_args() 
@@ -79,14 +79,21 @@ def main() -> None:
                   workdir / "blast" / f"hits_{args.db}.tsv")
 
     elif args.cmd == "postblast":
-        print("postblast not implemented yet")
-        sys.exit(1)
+        out_biom = workdir / "biom" / args.output_biom 
+        out_biom.parent.mkdir(exist_ok=True, parents=True)
+
+        postblast_run(
+                pathlib.Path(args.blast_file),
+                pathlib.Path(args.metadata),
+                out_biom,
+                write_csv=True
+                )
+        print(f" ✓ BIOM : {out_biom}")
+        print(f" ✓ CSV  : {out_biom.with_suffix('.csv')}") 
+
 
 if __name__ == "__main__":
     main() 
-
-
-
 
 
 
