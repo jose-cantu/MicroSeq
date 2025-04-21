@@ -8,13 +8,15 @@ Usage from CLI module:
     
 The CAP3 binary path is read from config.yaml.
 """
-
+from __future__ import annotations 
 from pathlib import Path
 import subprocess 
 import logging 
 from microseq_tests.utility.utils import load_config, setup_logging 
 
-def de_novo_assembly(input_fasta: str, output_dir: str) -> Path: 
+PathLike = str | Path 
+
+def de_novo_assembly(input_fasta: PathLike, output_dir: PathLike) -> Path: 
     """
     Run CAP3 on input_fasta. 
 
@@ -41,7 +43,7 @@ def de_novo_assembly(input_fasta: str, output_dir: str) -> Path:
     try:
         subprocess.run(cmd, check=True, cwd=out_dir, stderr=subprocess.PIPE, text=True) 
     except subprocess.CalledProcessError as exc:
-        logging.error("CAP3 failed (exit %s):\n%s". exc.returncode, exc.stderr)
+        logging.error("CAP3 failed (exit %s):\n%s", exc.returncode, exc.stderr)
         raise 
 
     contig_path = out_dir / f"{in_path.name}.cap.contigs"

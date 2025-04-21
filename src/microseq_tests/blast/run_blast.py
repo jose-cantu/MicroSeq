@@ -1,7 +1,12 @@
+from __future__ import annotations 
+from pathlib import Path 
 from microseq_tests.utility.utils import load_config, expand_db_path, setup_logging 
-import subprocess, logging, argparse, pathlib
+import subprocess, logging, argparse
 
-def run_blast(query_fa: str, db_key: str, out_tsv: str) -> None:
+PathLike = str | Path 
+
+# db_key is the shorthand string for "gg2" or "silva" best keep it str here for future reference 
+def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike) -> None:
     cfg = load_config()
     try: 
         tmpl = cfg["databases"][db_key]["blastdb"]
@@ -13,14 +18,14 @@ def run_blast(query_fa: str, db_key: str, out_tsv: str) -> None:
 
     blastdb = expand_db_path(tmpl) 
 
-    pathlib.Path(out_tsv).parent.mkdir(parents=True, exist_ok=True)
+    Path(out_tsv).parent.mkdir(parents=True, exist_ok=True)
     outfmt = "6 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle"
     cmd=["blastn",
          "-task", "blastn", # why not? 
-         "-query", query_fa,
+         "-query", str(query_fa),   # casting query_fa to str before passing to subprocess 
          "-db", blastdb, 
          "-qcov_hsp_perc", "80",     # here I am requiring ≥ 80% of query to align.... 
-         "-out", out_tsv,
+         "-out", str(out_tsv),
          "-outfmt", outfmt,
          ]
 

@@ -55,10 +55,10 @@ def fetch_gg2() -> None:
     
     # Download the QIIME2 artifact (a ZIP)
     url = (
-        "https://data.qiime2.org/2022.10"
-        "/2022.10.backbone.full-length.fna.qza"
+        "https://ftp.microbio.me/greengenes/greengenes2/2024.09/"
+        "2024.09.backbone.full-length.fna.qza"
     )
-    qza = gg_dir / "gg2_2022.10_full.qza"
+    qza = gg_dir / "gg2_2024.09_full.qza"
     dl(url, qza)
     
     # Extract dna-sequences.fasta from the QZA (ZIP)
@@ -72,9 +72,10 @@ def fetch_gg2() -> None:
                 
     # Download taxonomy.tsv to support post‑BLAST parsing
     tax_url = (
-        "https://data.qiime2.org/2022.10/2022.10.taxonomy.asv.tsv.qza"
+        "https://ftp.microbio.me/greengenes/greengenes2/2024.09/"
+        "2024.09.taxonomy.asv.tsv.qza"
     )
-    tax_qza = gg_dir / "taxonomy.tsv.qza"
+    tax_qza = gg_dir / "taxonomy_2024.09.tsv.qza"
     taxonomy_tsv = gg_dir / "taxonomy.tsv"
     dl(tax_url, tax_qza)
     if not taxonomy_tsv.exists():

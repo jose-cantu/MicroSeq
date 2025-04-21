@@ -1,21 +1,21 @@
-import argparse, subprocess, pathlib, logging 
+from __future__ import annotations 
+from pathlib import Path 
+import argparse, subprocess, logging 
 from microseq_tests.utility.utils import load_config, setup_logging 
 
-def quality_trim(input_file: str, output_file: str) -> pathlib.Path:
+PathLike = str | Path 
+
+def quality_trim(input_file: PathLike, output_file: PathLike) -> Path:
     """
-    Run Trimmomatic single-end mode. 
+    Run Trimmomatic single-end mode and return the absolute path to trimmed FASTAQ/FASTA so down stream steps (assembly, GUI, tests) can chain without guessing. 
 
-    Returns here: 
-
-    pathlib.Path
-        Soo this is the absulute path to the trimmed FASTA/FASTQ file so downstream functions (assembly, GUI, tests) can chain w/o guessing. 
         """
     cfg = load_config()
     trimm = cfg["tools"]["trimmomatic"]
 
     cmd = [ 
         trimm, "SE", "-phred33",
-        input_file, output_file,
+        str(input_file), str(output_file),    # <<< cast once here 
         "SLIDINGWINDOW:5:20",
         "MINLEN:200",
         ]
@@ -27,7 +27,7 @@ def quality_trim(input_file: str, output_file: str) -> pathlib.Path:
         logging.error("Trimmomatic failed (exit %s):\n%s", e.returncode, e.stderr)
         raise 
 
-    out_path = pathlib.Path(output_file).resolve()
+    out_path = Path(output_file).resolve()
     if not out_path.exists():
         raise FileNotFoundError(out_path)
     return out_path 
