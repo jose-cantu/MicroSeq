@@ -41,6 +41,7 @@ def main() -> None:
     p_BIOM.add_argument("-b", "--blast_file", required=True, help="BLAST hits TSV produced by MicroSeq blast =)")
     p_BIOM.add_argument("-m", "--metadata", required=True, help="Metadata TSV (must have the sample_id column)")
     p_BIOM.add_argument("-o", "--output_biom", required=True, help="Output .biom path; .csv written alongside")
+    p_BIOM.add_argument("--sample-col", help="Column in metadata to treat as sample_id") 
     
     # parse out arguments 
     args = ap.parse_args() 
@@ -86,7 +87,8 @@ def main() -> None:
                 pathlib.Path(args.blast_file),
                 pathlib.Path(args.metadata),
                 out_biom,
-                write_csv=True
+                write_csv=True,
+                sample_col=args.sample_col,
                 )
         print(f" ✓ BIOM : {out_biom}")
         print(f" ✓ CSV  : {out_biom.with_suffix('.csv')}") 
