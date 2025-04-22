@@ -75,9 +75,11 @@ def main() -> None:
                          workdir / "asm")
 
     elif args.cmd == "blast":
-        contigs = workdir / "asm" / "trimmed.fasta.cap.contigs"
-        run_blast(contigs, args.db,
-                  workdir / "blast" / f"hits_{args.db}.tsv")
+        run_blast(
+            pathlib.Path(args.input).resolve(),  # temporary patch for blasting and post biom only will need to think around 
+            args.db,
+            pathlib.Path(args.output).resolve()
+            )
 
     elif args.cmd == "postblast":
         out_biom = workdir / "biom" / args.output_biom 
