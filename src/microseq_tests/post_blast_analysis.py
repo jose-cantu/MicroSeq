@@ -8,11 +8,14 @@ Take a BLAST TSV + metadata TSV => write one-column BIOM + CSV mirror.
 from pathlib import Path 
 import pandas as pd 
 import numpy as np 
-from biom import Table 
+from biom import Table
+from biom.util import biom_open 
 from microseq_tests.utility.utils import setup_logging # reusing logger 
 from microseq_tests.utility.utils import load_config # for default DB paths here 
+import logging 
 
-logger = setup_logging(__name__)
+setup_logging() # initialize global logging by configure as root logger  
+logger = logging.getLogger(__name__) # Now this then set as the real logger by passing everything from the root logger which doesn't return anything on its own  
 
 # -------
 # constants - expose as CLI flags for later on will write them in master file CLI
@@ -57,7 +60,9 @@ def _choose_best_hit(blast_df: pd.DataFrame) -> pd.DataFrame:
 
 def biom_to_csv(biom_path: Path) -> Path: 
     """Convert one-column BIOM to Prism friendly wide CSV (samples in rows).""" 
-    table = Table.from_hdf5(str(biom_path)) 
+    with biom_open(str(biom_path)) as fh: 
+        table = Table.from_hdf5(fh) 
+
     df = table.to_dataframe(dense=True).T       # rows = samples since 
     out_csv = biom_path.with_suffix(".csv")
     df.to_csv(out_csv)
@@ -67,20 +72,28 @@ def biom_to_csv(biom_path: Path) -> Path:
 def run(blast_tsv: Path,
         metadata_tsv: Path, 
         out_biom: Path,
-        write_csv: bool = True) -> None: 
-        blast = pd.read_csv(blast_tsv, sep="\t")
-        meta  = pd.read_csv(metadata_tsv, sep="\t")
+        write_csv: bool = True) -> None:
+
+        # ---- more tolerant parser: any whitespace, not just tabs ---------
+        blast = pd.read_csv(blast_tsv, sep=r"\s+", engine="python")
+        meta  = pd.read_csv(metadata_tsv, sep=r"\s+", engine="python")
+        
+        # ensure pident is numeric so the ≥97 filter works
+        if "pident" in blast.columns:
+            blast["pident"] = pd.to_numeric(blast["pident"], errors="coerce") 
 
         best = _choose_best_hit(blast)
         merged = best.merge(meta, on="sample_id", how="left")
+        print(blast.head(), blast.columns) 
 
         # one count per sample (presence/absence) 
         counts = np.ones(len(merged), dtype=int)
         biom = Table(counts[:, None],
                      observation_ids=merged["taxonomy"],
-                     sample_ids=merged["sample_id"])
+                     sample_ids=["sample"])    
 
-        biom.to_hdf5(str(out_biom), "MicroSeq")
+        with biom_open(str(out_biom), "w") as fh:
+            biom.to_hdf5(fh, "MicroSeq")
         logger.info(f"Wrote {out_biom}")
 
         if write_csv:

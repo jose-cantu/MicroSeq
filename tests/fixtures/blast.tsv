@@ -1,1 +1,4 @@
-sample_id	taxonomy	evalue	bitscore	pident	qcov	A1	d__Bacteria;	...;	s__Staph	0.0	1000	99.5	98	B2	d__Bacteria;	...;	s__Bacillus_subtilis	1e-20	900	98.7	92	C3	d__Bacteria;	...;	g__Corynebacterium	5e-10	850	93.0	85	
+sample_id	taxonomy	evalue	bitscore	pident	qcov
+A1	d__Bacteria;g__Staphylococcus;s__Staphylococcus_epidermidis	0.0	1000	99.5	98
+B2	d__Bacteria;g__Bacillus;s__Bacillus_subtilis	1e-20	900	98.7	92
+C3	d__Bacteria;g__Corynebacterium	5e-10	850	93.0	85

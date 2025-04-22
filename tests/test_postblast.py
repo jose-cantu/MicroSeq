@@ -20,7 +20,7 @@ def test_postblast(tmp_path: Path):
     df = pd.read_csv(csv, index_col=0)
     table = load_table(str(out_biom))
     assert table.shape[1] == 1 # one column 
-    assert df.shape[0] == table.shape[0] # same taxa rows 
+    assert df.shape[1] == table.shape[0] # taxa count matches table rows :: Rows = samples, Columns = taxa :: matching graph-pad prism default (X-axis taxa)  
 
 
 
