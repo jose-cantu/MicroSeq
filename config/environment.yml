@@ -18,7 +18,8 @@ dependencies:
   - pynvim
   - typing_extensions
   - biom-format # Needed for BIOM 
-  - h5py # necessary for BIOM 
+  - h5py # necessary for BIOM
+  - pandas 
 
   # external bio-tools
   - trimmomatic    # adds trimmomatic to $CONDA_PREFIX/bin  
