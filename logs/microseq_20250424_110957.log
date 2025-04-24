@@ -1,0 +1,2 @@
+2025-04-24 11:09:57,967 INFO: Logging to logs/microseq_20250424_110957.log
+2025-04-24 11:09:57,971 INFO: RUN BLAST:blastn -task blastn -query /Users/josecantu/microseq_test/data/final_fasta_output_cultivation_repo/14454-1492R-C2-E3_E05_trimmed.fasta -db greengenes2_db -qcov_hsp_perc 80 -out /Users/josecantu/microseq_test/data/blast/14454-1492R-C2-E3_E05_trimmed.tsv.tmp -outfmt 6 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle

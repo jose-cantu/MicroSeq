@@ -8,7 +8,8 @@ from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq 
 from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta 
-from microseq_tests.post_blast_analysis import run as postblast_run  
+from microseq_tests.post_blast_analysis import run as postblast_run 
+from microseq_tests.utility.add_taxonomy import run_taxonomy_join 
 
 def main() -> None:
     setup_logging() # sets up logging from here... 
@@ -42,6 +43,12 @@ def main() -> None:
     p_BIOM.add_argument("-m", "--metadata", required=True, help="Metadata TSV (must have the sample_id column)")
     p_BIOM.add_argument("-o", "--output_biom", required=True, help="Output .biom path; .csv written alongside")
     p_BIOM.add_argument("--sample-col", help="Column in metadata to treat as sample_id") 
+
+    # taxonomy join after postblast (GG2 only) 
+    p_tax = sp.add_parser("add_taxonomy", help="Append Greengenes2 taxon names to a BLAST table")
+    p_tax.add_argument("-i", "--hits", required=True, help="Blast merge table (needs sseqid & qseqid)") 
+    p_tax.add_argument("-t", "--taxonomy", required=True, help="Greengenes2 taxonomy.tsv") 
+    p_tax.add_argument("-o", "--output", required=True, help="Output CSV/TSV") 
     
     # parse out arguments 
     args = ap.parse_args() 
@@ -94,6 +101,14 @@ def main() -> None:
                 )
         print(f" ✓ BIOM : {out_biom}")
         print(f" ✓ CSV  : {out_biom.with_suffix('.csv')}") 
+
+    elif args.cmd == "add_taxonomy": 
+        run_taxonomy_join(
+                pathlib.Path(args.hits).resolve(),
+                pathlib.Path(args.taxonomy).expanduser().resolve(),
+                pathlib.Path(args.output).resolve(),
+                )
+        print(f" ✓ CSV+tax : {args.output}")
 
 
 if __name__ == "__main__":

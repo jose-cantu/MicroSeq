@@ -20,6 +20,7 @@ src/microseq_tests/trimming/biopy_trim.py
 src/microseq_tests/trimming/fastq_to_fasta.py
 src/microseq_tests/trimming/quality_trim.py
 src/microseq_tests/utility/__init__.py
+src/microseq_tests/utility/add_taxonomy.py
 src/microseq_tests/utility/utils.py
 tests/test_ab1_convert.py
 tests/test_postblast.py
