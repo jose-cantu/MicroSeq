@@ -9,7 +9,7 @@ tools:
 
 databases:
   gg2:
-    blastdb: "${MICROSEQ_DB_HOME}/greengenes2/greengenes2_db"
+    blastdb: "greengenes2_db"
     taxonomy: "${MICROSEQ_DB_HOME}/greengenes2/taxonomy.tsv"
   silva:
     blastdb: "${MICROSEQ_DB_HOME}/silva/silva_db"
