@@ -20,15 +20,25 @@ logger = logging.getLogger(__name__) # Now this then set as the real logger by p
 IDENTITY_TH = 97.0 # % identity threshold using for species-grade hits OTU 
 
 # --- helper function: read table with auto delimiter detecter ---------
-def _smart_read(path: Path) -> pd.DataFrame: 
+def _smart_read(path: Path) -> pd.DataFrame:
+    """
+    Robust reader that keeps the GG2 lineage intact 
+    *.tsv force tab as the delimiter here so taxnomy strings may contain spaces that autosniffing for whatever reason explode them. 
+    different file such as csv then fall back to older sniffer logic. 
+    """
+    if path.suffix.lower() == ".tsv":
+        df = pd.read_csv(path, sep='\t')
+        logger.info(f"Loaded {path.name} as explicit TSV rows={len(df)}")
+        return df 
+
     sample = path.read_text(errors="replace")[:1024]
     try:
         dialect = csv.Sniffer().sniff(sample, delimiters="\t,;")
         sep = dialect.delimiter
     except csv.Error:
-        sep = r"\s+"        # the fallback to whitespace 
+        sep = r"\s+"
     df = pd.read_csv(path, sep=sep, engine="python")
-    logger.info(f"Loaded {path.name} with delimiter ='{sep}' rows={len(df)}")
+    logger.info(f"Loaded {path.name} with delimiter = '{sep}' rows={len(df)}")
     return df 
 
 # ----- helper function: choose the metadata column matching BLAST sample_IDs ------- 
@@ -56,14 +66,17 @@ def _detect_sample_col(meta: pd.DataFrame,
         if len(overlap) / len(blast_ids) >= 0.8:
             return col 
 
-    raise ValueError("No metadata column matches BLAST sample IDs") 
+    raise ValueError("No metadata column matches BLAST sample IDs either rename to sample_id or use the --sample-col flag") 
 
 
 # ---taxonomy depth function here for tie-breaking (e-values) ------------- Note this assumed you blasted against GG2 ONLY given how its parsed out 
-def _tax_depth(taxon: str) -> int: 
-    """Count filled ranks (d__, p__, ... s__).""" 
+def _tax_depth(taxon: str | float) -> int:
+    """Return how many ranks are filled in the lineage string."""
+    if not isinstance(taxon, str):
+        return 0 # NaN or non-string means depth of 0. 
+    return sum(bool(seg.split("__")[1]) for seg in taxon.split(";")) 
 
-    return sum(bool(seg.split("__")[1]) for seg in taxon.split(";"))
+
 
 # --- chosing the best hit per sample ------------
 
@@ -128,15 +141,22 @@ def run(blast_tsv: Path,
      
         print(blast.head(), blast.columns) 
 
-        # one count per sample (presence/absence) 
-        counts = np.ones(len(merged), dtype=int)
-        biom = Table(counts[:, None],
-                     observation_ids=merged["taxonomy"],
-                     sample_ids=["sample"])    
-
+        # one count per sample (presence/absence) matrix  
+        mat = (
+            merged.assign(count=1) # add constant 1 
+                  .pivot_table(index="taxonomy", # rows = taxa 
+                                  columns="sample_id", # cols = isolates 
+                                  values="count",
+                                  fill_value=0) # 0/1 matrix 
+                  )
+        biom_table = Table(
+            mat.values,
+            observation_ids=mat.index.tolist(),
+            sample_ids = mat.columns.tolist()
+            )
         with biom_open(str(out_biom), "w") as fh:
-            biom.to_hdf5(fh, "MicroSeq")
-        logger.info(f"Wrote {out_biom}")
+            biom_table.to_hdf5(fh, "MicroSeq")
+        logger.info(f"Wrote {out_biom} (shape {biom_table.shape})") 
 
         if write_csv:
             biom_to_csv(out_biom) 

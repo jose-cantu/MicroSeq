@@ -1,0 +1,7 @@
+2025-04-24 20:26:46,030 INFO: Logging to logs/microseq_20250424_202646.log
+2025-04-24 20:26:46,047 INFO: Loaded all_hits_with_tax.tsv as explicit TSV rows=17460
+2025-04-24 20:26:46,050 INFO: Loaded Final_Master_Seq_File.csv with delimiter = ',' rows=699
+2025-04-24 20:26:46,083 DEBUG: Creating converter from 5 to 3
+2025-04-24 20:26:46,086 INFO: Wrote /home/jason/microseq_tests/data/biom/ocular_isolates.biom (shape (48, 530))
+2025-04-24 20:26:46,086 DEBUG: Creating converter from 3 to 5
+2025-04-24 20:26:46,094 INFO: Wrote /home/jason/microseq_tests/data/biom/ocular_isolates.csv

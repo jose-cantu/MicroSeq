@@ -14,6 +14,17 @@ import re
 from pathlib import Path 
 import pandas as pd
 
+# -------- helpers -----------------------------------------------------------
+
+# Extract plain genome accession (GCF_012345678) from RS-GCF-... strings
+_ACC_RE = re.compile(r"(GC[AF])[-_](\d+)")
+def _strip_accession(s: str) -> str | None:
+    m = _ACC_RE.search(str(s))
+    return f"{m.group(1)}_{m.group(2)}" if m else None
+
+
+
+
 def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path) -> None:
     # ------------------------------------------------------------------ #
     hits = pd.read_csv(hits_fp, sep=None, engine="python")
@@ -39,5 +50,5 @@ def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path) -> None:
     merged = merged[cols]
     
     sep = "\t" if out_fp.suffix.lower() in {".tsv", ".txt"} else ","
-    merged.to_csv(out_fp, sep=sep, index=False)
+    merged.to_csv(out_fp, sep="\t", index=False)
     print(f"[add_taxonomy] wrote {out_fp}") 
