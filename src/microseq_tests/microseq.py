@@ -13,9 +13,11 @@ from microseq_tests.utility.add_taxonomy import run_taxonomy_join
 
 def main() -> None:
     setup_logging() # sets up logging from here... 
-    ap = argparse.ArgumentParser(description="MicroSeq Master Pipeline")
+    cfg = load_config() 
+    ap = argparse.ArgumentParser(
+    prog="microseq", description="MicroSeq QC-trim Fastq; optional CAP3 assembly; blastn search; taxonomy join; optional BIOM export")
     # adding global flag 
-    ap.add_argument("--workdir", default="data", help="Root folder for intermediate outputs (default: ./data)") 
+    ap.add_argument("--workdir", default=cfg.get("default_workdir","data"), help="Root folder for intermediate outputs (default: ./data) note: Yaml is placed as a 2ndary place for a shared repo project which can you modify and change without using workdir flag otherwise use --workdir to point where you want to set up your individual project") 
     sp = ap.add_subparsers(dest="cmd", required=True)
 
     # trimming sub command 
@@ -30,26 +32,28 @@ def main() -> None:
     p_asm.add_argument("-o", "--output", required=True) 
 
     # blast 
-    cfg = load_config()
     db_choices = list(cfg["databases"].keys())    # e.g. here ['gg2', 'silva', 'ncbi16s']
     p_blast = sp.add_parser("blast", help="Blast search against 16S DBs")
     p_blast.add_argument("-i", "--input", required=True)
     p_blast.add_argument("-d", "--db", choices=db_choices, required=True)
     p_blast.add_argument("-o", "--output", required=True)
+    p_blast.add_argument("--identity", type=float, default=97.0, help="percent-identity threshold (default: %(default)s) you can adjust value based on needs of project")
+    p_blast.add_argument("--qcov", type=float, default=80.0, help="query coverage %% (default: %(default)s) again you can adjust value based on needs of project")
+
+        # taxonomy join after postblast (GG2 only) 
+    p_tax = sp.add_parser("add_taxonomy", help="Append Greengenes2 taxon names to a BLAST table")
+    p_tax.add_argument("-i", "--hits", required=True, help="Blast merge table (needs sseqid & qseqid)") 
+    p_tax.add_argument("-t", "--taxonomy", required=True, help="Greengenes2 taxonomy.tsv") 
+    p_tax.add_argument("-o", "--output", required=True, help="Output CSV/TSV == Perferable do TSV please!")
+
 
     # postblast BIOM 
     p_BIOM = sp.add_parser("postblast", help="Join BLAST + metadata -> BIOM(+CSV)")
     p_BIOM.add_argument("-b", "--blast_file", required=True, help="BLAST hits TSV produced by MicroSeq blast =)")
     p_BIOM.add_argument("-m", "--metadata", required=True, help="Metadata TSV (must have the sample_id column)")
     p_BIOM.add_argument("-o", "--output_biom", required=True, help="Output .biom path; .csv written alongside")
-    p_BIOM.add_argument("--sample-col", help="Column in metadata to treat as sample_id") 
-
-    # taxonomy join after postblast (GG2 only) 
-    p_tax = sp.add_parser("add_taxonomy", help="Append Greengenes2 taxon names to a BLAST table")
-    p_tax.add_argument("-i", "--hits", required=True, help="Blast merge table (needs sseqid & qseqid)") 
-    p_tax.add_argument("-t", "--taxonomy", required=True, help="Greengenes2 taxonomy.tsv") 
-    p_tax.add_argument("-o", "--output", required=True, help="Output CSV/TSV") 
-    
+    p_BIOM.add_argument("--sample-col", help="Column in metadata to treat as sample_id helps MicroSeq known which column to treat as such if not sample_id itself") 
+  
     # parse out arguments 
     args = ap.parse_args() 
 
@@ -83,9 +87,11 @@ def main() -> None:
 
     elif args.cmd == "blast":
         run_blast(
-            pathlib.Path(args.input).resolve(),  # temporary patch for blasting and post biom only will need to think around 
+            pathlib.Path(args.input),  # temporary patch for blasting and post biom only will need to think around 
             args.db,
-            pathlib.Path(args.output).resolve()
+            pathlib.Path(args.output),
+            pct_id=args.identity,
+            qcov=args.qcov
             )
 
     elif args.cmd == "postblast":

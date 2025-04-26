@@ -6,7 +6,8 @@ import subprocess, logging, argparse, os
 PathLike = str | Path 
 
 # db_key is the shorthand string for "gg2" or "silva" best keep it str here for future reference 
-def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike) -> None:
+def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
+              pct_id: float = 97.0, qcov: float = 80.0) -> None:
     """
     Run blastn against one of the configured 16 S databases. 
 
@@ -43,8 +44,10 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike) -> None:
     cmd=["blastn",
          "-task", "blastn", # why not? 
          "-query", str(q),   # casting q to str before passing to subprocess 
-         "-db", blastdb, 
-         "-qcov_hsp_perc", "80",     # here I am requiring ≥ 80% of query to align.... 
+         "-db", blastdb,
+         "-max_target_seqs", "1" # keep only the best alignment here HSP that has the best-overall score
+         "-perc_identity", str(pct_id),
+         "-qcov_hsp_perc", str(qcov),  # here I am requiring ≥ 80% of query to align.... 
          "-out", str(out_tsv),
          "-outfmt", outfmt,
          ]

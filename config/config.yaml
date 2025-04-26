@@ -12,9 +12,9 @@ databases:
     blastdb: "greengenes2_db"
     taxonomy: "${MICROSEQ_DB_HOME}/greengenes2/taxonomy.tsv"
   silva:
-    blastdb: "${MICROSEQ_DB_HOME}/silva/silva_db"
+    blastdb: "silva_db"
   ncbi16s:
-    blastdb: "${MICROSEQ_DB_HOME}/ncbi/16S_ribosomal_RNA"
+    blastdb: "16S_ribosomal_RNA"
 
 
 
