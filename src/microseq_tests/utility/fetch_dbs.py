@@ -12,18 +12,18 @@ Files are stored under $MICROSEQ_DB_HOME (default is ~/.microseq_dbs).
 Each DB direcotry ends up with BLAST-ready indices (makeblastdb -dbtype nucl). 
 
 Run this once, then point config/config.yaml at the same MICROSEQ_DB_HOME.
-
 """
 
-import os, pathlib, subprocess, urllib.request, tarfile, sys, zipfile, shutil, gzip  
+import os, pathlib, subprocess, urllib.request, tarfile, sys, zipfile, shutil, gzip 
+from pathlib import Path 
 
 DB_HOME = pathlib.Path(os.environ.get("MICROSEQ_DB_HOME", "~/.microseq_dbs")).expanduser()
 DB_HOME.mkdir(parents=True, exist_ok=True) # path check 
 
 def log(msg: str) -> None:
     print(f"[fetch_dbs] {msg}")
-    
-    
+
+
 def dl(url: str, dest: pathlib.Path) -> None:
     """Download URL only if dest does not yet exist."""
     if dest.exists():
@@ -31,21 +31,21 @@ def dl(url: str, dest: pathlib.Path) -> None:
         return
     log(f"→ downloading {url}")
     urllib.request.urlretrieve(url, dest)
-    
-    
+
+
 def run(cmd: list[str]) -> None:
     """Run shell command (show it, fail loud)."""
     log("+" + " ".join(cmd))
     subprocess.run(cmd, check=True)
-    
-    
+
+
 def makeblastdb(fasta: pathlib.Path, out_prefix: pathlib.Path) -> None:
     if (out_prefix.with_suffix(".nsq")).exists():
         log(f"BLAST index for {out_prefix.name} already exists")
         return
     run(
-        ["makeblastdb", "-in", str(fasta), "-dbtype", "nucl", "-out", str(out_prefix)]
-    )
+            ["makeblastdb", "-in", str(fasta), "-dbtype", "nucl", "-out", str(out_prefix)]
+            )
 
 def extract_member(zip_path: pathlib.Path, pattern: str, out_path: pathlib.Path):
     """
@@ -60,7 +60,7 @@ def extract_member(zip_path: pathlib.Path, pattern: str, out_path: pathlib.Path)
         with zf.open(member) as fin, open(out_path, "wb") as fout:
             shutil.copyfileobj(fin, fout)
 
-    
+
 def fetch_gg2() -> None:
     """ Download Greengenes 2 (2024‑09 backbone full‑length) and build BLAST    db. """
     gg_dir = DB_HOME / "gg2"
@@ -69,9 +69,9 @@ def fetch_gg2() -> None:
     # Use HTTP to dodge the incomplete‑TLS‑chain problem
     BASE  = "http://ftp.microbio.me/greengenes_release/2024.09"
     FILES = {
-        "backbone_fasta": "2024.09.backbone.full-length.fna.qza",
-        "taxonomy":       "2024.09.backbone.tax.qza",
-    }
+            "backbone_fasta": "2024.09.backbone.full-length.fna.qza",
+            "taxonomy":       "2024.09.backbone.tax.qza",
+            }
 
     # ── download & extract dna‑sequences.fasta ────────────────────────────────
     backbone_qza = gg_dir / FILES["backbone_fasta"]
@@ -86,32 +86,32 @@ def fetch_gg2() -> None:
     # ── taxonomy table ────────────────────────────────────────────────────────
     tax_qza = gg_dir / FILES["taxonomy"]
     dl(f"{BASE}/{FILES['taxonomy']}", tax_qza)
-    
+
     taxonomy_tsv = gg_dir / "taxonomy.tsv"
     if not taxonomy_tsv.exists():
         log("→ extracting taxonomy.tsv from QZA")
         extract_member(tax_qza, "taxonomy.tsv", taxonomy_tsv)
-    
+
 
     # ── build BLAST index (creates .nsq/.nin/.nhr) ────────────────────────────
     makeblastdb(fasta, gg_dir / "greengenes2_db")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-    
-    
+
+
 # SILVA 138.1 SSU NR99 (truncated fasta)
 def fetch_silva() -> None:
     silva_dir = DB_HOME / "silva"
     silva_dir.mkdir(exist_ok=True)
-    
+
     url = (
-        "ftp://ftp.arb-silva.de/release_138.1/Exports/"
-        "SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta.gz"
-    )
+            "ftp://ftp.arb-silva.de/release_138.1/Exports/"
+            "SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta.gz"
+            )
     gz = silva_dir / "SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta.gz"
     dl(url, gz)
-    
+
     fasta = silva_dir / "SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta"
     if not fasta.exists():
         log("→ extracting SILVA with Python gzip")
@@ -120,8 +120,8 @@ def fetch_silva() -> None:
 
     # Build BLAST index  
     makeblastdb(fasta, silva_dir / "silva_db")  
-    
-    
+
+
 #  NCBI 16S_ribosomal_RNA  (pre‑built BLAST db tar.gz)
 def fetch_ncbi16s() -> None:
     ncbi_dir = DB_HOME / "ncbi"
@@ -129,13 +129,13 @@ def fetch_ncbi16s() -> None:
     url = "ftp://ftp.ncbi.nlm.nih.gov/blast/db/16S_ribosomal_RNA.tar.gz"
     tar_file = ncbi_dir / "16S_ribosomal_RNA.tar.gz"
     dl(url, tar_file)
-    
+
     # the tar already contains BLAST index files
     if not (ncbi_dir / "16S_ribosomal_RNA.nsq").exists():
         log("→ extracting NCBI 16S tarball")
         tarfile.open(tar_file).extractall(ncbi_dir)
-        
-        
+
+
 # Run all fetchers
 def main():
     for fn in (fetch_gg2, fetch_silva, fetch_ncbi16s):
@@ -144,9 +144,33 @@ def main():
         except Exception as e:
             log(f"[ERROR] {fn.__name__} failed: {e}")
             sys.exit(1)
-            
+
     log(f"[DONE] all DBs are in {DB_HOME}")
-    
-    
+
+          # ---------------------------------------------------------------------------
+    #  Write/update ~/.bashrc so BLAST works out of the box
+    # --------------------------------------------------------------------------- 
+    bashrc = Path.home() / ".bashrc"
+    bashrc_lines = bashrc.read_text().splitlines() if bashrc.exists() else []
+
+    db_env=f'export BLASTDB="{DB_HOME / "gg2"}:{DB_HOME / "silva"}:{DB_HOME / "ncbi"}"'
+    lmdb_env = 'export BLASTDB_LMDB=0'           # disable LMDB everywhere
+
+    def ensure(line: str) -> None:
+        if line not in bashrc_lines:
+            bashrc_lines.append(line)
+
+    ensure("")                                    # blank separator
+    ensure("# Added by microseq-setup")
+    ensure(db_env)
+    ensure(lmdb_env)
+
+    bashrc.write_text("\n".join(bashrc_lines))
+    print("[✓] Appended BLASTDB and BLASTDB_LMDB to ~/.bashrc")
+    print("    (open a new shell or `source ~/.bashrc` before running microseq)")  
+
+
+
+
 if __name__ == "__main__":
     main() 

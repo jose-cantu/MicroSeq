@@ -1,2 +1,3 @@
 [console_scripts]
 microseq = microseq_tests.microseq:main
+microseq-setup = microseq_tests.utility.fetch_dbs:main

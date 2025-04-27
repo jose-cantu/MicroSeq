@@ -21,4 +21,5 @@ package-dir = {"" = "src"}     # tells setuptools hey my code lives here in src/
 where = ["src"]    # find all packages unders src/
 
 [project.scripts]
-microseq = "microseq_tests.microseq:main" 
+microseq = "microseq_tests.microseq:main"
+microseq-setup = "microseq_tests.utility.fetch_dbs:main"

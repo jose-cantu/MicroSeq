@@ -45,7 +45,7 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
          "-task", "blastn", # why not? 
          "-query", str(q),   # casting q to str before passing to subprocess 
          "-db", blastdb,
-         "-max_target_seqs", "1" # keep only the best alignment here HSP that has the best-overall score
+         "-max_target_seqs", "1", # keep only the best alignment here HSP that has the best-overall score
          "-perc_identity", str(pct_id),
          "-qcov_hsp_perc", str(qcov),  # here I am requiring ≥ 80% of query to align.... 
          "-out", str(out_tsv),
@@ -56,7 +56,10 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
     env = os.environ.copy() # start from full parent env 
 
     # force-set map-size 
-    env.setdefault("BLASTDB_LMDB_MAP_SIZE",str(64 * 1024 ** 3))
+    env.setdefault("BLASTDB_LMDB", "0")
+
+    # remove any pre existing map-size so LMDB can't re-activate 
+    env.pop("BLASTDB_LMDB_MAP_SIZE", None) 
 
     logging.info("RUN BLAST:%s", " ".join(cmd))
     subprocess.run(cmd, check=True, env=env) # launches blast, propogate all vars
