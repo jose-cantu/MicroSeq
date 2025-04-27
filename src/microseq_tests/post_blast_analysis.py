@@ -10,7 +10,8 @@ from pathlib import Path
 import csv, logging, pandas as pd, numpy as np 
 from biom import Table
 from biom.util import biom_open 
-from microseq_tests.utility.utils import load_config, setup_logging # for default DB paths here 
+from microseq_tests.utility.utils import load_config, setup_logging # for default DB paths here
+from microseq_tests.utility.io_utils import normalise_tsv 
 
 setup_logging() # initialize global logging by configure as root logger  
 logger = logging.getLogger(__name__) # Now this then set as the real logger by passing everything from the root logger which doesn't return anything on its own  
@@ -27,7 +28,7 @@ def _smart_read(path: Path) -> pd.DataFrame:
     different file such as csv then fall back to older sniffer logic. 
     """
     if path.suffix.lower() == ".tsv":
-        df = pd.read_csv(path, sep='\t')
+        df = pd.read_csv(normalise_tsv(path), sep='\t')
         logger.info(f"Loaded {path.name} as explicit TSV rows={len(df)}")
         return df 
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 import re 
 from pathlib import Path 
 import pandas as pd
+from microseq_tests.utility.io_utils import normalise_tsv 
 
 # -------- helpers -----------------------------------------------------------
 
@@ -27,10 +28,17 @@ def _strip_accession(s: str) -> str | None:
 
 def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path) -> None:
     # ------------------------------------------------------------------ #
-    hits = pd.read_csv(hits_fp, sep=None, engine="python")
+    # added a new revision in here auto-convert space or comma-delimited files to real TABs moving forward
+    COLS = [ 
+        "qseqid", "sseqid", "pident", "qlen", "qcovhsp", "length", "evalue", "bitscore", "stitle",
+            ]
+
+
+    sep = "\t" if hits_fp.suffix.lower() == ".tsv" else None 
+    hits = pd.read_csv(normalise_tsv(hits_fp), sep=sep, engine="python", header=None, names=COLS,).rename(columns={"qseqid": "sample_id"}) 
     
     tax = (
-        pd.read_csv(taxonomy_fp, sep="\t")                # original columns
+        pd.read_csv(normalise_tsv(taxonomy_fp), sep="\t")                # original columns
             .rename(                                        # normalise names
                 columns={
                     "Feature ID": "sseqid",
@@ -46,9 +54,9 @@ def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path) -> None:
     print(f"[add_taxonomy] {n_unmatched}/{len(merged)} rows unmatched") 
 
     # --- reoder for post-BLAST 
-    cols   = ["sample_id", "taxonomy", "evalue", "bitscore", "pident", "qcov"]
+    cols   = ["sample_id", "taxonomy", "evalue", "bitscore", "pident", "qcovhsp"]
     merged = merged[cols]
     
-    sep = "\t" if out_fp.suffix.lower() in {".tsv", ".txt"} else ","
-    merged.to_csv(out_fp, sep="\t", index=False)
+    out_sep = "\t" if out_fp.suffix.lower() in {".tsv", ".txt"} else ","
+    merged.to_csv(out_fp, sep=out_sep, index=False)
     print(f"[add_taxonomy] wrote {out_fp}") 

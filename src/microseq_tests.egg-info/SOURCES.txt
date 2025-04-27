@@ -22,8 +22,9 @@ src/microseq_tests/trimming/quality_trim.py
 src/microseq_tests/utility/__init__.py
 src/microseq_tests/utility/add_taxonomy.py
 src/microseq_tests/utility/fetch_dbs.py
+src/microseq_tests/utility/io_utils.py
 src/microseq_tests/utility/utils.py
 tests/test_ab1_convert.py
-tests/test_postblast.py
+tests/test_pipeline.py
 tests/test_trim_pipeline.py
 tests/test_utils.py

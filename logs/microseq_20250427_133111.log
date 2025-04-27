@@ -1,0 +1,7 @@
+2025-04-27 13:31:11,507 INFO: Logging to logs/microseq_20250427_133111.log
+2025-04-27 13:31:11,511 INFO: Loaded hits_tax.tsv as explicit TSV rows=250
+2025-04-27 13:31:11,513 INFO: Loaded meta.tsv as explicit TSV rows=5
+2025-04-27 13:31:11,526 DEBUG: Creating converter from 5 to 3
+2025-04-27 13:31:11,528 INFO: Wrote /tmp/pytest-of-jason/pytest-16/test_postblast_pipeline0/profile.biom (shape (2, 4))
+2025-04-27 13:31:11,528 DEBUG: Creating converter from 3 to 5
+2025-04-27 13:31:11,530 INFO: Wrote /tmp/pytest-of-jason/pytest-16/test_postblast_pipeline0/profile.csv

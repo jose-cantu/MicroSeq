@@ -23,3 +23,4 @@ where = ["src"]    # find all packages unders src/
 [project.scripts]
 microseq = "microseq_tests.microseq:main"
 microseq-setup = "microseq_tests.utility.fetch_dbs:main"
+microseq-fix-tsv = "microseq_tests.utility.io_utils:cli"

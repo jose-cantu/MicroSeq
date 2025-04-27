@@ -39,8 +39,10 @@ def main() -> None:
     p_blast.add_argument("-o", "--output", required=True)
     p_blast.add_argument("--identity", type=float, default=97.0, help="percent-identity threshold (default: %(default)s) you can adjust value based on needs of project")
     p_blast.add_argument("--qcov", type=float, default=80.0, help="query coverage %% (default: %(default)s) again you can adjust value based on needs of project")
+    p_blast.add_argument("--max_target_seqs", type=int, default=5, help="How many DB hits to retain per query (passed to BLAST")
 
-        # taxonomy join after postblast (GG2 only) 
+                         
+    # taxonomy join after postblast (GG2 only) 
     p_tax = sp.add_parser("add_taxonomy", help="Append Greengenes2 taxon names to a BLAST table")
     p_tax.add_argument("-i", "--hits", required=True, help="Blast merge table (needs sseqid & qseqid)") 
     p_tax.add_argument("-t", "--taxonomy", required=True, help="Greengenes2 taxonomy.tsv") 
@@ -91,7 +93,8 @@ def main() -> None:
             args.db,
             pathlib.Path(args.output),
             pct_id=args.identity,
-            qcov=args.qcov
+            qcov=args.qcov,
+            max_target_seqs = args.max_target_seqs, 
             )
 
     elif args.cmd == "postblast":

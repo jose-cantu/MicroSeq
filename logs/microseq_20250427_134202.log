@@ -1,0 +1,12 @@
+2025-04-27 13:42:02,269 INFO: Logging to logs/microseq_20250427_134202.log
+2025-04-27 13:42:02,272 INFO: Loaded hits_tax.tsv as explicit TSV rows=250
+2025-04-27 13:42:02,273 INFO: Loaded meta.tsv as explicit TSV rows=5
+2025-04-27 13:42:02,283 DEBUG: Creating converter from 5 to 3
+2025-04-27 13:42:02,285 INFO: Wrote /tmp/pytest-of-jason/pytest-18/test_postblast_pipeline0/profile.biom (shape (2, 4))
+2025-04-27 13:42:02,285 DEBUG: Creating converter from 3 to 5
+2025-04-27 13:42:02,287 INFO: Wrote /tmp/pytest-of-jason/pytest-18/test_postblast_pipeline0/profile.csv
+2025-04-27 13:42:02,765 INFO: Logging to logs/microseq_20250427_134202.log
+2025-04-27 13:42:02,778 INFO: [PASS] 39764266.fastq → /tmp/pytest-of-jason/pytest-18/test_ab1_trim_to_fasta0/run_e451bbf9d43442608a65a9cd2e9a10a1/passed_qc_fastq/39764266_trimmed.fastq (avgQ 46.67)
+2025-04-27 13:42:02,778 INFO: [PASS] 39764278.fastq → /tmp/pytest-of-jason/pytest-18/test_ab1_trim_to_fasta0/run_e451bbf9d43442608a65a9cd2e9a10a1/passed_qc_fastq/39764278_trimmed.fastq (avgQ 54.90)
+2025-04-27 13:42:02,779 INFO: [PASS] 39764260.fastq → /tmp/pytest-of-jason/pytest-18/test_ab1_trim_to_fasta0/run_e451bbf9d43442608a65a9cd2e9a10a1/passed_qc_fastq/39764260_trimmed.fastq (avgQ 52.11)
+2025-04-27 13:42:02,779 INFO: [PASS] 39764269.fastq → /tmp/pytest-of-jason/pytest-18/test_ab1_trim_to_fasta0/run_e451bbf9d43442608a65a9cd2e9a10a1/passed_qc_fastq/39764269_trimmed.fastq (avgQ 55.43)
