@@ -1,5 +1,0 @@
-2025-04-27 12:19:35,095 INFO: Logging to logs/microseq_20250427_121935.log
-2025-04-27 12:19:35,107 INFO: [PASS] 39764266.fastq → /tmp/pytest-of-jason/pytest-6/test_ab1_trim_to_fasta0/run_2aa1423af59144ffb55c89b330e1bd8c/passed_qc_fastq/39764266_trimmed.fastq (avgQ 46.67)
-2025-04-27 12:19:35,108 INFO: [PASS] 39764278.fastq → /tmp/pytest-of-jason/pytest-6/test_ab1_trim_to_fasta0/run_2aa1423af59144ffb55c89b330e1bd8c/passed_qc_fastq/39764278_trimmed.fastq (avgQ 54.90)
-2025-04-27 12:19:35,108 INFO: [PASS] 39764260.fastq → /tmp/pytest-of-jason/pytest-6/test_ab1_trim_to_fasta0/run_2aa1423af59144ffb55c89b330e1bd8c/passed_qc_fastq/39764260_trimmed.fastq (avgQ 52.11)
-2025-04-27 12:19:35,108 INFO: [PASS] 39764269.fastq → /tmp/pytest-of-jason/pytest-6/test_ab1_trim_to_fasta0/run_2aa1423af59144ffb55c89b330e1bd8c/passed_qc_fastq/39764269_trimmed.fastq (avgQ 55.43)

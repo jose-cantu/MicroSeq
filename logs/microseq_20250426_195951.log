@@ -1,4 +1,0 @@
-2025-04-26 19:59:51,093 INFO: Logging to logs/microseq_20250426_195951.log
-2025-04-26 19:59:51,096 INFO: RUN BLAST:blastn -task blastn -query tiny.fasta -db silva_db -max_target_seqs 1 -perc_identity 50.0 -qcov_hsp_perc 10.0 -out /tmp/silva.tsv -outfmt 6 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle
-2025-04-26 19:59:51,813 INFO: Logging to logs/microseq_20250426_195951.log
-2025-04-26 19:59:51,816 INFO: RUN BLAST:blastn -task blastn -query tiny.fasta -db 16S_ribosomal_RNA -max_target_seqs 1 -perc_identity 50.0 -qcov_hsp_perc 10.0 -out /tmp/ncbi16s.tsv -outfmt 6 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle

@@ -1,2 +1,0 @@
-2025-04-26 20:18:08,362 INFO: Logging to logs/microseq_20250426_201808.log
-2025-04-26 20:18:08,364 INFO: RUN BLAST:blastn -task blastn -query tiny.fasta -db silva_db -max_target_seqs 1 -perc_identity 50.0 -qcov_hsp_perc 10.0 -out /tmp/silva.tsv -outfmt 6 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle

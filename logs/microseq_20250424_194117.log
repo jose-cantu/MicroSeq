@@ -1,3 +1,0 @@
-2025-04-24 19:41:17,077 INFO: Logging to logs/microseq_20250424_194117.log
-2025-04-24 19:41:17,093 INFO: Loaded all_hits_with_tax.tsv as explicit TSV rows=17460
-2025-04-24 19:41:17,098 INFO: Loaded Final_Master_Seq_File.csv with delimiter = ',' rows=699
