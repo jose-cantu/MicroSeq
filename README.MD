@@ -11,7 +11,8 @@ conda activate MicroSeq
 
 # 3 Install & download databases 
 pip install -e .  # This sets the current version of MicroSeq 
-microseq-setup    # downloads 16S Databases GG2, SILVA, NCBI16S, updates ~/.bashrc source ~/.bashrc  # reloads BLASTDB exports (or you can open a new shell next time?) 
+microseq-setup    # downloads 16S Databases GG2, SILVA, NCBI16S, updates ~/.bashrc 
+source ~/.bashrc  # reloads BLASTDB exports (or you can open a new shell next time?) 
 
 # Sanity check you can run to make sure databses work with blasting  
 
