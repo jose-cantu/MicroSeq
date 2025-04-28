@@ -1,0 +1,2 @@
+2025-04-28 12:55:59,472 INFO: Logging to logs/microseq_20250428_125559.log
+2025-04-28 12:55:59,476 INFO: RUN BLAST:blastn -task blastn -query /tmp/pytest-of-jason/pytest-29/test_verbose_level0/demo.fasta -db greengenes2_db -max_target_seqs 1 -perc_identity 50.0 -qcov_hsp_perc 10.0 -out /tmp/pytest-of-jason/pytest-29/test_verbose_level0/h.tsv -outfmt 6 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle -num_threads 1

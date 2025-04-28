@@ -1,5 +1,6 @@
 README.MD
 pyproject.toml
+src/microseq/__init__.py
 src/microseq_tests/__init__.py
 src/microseq_tests/microseq.py
 src/microseq_tests/pipeline.py
@@ -26,6 +27,7 @@ src/microseq_tests/utility/fetch_dbs.py
 src/microseq_tests/utility/io_utils.py
 src/microseq_tests/utility/utils.py
 tests/test_ab1_convert.py
+tests/test_cli_qol.py
 tests/test_pipeline.py
 tests/test_pipeline_wrappers.py
 tests/test_trim_pipeline.py

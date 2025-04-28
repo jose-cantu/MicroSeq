@@ -1,5 +1,0 @@
-2025-04-27 22:13:05,191 INFO: Logging to logs/microseq_20250427_221305.log
-2025-04-27 22:13:05,215 INFO: [PASS] 39764266.fastq → /home/jason/microseq_tests/run_ab1_demo/passed_qc_fastq/39764266_trimmed.fastq (avgQ 46.67)
-2025-04-27 22:13:05,215 INFO: [PASS] 39764278.fastq → /home/jason/microseq_tests/run_ab1_demo/passed_qc_fastq/39764278_trimmed.fastq (avgQ 54.90)
-2025-04-27 22:13:05,216 INFO: [PASS] 39764260.fastq → /home/jason/microseq_tests/run_ab1_demo/passed_qc_fastq/39764260_trimmed.fastq (avgQ 52.11)
-2025-04-27 22:13:05,216 INFO: [PASS] 39764269.fastq → /home/jason/microseq_tests/run_ab1_demo/passed_qc_fastq/39764269_trimmed.fastq (avgQ 55.43)
