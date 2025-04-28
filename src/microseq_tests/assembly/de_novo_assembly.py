@@ -16,7 +16,7 @@ from microseq_tests.utility.utils import load_config, setup_logging
 
 PathLike = str | Path 
 
-def de_novo_assembly(input_fasta: PathLike, output_dir: PathLike) -> Path: 
+def de_novo_assembly(input_fasta: PathLike, output_dir: PathLike, *, threads: int=1, **kwargs, ) -> Path: 
     """
     Run CAP3 on input_fasta. 
 
@@ -37,7 +37,7 @@ def de_novo_assembly(input_fasta: PathLike, output_dir: PathLike) -> Path:
     out_dir = Path(output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd = [cap3_exe, str(in_path)] 
+    cmd = [cap3_exe, str(in_path), "-p", str(threads)] 
     logging.info("RUN CAP3: %s (cwd=%s)", " ".join(cmd), out_dir)
 
     try:
@@ -60,9 +60,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="De-novo assembly via CAP3")
     ap.add_argument("-i", "--input", required=True, help="Trimmed FASTA here!")
     ap.add_argument("-o", "--output", required=True, help="Output directory") 
+    ap.add_argument("--threads", type=int, default=1, help="CPU threads") 
     args = ap.parse_args() 
     try:
-        de_novo_assembly(args.input, args.output)
+        de_novo_assembly(args.input, args.output, threads=args.threads)
     except Exception as e:
         logging.error(e)
         sys.exit(1) 

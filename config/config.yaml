@@ -1,5 +1,18 @@
 # config/config.yaml tells my code where things live and how to behave at runtime (think log level, executable paths, pipeline parameters) - load_config() helper points to this file 
 
+# ----- MicroSeq runtime configurations ------
+# On the local laptop/PC or for ad-hoc testing
+# If the CLI is invoked without --workdir, MicroSeq writes all intermediate files 
+# under default_workdir. 
+#
+# On the HPC/SLURM cluster:
+#   Every analysis run is launched with an explicit use of workdir flag for example,
+#   --workdir <YYYY-MM-DD-Project-Name-Software-Used> so outputs stay isolated.
+#   The key used here is then ignored, as this is treated as a fallback for quick local experiments and for new users who haven't decided on a directory structure yet. 
+#   --------------------------------------------
+default_workdir: "~/microseq_runs" # fallback only I was mentioning; override use --workdir flag =) 
+
+
 logging:
   level: DEBUG 
 tools:

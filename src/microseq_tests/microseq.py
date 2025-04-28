@@ -1,6 +1,6 @@
 # src/microseq_tests/microseq.py
 from __future__ import annotations 
-import argparse, sys, pathlib 
+import argparse, pathlib, logging, shutil   
 import microseq_tests.trimming.biopy_trim as biopy_trim 
 from microseq_tests.utility.utils import setup_logging, load_config 
 from microseq_tests.trimming.quality_trim import quality_trim 
@@ -9,22 +9,33 @@ from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq 
 from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta 
 from microseq_tests.post_blast_analysis import run as postblast_run 
-from microseq_tests.utility.add_taxonomy import run_taxonomy_join 
+from microseq_tests.utility.add_taxonomy import run_taxonomy_join
+
+
+
 
 def main() -> None:
-    setup_logging() # sets up logging from here... 
     cfg = load_config() 
     ap = argparse.ArgumentParser(
     prog="microseq", description="MicroSeq QC-trim Fastq; optional CAP3 assembly; blastn search; taxonomy join; optional BIOM export")
-    # adding global flag 
-    ap.add_argument("--workdir", default=cfg.get("default_workdir","data"), help="Root folder for intermediate outputs (default: ./data) note: Yaml is placed as a 2ndary place for a shared repo project which can you modify and change without using workdir flag otherwise use --workdir to point where you want to set up your individual project") 
+    # adding global flags here ...... 
+    ap.add_argument("--workdir", default=cfg.get("default_workdir","data"), help="Root folder for intermediate outputs (default: ./data) note: Yaml is placed as a 2ndary place for a shared repo project which can you modify and change without using workdir flag otherwise use --workdir to point where you want to set up your individual project")
+    ap.add_argument("--threads", type=int, default=1, 
+                    help="CPU threads for parallel stages")
+    ap.add_argument("-v", "--verbose", action="count", default=0, help="-v: info, -vv: use for debugging") 
     sp = ap.add_subparsers(dest="cmd", required=True)
 
     # trimming sub command 
     p_trim = sp.add_parser("trim", help="Quality trimming via Trimmomatic")
     p_trim.add_argument("-i", "--input", required=True, help="FASTQ")
     p_trim.add_argument("-o", "--output", required=False, help="(ignored when --workdir is used or you can specifiy your own output if you don't want the automated version workdir gives you")
-    p_trim.add_argument("--sanger", action="store_true", help="Use BioPython trim for abi files Input is the AB1 folder -> convert + trim") 
+    p_trim.add_argument("--sanger", dest="sanger", action="store_true", help="Use BioPython trim for abi files Input is the AB1 folder -> convert + trim; autodetected if omitted") 
+    p_trim.add_argument("--no-sanger", dest="sanger", action="store_false", help="Force FASTQ mode") 
+    p_trim.set_defaults(sanger=None) # default = auto-detect in this case 
+    p_trim.add_argument("--link-raw", action="store_true", help="Symlink AB1 traces into workdir instead of copying") 
+
+
+
 
     # assembly 
     p_asm = sp.add_parser("assembly", help="De novo assembly via CAP3")
@@ -57,35 +68,82 @@ def main() -> None:
     p_BIOM.add_argument("--sample-col", help="Column in metadata to treat as sample_id helps MicroSeq known which column to treat as such if not sample_id itself") 
   
     # parse out arguments 
-    args = ap.parse_args() 
+    args = ap.parse_args()
 
-    # createing the directory for workdir 
-    workdir = pathlib.Path(args.workdir).resolve() 
+    LEVEL = {0: logging.WARNING, 1: logging.INFO}.get(args.verbose, logging.DEBUG)
+    setup_logging(level=LEVEL)  # reusing helper, but expose by level 
+
+    # createing the directory for workdir
+    workdir_arg = args.workdir or cfg.get("default_workdir", "data")
+    workdir = pathlib.Path(workdir_arg).expanduser().resolve() 
     for sub in ("raw", "raw_fastq", "qc", "asm", "blast", "biom", "passed_qc_fastq", "failed_qc_fastq"):
         (workdir / sub).mkdir(parents=True, exist_ok=True) 
    
    # use workdir in every brnach 
     if args.cmd == "trim":
+        inp = pathlib.Path(args.input)
+        if args.sanger is None:
+            args.sanger = (inp.suffix.lower() == ".ab1") or any(inp.glob("*.ab1"))
+        
         if args.sanger:
-            raw_fastq_dir = workdir / "raw_fastq"
-            ab1_folder_to_fastq(args.input, raw_fastq_dir)
-            biopy_trim.trim_folder(
-                input_dir=raw_fastq_dir,
-                output_dir=workdir / "qc",
-            )
-        else:
-            out_fq = workdir / "qc" / "trimmed.fastq"
-            quality_trim(args.input, out_fq)
+            # -- preparing raw_ab1 folder copy or symlink --- prefernece for symlink here for me --- 
+            dst = workdir / "raw_ab1"
 
-        # In both branches now have passed_qc_fastq/*.fasta 
-        fasta = fastq_folder_to_fasta(
-            workdir / "passed_qc_fastq",
-            workdir / "qc" / "trimmed.fasta")
-        print("FASTA ready to go!", fasta)
+            # Here you clean up leftovers from a previous run so the command is idempotent assuming you use the same directory... (rare scenario) 
+
+            if dst.exists():
+                if dst.is_symlink() or dst.is_file():
+                    dst.unlink()     # removes stale symlink or stray file 
+                else:
+                    shutil.rmtree(dst)  # removes old directory tree 
+
+            if args.link_raw:
+                # symlink handles file vs directory 
+                dst.symlink_to(inp.resolve(), target_is_directory=inp.is_dir())
+            else: 
+                # physical copy now 
+                if inp.is_dir():
+                    # copy folder into raw_ab1/ 
+                    shutil.copytree(inp, dst, dirs_exist_ok=True)
+                else: 
+                    # single AB1 file 
+                    dst.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(inp, dst / inp.name)
+            
+            # --- convert AB1 to FASTQ --------------- 
+            raw_fastq_dir = workdir / "raw_fastq"
+            ab1_folder_to_fastq(dst, raw_fastq_dir)
+
+            # --- BioPython QC trim writes to passed_qc_fastq/ ------- 
+            trim_out = workdir / "passed_qc_fastq"
+            biopy_trim.trim_folder(
+                    input_dir=raw_fastq_dir,
+                    output_dir=workdir / "qc",
+                    threads=args.threads,
+                    )
+
+            # ---- FASTQ converted to FASTA --------------------
+            fasta = fastq_folder_to_fasta(
+                    trim_out,       # here FASTQs are kept 
+                    workdir / "qc" / "trimmed.fasta" 
+                    )
+        else:
+            # --- Trimmomatic QC for regular FASTQ ---------------
+            out_fq = workdir / "qc" / "trimmed.fastq" 
+            quality_trim(args.input, out_fq, threads=args.threads)
+
+            fasta = fastq_folder_to_fasta(
+                    workdir / "qc", # contains the trimmed.fastq 
+                    workdir / "qc" / "trimmed.fasta" 
+                    )
+        print("FASTA ready:", fasta)
+
 
     elif args.cmd == "assembly":
         de_novo_assembly(workdir / "qc" / "trimmed.fasta",
-                         workdir / "asm")
+                         workdir / "asm",
+                         threads=args.threads,
+                         )
 
     elif args.cmd == "blast":
         run_blast(
@@ -95,6 +153,7 @@ def main() -> None:
             pct_id=args.identity,
             qcov=args.qcov,
             max_target_seqs = args.max_target_seqs, 
+            threads=args.threads,
             )
 
     elif args.cmd == "postblast":

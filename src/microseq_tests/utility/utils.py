@@ -3,6 +3,7 @@ import yaml
 import os
 from pathlib import Path 
 import logging, datetime 
+import sys 
 
 ROOT = Path(__file__).resolve().parents[3]  # repo root (think going 3 steps back here ../../.. until it sees top level of repo =) )  
 CONF_PATH = ROOT / "config" / "config.yaml"
@@ -15,7 +16,7 @@ LOG_ROOT = ROOT/ "logs"
 
 
 def setup_logging(log_dir: str | Path = "logs", log_file_prefix: str ="microseq", 
-    *,
+                  *, level: int | None = None,
                   force: bool = False,) -> None:
     """
        Configure a timestamped file + console logger.
@@ -36,8 +37,10 @@ def setup_logging(log_dir: str | Path = "logs", log_file_prefix: str ="microseq"
 
     if logging.getLogger().handlers and not force:
         return
+
+    level = level or logging.INFO  # this is default if caller omitted so take note 
     logging.basicConfig(
-            level=logging.DEBUG,
+            level=level,
             format="%(asctime)s %(levelname)s: %(message)s",
             handlers=[
                 logging.FileHandler(file_path),
@@ -45,7 +48,7 @@ def setup_logging(log_dir: str | Path = "logs", log_file_prefix: str ="microseq"
                 ],
             force=force, 
             )
-    logging.info(f"Logging to {file_path}") 
+    logging.info("Logging to %s", file_path) 
            
 def expand_db_path(template: str) -> str:
     db_home = os.environ.get("MICROSEQ_DB_HOME", os.path.expanduser("~/.microseq_dbs"))

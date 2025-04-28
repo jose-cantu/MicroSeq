@@ -5,16 +5,18 @@ from microseq_tests.utility.utils import load_config, setup_logging
 
 PathLike = str | Path 
 
-def quality_trim(input_file: PathLike, output_file: PathLike) -> Path:
+def quality_trim(input_file: PathLike, output_file: PathLike, *, threads: int=1, **kwargs, ) -> Path:
     """
     Run Trimmomatic single-end mode and return the absolute path to trimmed FASTAQ/FASTA so down stream steps (assembly, GUI, tests) can chain without guessing. 
+    threads : int 
+    Forwarded to Trimmomatics's threads option. 
 
         """
     cfg = load_config()
     trimm = cfg["tools"]["trimmomatic"]
 
     cmd = [ 
-        trimm, "SE", "-phred33",
+        trimm, "SE", "-threads", str(threads), "-phred33",
         str(input_file), str(output_file),    # <<< cast once here 
         "SLIDINGWINDOW:5:20",
         "MINLEN:200",

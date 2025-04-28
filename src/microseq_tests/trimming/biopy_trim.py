@@ -45,6 +45,8 @@ def trim_folder(
     per_base_q: int = 20,
     file_q_threshold: float = 20.0,
     combined_tsv: str | Path | None = None,
+    threads: int = 1,
+    **kwargs,
 ) -> None:
     """
     For every *.fastq in input_dir ....
