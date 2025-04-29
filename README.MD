@@ -11,7 +11,7 @@ uing BLAST searches against the Greengenes2 and SILVA databases. Full Version 1.
 
 ```bash 
 # 1 Clone the repo:
-git clone https://github.com/your-org/microseq_tests.git
+git clone https://github.com/jose-cantu/microseq_tests.git 
 cd microseq_tests 
 
 # 2 Create the Conda env located in env yaml 
