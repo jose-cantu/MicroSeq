@@ -33,3 +33,4 @@ tests/test_pipeline.py
 tests/test_pipeline_wrappers.py
 tests/test_trim_pipeline.py
 tests/test_utils.py
+tests/test_utils_logging.py

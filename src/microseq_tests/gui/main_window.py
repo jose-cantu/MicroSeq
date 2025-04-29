@@ -1,6 +1,9 @@
 # src/microseq_tests/gui
 
 from __future__ import annotations 
+import logging
+L = logging.getLogger(__name__)
+
 import sys, logging, traceback, subprocess, shlex  
 from pathlib import Path 
 from typing import Optional 
@@ -40,11 +43,11 @@ class Worker(QObject):
     def run(self):
         try:
             # --------- live banner so GUI shows immediate activity -- 
-            logging.info("▶ Starting BLAST…")
+            L.info("▶ Starting BLAST…")
             self.progress.emit(0)
             rc = self._fn(*self._args, **self._kwargs)
             self.progress.emit(100) 
-            logging.info("✔ BLAST finished with rc=%s", rc)
+            L.info("✔ BLAST finished with rc=%s", rc)
 
         except Exception:
             self.log.emit(traceback.format_exc())

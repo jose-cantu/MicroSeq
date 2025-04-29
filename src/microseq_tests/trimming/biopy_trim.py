@@ -1,4 +1,7 @@
 from __future__ import annotations
+import logging
+L = logging.getLogger(__name__)
+
 from pathlib import Path
 from typing import List, Optional
 from Bio import SeqIO                         
@@ -103,10 +106,10 @@ def trim_folder(
         if avg_q < file_q_threshold:
             (failed_dir / fq.name).write_bytes(fq.read_bytes())
             (failed_dir / stats_path.name).write_bytes(stats_path.read_bytes())
-            logging.info("[FAIL] %s  (avgQ %.2f)", fq.name, avg_q)
+            L.info("[FAIL] %s  (avgQ %.2f)", fq.name, avg_q)
         else:
             SeqIO.write(trimmed_recs, trimmed_path, "fastq")
-            logging.info("[PASS] %s → %s (avgQ %.2f)", fq.name, trimmed_path, avg_q)
+            L.info("[PASS] %s → %s (avgQ %.2f)", fq.name, trimmed_path, avg_q)
             if comb:
                 comb.write(f"{fq.name}\t{reads}\t{avg_len:.1f}\t{avg_q:.2f}\n")
 

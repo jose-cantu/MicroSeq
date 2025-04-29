@@ -1,4 +1,7 @@
 from __future__ import annotations 
+import logging
+L = logging.getLogger(__name__)
+
 from pathlib import Path 
 from microseq_tests.utility.utils import load_config, expand_db_path, setup_logging 
 import subprocess, logging, argparse, os
@@ -62,5 +65,5 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
     # remove any pre existing map-size so LMDB can't re-activate 
     env.pop("BLASTDB_LMDB_MAP_SIZE", None) 
 
-    logging.info("RUN BLAST:%s", " ".join(cmd))
+    L.info("RUN BLAST:%s", " ".join(cmd))
     subprocess.run(cmd, check=True, env=env) # launches blast, propogate all vars

@@ -1,4 +1,7 @@
 from __future__ import annotations 
+import logging
+L = logging.getLogger(__name__)
+
 from pathlib import Path 
 import argparse, subprocess, logging 
 from microseq_tests.utility.utils import load_config, setup_logging 
@@ -22,11 +25,11 @@ def quality_trim(input_file: PathLike, output_file: PathLike, *, threads: int=1,
         "MINLEN:200",
         ]
 
-    logging.info("RUN Trimmomatic: %s", " ".join(cmd))
+    L.info("RUN Trimmomatic: %s", " ".join(cmd))
     try:
         subprocess.run(cmd, check=True, stderr=subprocess.PIPE, text=True)
     except subprocess.CalledProcessError as e:
-        logging.error("Trimmomatic failed (exit %s):\n%s", e.returncode, e.stderr)
+        L.error("Trimmomatic failed (exit %s):\n%s", e.returncode, e.stderr)
         raise 
 
     out_path = Path(output_file).resolve()
