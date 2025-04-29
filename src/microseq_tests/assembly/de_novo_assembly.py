@@ -9,6 +9,9 @@ Usage from CLI module:
 The CAP3 binary path is read from config.yaml.
 """
 from __future__ import annotations 
+import logging
+L = logging.getLogger(__name__)
+
 from pathlib import Path
 import subprocess 
 import logging 
@@ -38,19 +41,19 @@ def de_novo_assembly(input_fasta: PathLike, output_dir: PathLike, *, threads: in
     out_dir.mkdir(parents=True, exist_ok=True)
 
     cmd = [cap3_exe, str(in_path), "-p", str(threads)] 
-    logging.info("RUN CAP3: %s (cwd=%s)", " ".join(cmd), out_dir)
+    L.info("RUN CAP3: %s (cwd=%s)", " ".join(cmd), out_dir)
 
     try:
         subprocess.run(cmd, check=True, cwd=out_dir, stderr=subprocess.PIPE, text=True) 
     except subprocess.CalledProcessError as exc:
-        logging.error("CAP3 failed (exit %s):\n%s", exc.returncode, exc.stderr)
+        L.error("CAP3 failed (exit %s):\n%s", exc.returncode, exc.stderr)
         raise 
 
     contig_path = out_dir / f"{in_path.name}.cap.contigs"
     if not contig_path.exists():
         raise FileNotFoundError(contig_path)
 
-    logging.info("CAP3 finished; contigs file: %s", contig_path) 
+    L.info("CAP3 finished; contigs file: %s", contig_path) 
     return contig_path 
 
 # optional CLI to call file directly 
@@ -65,7 +68,7 @@ if __name__ == "__main__":
     try:
         de_novo_assembly(args.input, args.output, threads=args.threads)
     except Exception as e:
-        logging.error(e)
+        L.error(e)
         sys.exit(1) 
 
 

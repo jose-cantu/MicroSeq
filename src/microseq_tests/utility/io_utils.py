@@ -1,4 +1,7 @@
 from __future__ import annotations 
+import logging
+L = logging.getLogger(__name__)
+
 from pathlib import Path 
 import re, shutil, logging 
 
@@ -20,7 +23,7 @@ def normalise_tsv(path: str | Path) -> Path:
     if "\t" in text: # already fine here 
         return p 
 
-    logging.info("[fix-tsv] converting spaces / commas to TABS in %s", p.name)
+    L.info("[fix-tsv] converting spaces / commas to TABS in %s", p.name)
     fixed = re.sub(r"( {2,}|,)", "\t", text) # 2+ spaces or comma gets turned into TAB format. 
 
     tmp = p.with_suffix(".tsv.tmp")

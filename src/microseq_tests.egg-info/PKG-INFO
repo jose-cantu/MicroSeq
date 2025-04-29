@@ -8,11 +8,20 @@ Requires-Dist: pyyaml>=6
 Requires-Dist: biopython>=1.8
 Requires-Dist: PySide6
 
+# MicroSeq - Microbial Sequence Analysis Tool 
+
+MicroSeq is currently in the prototype stage, it is a streamlined bioinformatics tool designed for efficient microbial sequence analysis. 
+Currently, it focuses on on core functionalities such as sequence trimming, de nove assembly, and taxonomic classification 
+uing BLAST searches against the Greengenes2 and SILVA databases. Full Version 1.0 once release will be both a CLI and GUI interface. Version 2.0 will then be wrapped in RUST for performance critical portions that will be tested rigoursely for seamless integration. 
+
+
+
 ### Quick Install Guide Meant for First Time Usage Only 
+# NOTE: THIS IS IN PROTOTYPE PHASE SO USE AT OWN RISK - WILL NOT BE COMPLETE UNTIL Realistically a month from now. SO FUNCTIONALITY WILL CHANGE. 
 
 ```bash 
 # 1 Clone the repo:
-git clone https://github.com/your-org/microseq_tests.git
+git clone https://github.com/jose-cantu/microseq_tests.git 
 cd microseq_tests 
 
 # 2 Create the Conda env located in env yaml 
@@ -21,7 +30,7 @@ conda activate MicroSeq
 
 # 3 Install & download databases 
 pip install -e .  # This sets the current version of MicroSeq 
-microseq-setup    # downloads 16S Databases GG2, SILVA, NCBI16S, updates ~/.bashrc 
+microseq-setup    # downloads 16S Databases GG2, SILVA, NCBI16S, updates ~/.bashrc ~3GB of space, one-off  
 source ~/.bashrc  # reloads BLASTDB exports (or you can open a new shell next time?) 
 
 # Sanity check you can run to make sure databses work with blasting  
@@ -33,17 +42,60 @@ for d in gg2 silva ncbi16s; do
       && echo "[✓] $d OK"
 done
 rm tiny.fasta /tmp/*.tsv
+```
+
+Executable from your $PATH you can use from MicroSeq (they come from 'pyproject.toml`)
+
+`microseq` - main multisub-command CLI 
+
+`microseq-gui` - launches the GUI thats underdevelopment 
+
+`microseq-setup` - one-off helper that downloads reference database 
+`microseq-fix-tsv` - utlitity that normalises BLAST tables so they can be parsed through post blast sub command =) 
+
+## Key features
+
+* **QC-trim pipeline**  
+  * AB1 → FASTQ, FASTQ → FASTA, Trimmomatic & BioPython quality filtering  
+* **De-novo assembly** (CAP3)  
+* **BLAST search** against Greengenes 2, SILVA, or NCBI 16S  
+* **Taxonomy join** + BIOM / CSV export for easy downstream stats  
+* **PySide6 GUI** with file queue, live log pane and progress bar  
+* **Single-command installers** (`microseq-setup`, `microseq blast …`) 
+
+
+## Core CLI commands
+
+| Command | Typical use | Minimal example |
+|---------|-------------|-----------------|
+| `microseq trim` | Full QC (AB1 or FASTQ) | `microseq trim -i traces.ab1 --sanger --workdir run1` |
+| `microseq ab1-to-fastq` | Only convert ABI → FASTQ | `microseq ab1-to-fastq -i traces_ab1 -o fastq_out` |
+| `microseq fastq-to-fasta` | Merge FASTQ → FASTA | `microseq fastq-to-fasta -i fastq_out -o merged.fasta` |
+| `microseq assembly` | CAP3 assembly | `microseq assembly -i merged.fasta -o asm/` |
+| `microseq blast` | BLAST search | `microseq blast -i merged.fasta -d gg2 -o hits.tsv` |
+| `microseq add_taxonomy` | Greengenes2 tax join | `microseq add_taxonomy -i hits.tsv -t gg2_tax.tsv -o hits_tax.tsv` |
+| `microseq postblast` | BIOM + CSV export | `microseq postblast -b hits_tax.tsv -m meta.tsv -o run1.biom` |
+| `microseq-gui` | Launch GUI | `microseq-gui` |
+
+
+## GUI at a glance
+
+*Pick files or a whole folder, tweak identity / q-cov / threads, then watch the
+log update live. Output `*.hits.tsv` appear beside each input file.*
+
+## End-to-end example (AB1 traces)
+
+```bash
+conda activate MicroSeq
+microseq trim       -i raw_ab1/     --sanger  --workdir run1           # QC
+microseq assembly   -i run1/qc/trimmed.fasta  -o run1/asm              # CAP3
+microseq blast      -i run1/asm/contigs.fasta \
+                    -d gg2 -o run1/blast/hits.tsv                      # BLAST
+microseq add_taxonomy \
+        -i run1/blast/hits.tsv  -t gg2_tax.tsv \
+        -o run1/blast/hits_tax.tsv                                     # taxonomy
+microseq postblast  -b run1/blast/hits_tax.tsv \
+                    -m meta.tsv  -o run1.biom                          # BIOM+CSV
 ``` 
-
-
-
-
-
-
-
-
-
-
-
 
 MicroSeq's GUI uses PySide6 / Qt 6, licensed under the LGPL v3. See LICENSES/Qt_LGPLv3.txt for details. 
