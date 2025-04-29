@@ -1,0 +1,4 @@
+2025-04-28 17:13:50,562 INFO: Logging to logs/microseq_20250428_171350.log
+2025-04-28 17:14:54,018 INFO: ▶ Starting BLAST …
+2025-04-28 17:14:54,026 INFO: RUN BLAST:blastn -task blastn -query /home/jason/microseq_tests/tests/data/demo.fasta -db greengenes2_db -max_target_seqs 5 -perc_identity 80 -qcov_hsp_perc 10 -out /home/jason/microseq_tests/tests/data/demo.hits.tsv -outfmt 6 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle -num_threads 1
+2025-04-28 17:15:15,020 INFO: ✔ BLAST finished with rc=0

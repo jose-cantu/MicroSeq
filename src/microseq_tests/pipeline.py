@@ -11,13 +11,23 @@ import logging
 
 # pull the existing implementation functions
 from microseq_tests.trimming.quality_trim import quality_trim
-from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq
+from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq as ab1_to_fastq 
 from microseq_tests.trimming.biopy_trim import trim_folder as biopy_trim
-from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta
+from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta as fastq_to_fasta
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
 from microseq_tests.post_blast_analysis import run as postblast_run
+
+__all__ = [
+        "run_trim",
+        "run_assembly",
+        "run_blast_stage",
+        "run_add_tax",
+        "run_postblast",
+        "run_ab1_to_fastq",
+        "run_fastq_to_fasta",
+        ] 
 
 PathLike = Union[str, Path]
 L = logging.getLogger(__name__)
@@ -60,10 +70,12 @@ def run_blast_stage(fasta_in: PathLike,
                     out_tsv: PathLike,
                     identity: float = 97.0,
                     qcov: float = 80.0,
-                    max_target_seqs: int = 5) -> int:
+                    max_target_seqs: int = 5,
+                    threads: int = 1) -> int:
     run_blast(fasta_in, db_key, out_tsv,
               pct_id=identity, qcov=qcov,
-              max_target_seqs=max_target_seqs)
+              max_target_seqs=max_target_seqs,
+              threads=threads)
     return 0
 
 
@@ -83,3 +95,40 @@ def run_postblast(blast_hits: PathLike,
     postblast_run(blast_hits, metadata, out_biom,
                   write_csv=True, sample_col=sample_col)
     return 0
+
+# ───────────────────────────────────────────────────────── AB1 → FASTQ
+def run_ab1_to_fastq(
+    input_dir: PathLike,
+    output_dir: PathLike,
+    *,
+    overwrite: bool = False,
+) -> int:
+    """
+    Convert every *.ab1 in *input_dir* to FASTQ files in *output_dir*.
+    Returns 0 on success, 1 on failure (and logs the error).
+    """
+    try:
+        written: Sequence[Path] = ab1_to_fastq(input_dir, output_dir, overwrite=overwrite)
+        L.info("AB1→FASTQ wrote %d files to %s", len(written), output_dir)
+        return 0
+    except Exception:
+        L.exception("AB1→FASTQ failed")
+        return 1
+
+
+# ───────────────────────────────────────────────────────── FASTQ → FASTA
+def run_fastq_to_fasta(
+    input_dir: PathLike,
+    output_fasta: PathLike,
+) -> int:
+    """
+    Merge all *.fastq in *input_dir* into a single FASTA *output_fasta*.
+    """
+    try:
+        out = fastq_to_fasta(input_dir, output_fasta)
+        L.info("FASTQ→FASTA wrote %s", out)
+        return 0
+    except Exception:
+        L.exception("FASTQ→FASTA failed")
+        return 1
+

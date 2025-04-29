@@ -1,16 +1,17 @@
 # src/microseq_tests/microseq.py
 from __future__ import annotations 
 import argparse, pathlib, logging, shutil   
-import microseq_tests.trimming.biopy_trim as biopy_trim 
+import microseq_tests.trimming.biopy_trim as biopy_trim
+from microseq_tests.pipeline import (
+        run_ab1_to_fastq, run_fastq_to_fasta,) 
 from microseq_tests.utility.utils import setup_logging, load_config 
 from microseq_tests.trimming.quality_trim import quality_trim 
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly 
 from microseq_tests.blast.run_blast import run_blast
-from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq 
-from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta 
 from microseq_tests.post_blast_analysis import run as postblast_run 
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
-
+from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq 
+from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta 
 
 
 
@@ -33,10 +34,25 @@ def main() -> None:
     p_trim.add_argument("--no-sanger", dest="sanger", action="store_false", help="Force FASTQ mode") 
     p_trim.set_defaults(sanger=None) # default = auto-detect in this case 
     p_trim.add_argument("--link-raw", action="store_true", help="Symlink AB1 traces into workdir instead of copying") 
+    
+    # ── AB1 → FASTQ -------------------------------------------------------
+    p_ab1 = sp.add_parser("ab1-to-fastq",
+                          help="Convert ABI chromatograms to FASTQ")
+    p_ab1.add_argument("-i", "--input_dir",  required=True, metavar="DIR",
+                       help="Folder containing *.ab1 files")
+    p_ab1.add_argument("-o", "--output_dir", required=True, metavar="DIR",
+                       help="Folder to write *.fastq files")
+    p_ab1.add_argument("--overwrite", action="store_true",
+                       help="Re-create FASTQ even if it exists")
 
-
-
-
+    # ── FASTQ → FASTA -----------------------------------------------------
+    p_fq = sp.add_parser("fastq-to-fasta",
+                         help="Merge all FASTQ in a folder into one FASTA")
+    p_fq.add_argument("-i", "--input_dir",    required=True, metavar="DIR",
+                      help="Folder with *.fastq / *.fq")
+    p_fq.add_argument("-o", "--output_fasta", required=True, metavar="FASTA",
+                      help="Output FASTA file path") 
+    
     # assembly 
     p_asm = sp.add_parser("assembly", help="De novo assembly via CAP3")
     p_asm.add_argument("-i", "--input", required=True)
@@ -137,6 +153,24 @@ def main() -> None:
                     workdir / "qc" / "trimmed.fasta" 
                     )
         print("FASTA ready:", fasta)
+    
+
+
+    elif args.cmd == "ab1-to-fastq":
+        rc = run_ab1_to_fastq(
+                args.input_dir,
+                args.output_dir,
+                overwrite=args.overwrite,
+                )
+        print(" AB1->FastQ exit-code:", rc)
+
+
+    elif args.cmd == "fastq-to-fasta":
+        rc = run_fastq_to_fasta(
+                args.input_dir,
+                args.output_fasta,
+                )
+        print("FASTQ -> FASTA exit-code:", rc) 
 
 
     elif args.cmd == "assembly":

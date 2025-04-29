@@ -1,4 +1,5 @@
 [console_scripts]
 microseq = microseq_tests.microseq:main
 microseq-fix-tsv = microseq_tests.utility.io_utils:cli
+microseq-gui = microseq_tests.gui.__main__:launch
 microseq-setup = microseq_tests.utility.fetch_dbs:main

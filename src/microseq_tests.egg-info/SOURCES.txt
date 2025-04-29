@@ -15,6 +15,7 @@ src/microseq_tests/assembly/__init__.py
 src/microseq_tests/assembly/de_novo_assembly.py
 src/microseq_tests/blast/run_blast.py
 src/microseq_tests/gui/__init__.py
+src/microseq_tests/gui/__main__.py
 src/microseq_tests/gui/main_window.py
 src/microseq_tests/trimming/__init__.py
 src/microseq_tests/trimming/ab1_to_fastq.py
