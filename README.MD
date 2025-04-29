@@ -34,11 +34,14 @@ done
 rm tiny.fasta /tmp/*.tsv
 ```
 
-Executable from your $PATH you can use from MicroSeq (they come from 'pyproject.toml`) 
-**`microseq`** - main multisub-command CLI 
-**`microseq-gui`** - launches the GUI thats underdevelopment 
-**`microseq-setup`** - one-off helper that downloads reference database 
-**`microseq-fix-tsv`** - utlitity that normalises BLAST tables so they can be parsed through post blast sub command =) 
+Executable from your $PATH you can use from MicroSeq (they come from 'pyproject.toml`)
+
+`microseq` - main multisub-command CLI 
+
+`microseq-gui` - launches the GUI thats underdevelopment 
+
+`microseq-setup` - one-off helper that downloads reference database 
+`microseq-fix-tsv` - utlitity that normalises BLAST tables so they can be parsed through post blast sub command =) 
 
 ## Key features
 
