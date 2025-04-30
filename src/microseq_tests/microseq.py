@@ -1,7 +1,7 @@
 # src/microseq_tests/microseq.py
 from __future__ import annotations
 from tqdm.auto import tqdm 
-import argparse, pathlib, logging, shutil   
+import argparse, pathlib, logging, shutil, glob, sys, subprocess     
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
 from microseq_tests.pipeline import (
@@ -16,6 +16,7 @@ from microseq_tests.utility.add_taxonomy import run_taxonomy_join
 from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq 
 from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta
 from Bio import SeqIO 
+from functools import partial 
 
 
 
@@ -71,7 +72,12 @@ def main() -> None:
     p_blast.add_argument("--identity", type=float, default=97.0, help="percent-identity threshold (default: %(default)s) you can adjust value based on needs of project")
     p_blast.add_argument("--qcov", type=float, default=80.0, help="query coverage %% (default: %(default)s) again you can adjust value based on needs of project")
     p_blast.add_argument("--max_target_seqs", type=int, default=5, help="How many DB hits to retain per query (passed to BLAST")
-
+    
+    # -- TSV Merge Sub command --- 
+    p_merge = sp.add_parser("merge-hits", help="Concatenate many BLAST TSV files into one large TSV")
+    p_merge.add_argument("-i", "--input", nargs="+", required=True, metavar="TSV", help="Either a list of *.tsv or a single glob/dir (use shell-globs yay lol)", 
+                         )
+    p_merge.add_argument("-o", "--output", required=True, metavar="TSV", help="Destination merged TSV",) 
                          
     # taxonomy join after postblast (GG2 only) 
     p_tax = sp.add_parser("add_taxonomy", help="Append Greengenes2 taxon names to a BLAST table")
@@ -86,7 +92,8 @@ def main() -> None:
     p_BIOM.add_argument("-m", "--metadata", required=True, help="Metadata TSV (must have the sample_id column)")
     p_BIOM.add_argument("-o", "--output_biom", required=True, help="Output .biom path; .csv written alongside")
     p_BIOM.add_argument("--sample-col", help="Column in metadata to treat as sample_id helps MicroSeq known which column to treat as such if not sample_id itself") 
-  
+    p_BIOM.add_argument("--json", action="store_true", help="Also emit a pretty-printed JSON BIOM alonside") 
+
     # parse out arguments 
     args = ap.parse_args()
 
@@ -199,6 +206,35 @@ def main() -> None:
                 on_progress=lambda p: bar.update(p - bar.n), 
             )
 
+    elif args.cmd == "merged-hits":
+        # resolve globs after argparse to keep it cross-platform functional 
+        
+        paths = [] 
+        for spec in args.input:
+            g = glob.glob(spec) 
+            paths.extend(g if g else [spec]) # keep literal no match 
+        
+        if not paths: 
+            logging.error("No TSV files matched")
+            sys.exit(1) 
+
+        out = pathlib.Path(args.output).expanduser().resolve()
+        out.parent.mkdir(parents=True, exist_ok=True) 
+
+        logging.info("Merging %d RSV -> %s", len(paths), out) 
+        with out.open("w") as w:
+            for i, p in enumerate(paths):
+                with open(p) as r:
+                    for line in r:
+                        # keep header (# ...) only from the 1st file 
+                        if i and line.startswith("#"):
+                            continue 
+                        w.write(line) 
+
+
+        print("✓ merged →", out) 
+
+
     elif args.cmd == "postblast":
         out_biom = workdir / "biom" / args.output_biom 
         out_biom.parent.mkdir(exist_ok=True, parents=True)
@@ -212,6 +248,21 @@ def main() -> None:
                 )
         print(f" ✓ BIOM : {out_biom}")
         print(f" ✓ CSV  : {out_biom.with_suffix('.csv')}") 
+
+        if args.json:
+            json_out = out_biom.with_suffix(".json")
+            logging.info("Converting BIOM -> JSON ...")
+
+            if not shutil.which("biom"):
+                logging.error("'biom' CLI not found - install biom-format")
+                sys.exit(1) 
+
+            subprocess.check_call(
+                    ["biom", "convert",
+                     "-i", out_biom, "-o", json_out,
+                     "--to-json", "--pretty"])
+            print(f" ✓ JSON : {json_out}") 
+            
 
     elif args.cmd == "add_taxonomy": 
         run_taxonomy_join(
