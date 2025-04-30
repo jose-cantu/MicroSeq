@@ -46,13 +46,13 @@ def run_trim(input_path: PathLike,
 
     if sanger:
         fastq_dir = work / "raw_fastq"
-        ab1_folder_to_fastq(Path(input_path), fastq_dir)
+        ab1_to_fastq(Path(input_path), fastq_dir)
         biopy_trim(fastq_dir, work / "qc")
     else:
         out_fq = work / "qc" / "trimmed.fastq"
         quality_trim(input_path, out_fq)
 
-    fastq_folder_to_fasta(work / "qc", work / "qc" / "trimmed.fasta")
+    fastq_to_fasta(work / "qc", work / "qc" / "trimmed.fasta")
     L.info("Trim finished → %s", work / "qc" / "trimmed.fasta")
     return 0
 
@@ -71,11 +71,12 @@ def run_blast_stage(fasta_in: PathLike,
                     identity: float = 97.0,
                     qcov: float = 80.0,
                     max_target_seqs: int = 5,
-                    threads: int = 1) -> int:
+                    threads: int = 1, on_progress=None) -> int:
     run_blast(fasta_in, db_key, out_tsv,
               pct_id=identity, qcov=qcov,
               max_target_seqs=max_target_seqs,
-              threads=threads)
+              threads=threads,
+              on_progress=on_progress)
     return 0
 
 

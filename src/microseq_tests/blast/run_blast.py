@@ -1,18 +1,21 @@
+# -- src/micrseq_tests/blast/run_blast.py ---------------
 from __future__ import annotations 
-import logging
-L = logging.getLogger(__name__)
-
+import logging, os, subprocess 
 from pathlib import Path 
-from microseq_tests.utility.utils import load_config, expand_db_path, setup_logging 
-import subprocess, logging, argparse, os
+from typing import Optional, Callable 
+from Bio import SeqIO 
 
+from microseq_tests.utility.utils import load_config, expand_db_path 
+
+L = logging.getLogger(__name__) 
 PathLike = str | Path 
 
 # db_key is the shorthand string for "gg2" or "silva" best keep it str here for future reference 
 def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
-              pct_id: float = 97.0, qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, **kwargs) -> None:
+              pct_id: float = 97.0, qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, on_progress: Optional[Callable[[int], None]] = None,) -> None:
     """
-    Run blastn against one of the configured 16 S databases. 
+    Run blastn against one of the configured 16 S databases.
+    You will also emit a percentage progress bar I have set to make it look more a      ppealing. =) 
 
     Parameters:
     query_fa : PathLike
@@ -31,15 +34,23 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
         raise KeyError(
                 f"[run_blast] unknown DB key '{db_key}'."
                 f"Valid keys: {valid}") from e 
-                 
-
+    
     blastdb = expand_db_path(tmpl) # fills in $HOME etc. 
 
     # safety make sure query even exists before spawning BLAST .... 
     q = Path(query_fa)
     if not q.is_file():
-        raise FileNotFoundError(q) 
+        raise FileNotFoundError(q)
 
+    # compute total queries here 
+
+    total = sum(1 for _ in SeqIO.parse(q, "fasta"))
+    if total == 0:    # input is FASTQ 
+        total = sum(1 for _ in SeqIO.parse(q, "fastq")) 
+    if total == 0:
+        raise ValueError(
+            f"{q} contains no FASTA/FASTQ records - nothing to BLAST" 
+            )
 
     Path(out_tsv).parent.mkdir(parents=True, exist_ok=True)
 
@@ -66,4 +77,41 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
     env.pop("BLASTDB_LMDB_MAP_SIZE", None) 
 
     L.info("RUN BLAST:%s", " ".join(cmd))
-    subprocess.run(cmd, check=True, env=env) # launches blast, propogate all vars
+
+    # ------------ progress setup ------------------------ 
+  
+    if on_progress:
+        on_progress(0) 
+
+    proc = subprocess.Popen(
+            cmd, 
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=env,
+            )
+
+    done, next_log = 0, 5 # log every 5% incrementally ......
+
+    for ln in proc.stdout:
+        if ln and not ln.startswith("#"): # data row, not BLAST banner 
+            done += 1                         # one query finished 
+            pct = int(done / total * 100) 
+
+            if on_progress:                   # GUI / tqdm callback 
+                on_progress(min(pct, 99))    # keep 100% for the end 
+
+            if pct >= next_log: # terminal log 
+                L.info("Progress %d %%", pct)
+                next_log += 5
+
+    rc = proc.wait()
+    if rc:
+        raise RuntimeError(f"blastn exited with code {rc}") 
+
+    if on_progress:
+        on_progress(100) # final tick in progress bar 
+    L.info("BLAST finished OK -> %s", out_tsv) 
+
+

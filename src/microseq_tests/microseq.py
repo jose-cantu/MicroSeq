@@ -1,7 +1,9 @@
 # src/microseq_tests/microseq.py
-from __future__ import annotations 
+from __future__ import annotations
+from tqdm.auto import tqdm 
 import argparse, pathlib, logging, shutil   
 import microseq_tests.trimming.biopy_trim as biopy_trim
+# ── pipeline wrappers (return rc int, handle logging) ──────────────
 from microseq_tests.pipeline import (
         run_ab1_to_fastq, run_fastq_to_fasta,) 
 from microseq_tests.utility.utils import setup_logging, load_config 
@@ -10,8 +12,10 @@ from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.post_blast_analysis import run as postblast_run 
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
+# ── low-level helpers (do the actual work, return Path/Seq list) ──
 from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq 
-from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta 
+from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta
+from Bio import SeqIO 
 
 
 
@@ -29,7 +33,7 @@ def main() -> None:
     # trimming sub command 
     p_trim = sp.add_parser("trim", help="Quality trimming via Trimmomatic")
     p_trim.add_argument("-i", "--input", required=True, help="FASTQ")
-    p_trim.add_argument("-o", "--output", required=False, help="(ignored when --workdir is used or you can specifiy your own output if you don't want the automated version workdir gives you")
+    p_trim.add_argument("-o", "--output", required=False, help="ignored when --workdir is used or you can specifiy your own output if you don't want the automated version workdir gives you")
     p_trim.add_argument("--sanger", dest="sanger", action="store_true", help="Use BioPython trim for abi files Input is the AB1 folder -> convert + trim; autodetected if omitted") 
     p_trim.add_argument("--no-sanger", dest="sanger", action="store_false", help="Force FASTQ mode") 
     p_trim.set_defaults(sanger=None) # default = auto-detect in this case 
@@ -180,14 +184,19 @@ def main() -> None:
                          )
 
     elif args.cmd == "blast":
-        run_blast(
-            pathlib.Path(args.input),  # temporary patch for blasting and post biom only will need to think around 
-            args.db,
-            pathlib.Path(args.output),
-            pct_id=args.identity,
-            qcov=args.qcov,
-            max_target_seqs = args.max_target_seqs, 
-            threads=args.threads,
+        total = sum(1 for _ in SeqIO.parse(args.input, "fasta"))
+        if total == 0:
+            total = sum(1 for _ in SeqIO.parse(args.input, "fastq"))
+        with tqdm(total=total, unit="seq") as bar: 
+            run_blast(
+                pathlib.Path(args.input),  # temporary patch for blasting and post biom only will need to think around 
+                args.db,
+                pathlib.Path(args.output),
+                pct_id=args.identity,
+                qcov=args.qcov,
+                max_target_seqs = args.max_target_seqs, 
+                threads=args.threads,
+                on_progress=lambda p: bar.update(p - bar.n), 
             )
 
     elif args.cmd == "postblast":

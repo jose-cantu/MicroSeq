@@ -44,9 +44,7 @@ class Worker(QObject):
         try:
             # --------- live banner so GUI shows immediate activity -- 
             L.info("▶ Starting BLAST…")
-            self.progress.emit(0)
-            rc = self._fn(*self._args, **self._kwargs)
-            self.progress.emit(100) 
+            rc = self._fn(*self._args, **self._kwargs) # adjusted to one source of truth here so progress bar is queued to run_blast actual run 
             L.info("✔ BLAST finished with rc=%s", rc)
 
         except Exception:
@@ -189,6 +187,8 @@ class MainWindow(QMainWindow):
                 qcov=self.qcov_spin.value(),
                 max_target_seqs=self.hits_spin.value(),
                 threads=self.threads_spin.value(),
+                # foward progress bar signal to run_blast 
+                on_progress=self.progress.emit,
                 )
         # injecting wrapper + args into Worker; moves into new thread 
         thread = QThread(self) # autodeleted with window 
