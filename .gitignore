@@ -12,3 +12,5 @@ microseq_dbs/
 # keep references DBs out of Git 
 .microseq_dbs/
 
+# keeping logs from building up 
+logs/*.log 
