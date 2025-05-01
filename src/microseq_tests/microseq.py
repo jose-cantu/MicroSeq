@@ -93,7 +93,7 @@ def main() -> None:
     p_BIOM.add_argument("-o", "--output_biom", required=True, help="Output .biom path; .csv written alongside")
     p_BIOM.add_argument("--sample-col", help="Column in metadata to treat as sample_id helps MicroSeq known which column to treat as such if not sample_id itself") 
     p_BIOM.add_argument("--json", action="store_true", help="Also emit a pretty-printed JSON BIOM alonside") 
-
+    p_BIOM.add_argument("--post_blast_identity", type=float, default=97.0, help="minimum %% identity to keep when selecting the best hit (default: %(default)s) you also have the decision to modify to what number you please besides the default") 
     # parse out arguments 
     args = ap.parse_args()
 
@@ -206,7 +206,7 @@ def main() -> None:
                 on_progress=lambda p: bar.update(p - bar.n), 
             )
 
-    elif args.cmd == "merged-hits":
+    elif args.cmd == "merge-hits":
         # resolve globs after argparse to keep it cross-platform functional 
         
         paths = [] 
@@ -245,6 +245,7 @@ def main() -> None:
                 out_biom,
                 write_csv=True,
                 sample_col=args.sample_col,
+                identity_th=args.post_blast_identity, 
                 )
         print(f" ✓ BIOM : {out_biom}")
         print(f" ✓ CSV  : {out_biom.with_suffix('.csv')}") 

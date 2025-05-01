@@ -31,6 +31,7 @@ tests/test_ab1_convert.py
 tests/test_cli_qol.py
 tests/test_pipeline.py
 tests/test_pipeline_wrappers.py
+tests/test_postblast_identity.py
 tests/test_trim_pipeline.py
 tests/test_utils.py
 tests/test_utils_logging.py

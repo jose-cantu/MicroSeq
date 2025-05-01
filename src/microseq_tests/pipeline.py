@@ -92,9 +92,11 @@ def run_add_tax(hits: PathLike,
 def run_postblast(blast_hits: PathLike,
                   metadata: PathLike,
                   out_biom: PathLike,
-                  sample_col: str | None = None) -> int:
+                  sample_col: str | None = None,
+                  identity_th: float = 97.0) -> int: 
     postblast_run(blast_hits, metadata, out_biom,
-                  write_csv=True, sample_col=sample_col)
+                  write_csv=True, sample_col=sample_col, 
+                  identity_th = identity_th)
     return 0
 
 # ───────────────────────────────────────────────────────── AB1 → FASTQ

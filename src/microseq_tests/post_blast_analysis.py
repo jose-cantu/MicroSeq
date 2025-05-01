@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__) # Now this then set as the real logger by p
 
 # -------
 # constants - expose as CLI flags for later on will write them in master file CLI
-IDENTITY_TH = 97.0 # % identity threshold using for species-grade hits OTU 
+DEFAULT_IDENTITY_TH = 97.0 # % identity threshold using for species-grade hits OTU 
 
 # --- helper function: read table with auto delimiter detecter ---------
 def _smart_read(path: Path) -> pd.DataFrame:
@@ -81,7 +81,7 @@ def _tax_depth(taxon: str | float) -> int:
 
 # --- chosing the best hit per sample ------------
 
-def _choose_best_hit(df: pd.DataFrame) -> pd.DataFrame:
+def _choose_best_hit(df: pd.DataFrame, *, identity_th: float) -> pd.DataFrame:
     """
     Best hit per sample with robustness:
         keep only rows meeting species‑level identity (≥97 %)
@@ -90,7 +90,7 @@ def _choose_best_hit(df: pd.DataFrame) -> pd.DataFrame:
     # filter on identity threshold (qcov already filtered upstream)
     if "pident" in df.columns:
         df["pident"] = pd.to_numeric(df["pident"], errors="coerce")
-        df = df[df["pident"] >= IDENTITY_TH].copy()
+        df = df[df["pident"] >= identity_th].copy()
 
     if df.empty:
         raise ValueError("No BLAST hits survive identity threshold")
@@ -126,7 +126,8 @@ def run(blast_tsv: Path,
         metadata_tsv: Path, 
         out_biom: Path,
         write_csv: bool = True,
-        sample_col: str | None = None) -> None:
+        sample_col: str | None = None,
+        identity_th: float = DEFAULT_IDENTITY_TH) -> None:
 
         # ---- more tolerant parser: any whitespace, not just tabs ---------
         blast = _smart_read(blast_tsv)
@@ -137,7 +138,7 @@ def run(blast_tsv: Path,
         if col != "sample_id":
             meta = meta.rename(columns={col: "sample_id"}) 
 
-        best = _choose_best_hit(blast)
+        best = _choose_best_hit(blast, identity_th=identity_th)
         merged = best.merge(meta, on="sample_id", how="left") 
      
         print(blast.head(), blast.columns) 
