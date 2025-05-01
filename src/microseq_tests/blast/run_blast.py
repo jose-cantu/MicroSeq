@@ -12,7 +12,7 @@ PathLike = str | Path
 
 # db_key is the shorthand string for "gg2" or "silva" best keep it str here for future reference 
 def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
-              pct_id: float = 97.0, qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, on_progress: Optional[Callable[[int], None]] = None,) -> None:
+              pct_id: float = 97.0, qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, on_progress: Optional[Callable[[int], None]] = None, log_missing: PathLike | None = None,) -> None:
     """
     Run blastn against one of the configured 16 S databases.
     You will also emit a percentage progress bar I have set to make it look more a      ppealing. =) 
@@ -23,7 +23,10 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
     db_key : str
         Key in `config.yaml` under ``databases:`` (e.g. "gg2", "silva").
     out_tsv : PathLike
-        Destination TSV file (BLAST 6 columns + extras).
+        Destination TSV file (BLAST 6 columns + extras listed below).
+    Thresholds applied by BLAST before writing to out_tsv. 
+    log_missing 
+        if given, appends isolate-ID to this file when resulting TSV contains ≤ 1 line header only -> zero hits ≥ pct_id / qcov).
     """
     cfg = load_config()
     # look up DB path in config.yaml 
@@ -78,7 +81,7 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
 
     L.info("RUN BLAST:%s", " ".join(cmd))
 
-    # ------------ progress setup ------------------------ 
+    # ------------ progress setup bar callback ------------------------ 
   
     if on_progress:
         on_progress(0) 
@@ -112,6 +115,25 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
 
     if on_progress:
         on_progress(100) # final tick in progress bar 
-    L.info("BLAST finished OK -> %s", out_tsv) 
+    L.info("BLAST finished OK -> %s", out_tsv)
+
+    # optional no hit logging setup ------------------ 
+
+    if log_missing:
+        n_lines = 0 
+        try:
+            n_lines = sum(1 for _ in Path(out_tsv).open()) 
+        except FileNotFoundError:
+            pass 
+
+        if n_lines <= 1:  # header-only TSV 
+            iso = Path(query_fa).stem
+            L.debug(
+                    "[post-filter] isolate %s -> 0 hits ≥%.1f%% id / ≥%.1f%% qcov",
+                    iso, pct_id, qcov, ) 
+            with open(log_missing, "a") as fh: 
+                fh.write(f"{iso}\n") 
+
+
 
 

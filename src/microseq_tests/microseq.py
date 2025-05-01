@@ -72,7 +72,9 @@ def main() -> None:
     p_blast.add_argument("--identity", type=float, default=97.0, help="percent-identity threshold (default: %(default)s) you can adjust value based on needs of project")
     p_blast.add_argument("--qcov", type=float, default=80.0, help="query coverage %% (default: %(default)s) again you can adjust value based on needs of project")
     p_blast.add_argument("--max_target_seqs", type=int, default=5, help="How many DB hits to retain per query (passed to BLAST")
-    
+    p_blast.add_argument("--log-missing", metavar="PATH", help="Append sample IDs that yield zero hits to this file for review.")
+
+
     # -- TSV Merge Sub command --- 
     p_merge = sp.add_parser("merge-hits", help="Concatenate many BLAST TSV files into one large TSV")
     p_merge.add_argument("-i", "--input", nargs="+", required=True, metavar="TSV", help="Either a list of *.tsv or a single glob/dir (use shell-globs yay lol)", 
@@ -203,7 +205,8 @@ def main() -> None:
                 qcov=args.qcov,
                 max_target_seqs = args.max_target_seqs, 
                 threads=args.threads,
-                on_progress=lambda p: bar.update(p - bar.n), 
+                on_progress=lambda p: bar.update(p - bar.n),
+                log_missing=pathlib.Path(args.log_missing) if args.log_missing else None, 
             )
 
     elif args.cmd == "merge-hits":
