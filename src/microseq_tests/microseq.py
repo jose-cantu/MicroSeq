@@ -264,7 +264,7 @@ def main() -> None:
             subprocess.check_call(
                     ["biom", "convert",
                      "-i", out_biom, "-o", json_out,
-                     "--to-json", "--pretty"])
+                     "--to-json"])
             print(f" ✓ JSON : {json_out}") 
             
 

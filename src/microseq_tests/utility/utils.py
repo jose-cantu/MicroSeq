@@ -1,26 +1,71 @@
+# ---- src/microseq_tests/utility/utils.py --------------------- 
 from __future__ import annotations 
-import yaml 
-import os
+import yaml, logging, os, sys, datetime  
 from pathlib import Path 
-import logging, datetime 
-import sys
-from logging.handlers import RotatingFileHandler 
+from logging.handlers import RotatingFileHandler
+import importlib.resources as pkg_resources 
 
-ROOT = Path(__file__).resolve().parents[3]  # repo root (think going 3 steps back here ../../.. until it sees top level of repo =) )  
+# default log directory (can be overwritten via function arg - keep that in mind)
+def _find_repo_root(start: Path | None = None) -> Path: 
+    """
+    Climb parents until we hit a file that marks the top of the project (which in this case its pyproject.toml, or .git). Fallback: 
+LOG_ROOT = ROOT/ "logs" # repo-local fallback option the package root inside site-packages. 
+    """
+    here = start or Path(__file__).resolve()
+    for parent in [here, *here.parents]:
+        if (parent / "pyproject.toml").exists() \
+                or (parent / "setup.cfg").exists() \
+                or (parent / ".git").exists():
+                    return parent 
+    # installed wheel -> use the package root on site-packages 
+    return pkg_resources.files("microseq_tests").resolve () 
+
+def expand_db_path(template: str) -> str:
+    """
+    Replace ${MICROSEQ_DB_HOME} in template with the environment variable. 
+    If set, otherwise with the value stored in config/config.yaml, 
+    If not then it defaults to ~/.microseq_dbs 
+    """
+    db_home = os.getenv("MICROSEQ_DB_HOME")
+    if not db_home:
+        cfg = load_config() 
+        db_home = cfg.get("microseq_db_home") or "~/.microseq_dbs" 
+    return template.replace("${MICROSEQ_DB_HOME}", os.path.expanduser(db_home)) 
+
+def set_module_level(module_name: str, level: int) -> None: 
+    """
+    Change verbosity of one sub-logger at runtime. 
+
+    Example
+    ______
+    from microseq_tests.utility.utils import set_module_level 
+    >>>> set_module_level("microseq_tests.blast", logging.ERROR)
+    """
+    logging.getLogger(module_name).setLevel(level) 
+
+
 CONF_PATH = ROOT / "config" / "config.yaml"
 def load_config(config_path: str | Path = CONF_PATH):
     config_path = Path(config_path)
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
 
-# default log directory (can be overwritten via function arg - keep that in mind) 
-LOG_ROOT = ROOT/ "logs" 
 
-
-def setup_logging(log_dir: str | Path = LOG_ROOT, log_file_prefix: str ="microseq", 
-                  *, level: int | None = None, max_bytes: int = 20_000_000, backup_count: int = 3, console: bool = True, force: bool = False,) -> Path:
+def setup_logging(*, level: int | None = None, console: bool = True, force: bool = False, rotate_mb: int | None = None,) -> Path:
     """
+    If $MICROSEQ_LOG_FILE is set -> use that exact path I recommend you do. 
+    Else if $MICROSEQ_LOG_DIR is set instead -> microseq.log in that folder.
+    Otherwise ./log/microseq.log inside the repo.. 
+    
+    If the chose file already exists, rename it to:
+        microseq.log<YYYYMMDD-HHMMSS>  (rolls-on-startup). 
+
+    If rotate_mb is provided, also adds a RotatingFileHandler that rolls every 1.5 MB (maxBytes = rotate_mb * 1 048 576,
+                                                                                     backupCount = 5). 
+
+
        Configure a timestamped file + console logger.
+       rotate_mb: int None = None so None was used to emulate Nextflow style logging here. 
 
     Parameters
     log_dir : str | pathlib.Path
@@ -39,52 +84,57 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, log_file_prefix: str ="microse
         Reinstall handlers even if logging was already configured
        (useful inside pytest).
     """
+    # ----- pick a destination path --------------------------------------
+    explicit = os.getenv("MICROSEQ_LOG_FILE")
+    if explicit:
+        logfile = Path(explicit).expanduser() 
 
-    Path(log_dir).mkdir(exist_ok=True)
-    # allow MICROSEQ_LOG_DIR to override fefault 
-    log_dir = Path(
-            os.environ.get("MICROSEQ_LOG_DIR", log_dir)
-    ).expanduser()
-    log_dir.mkdir(exist_ok=True)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_path = Path(log_dir) / f"{log_file_prefix}_{timestamp}.log" 
+    else: 
+        log_dir = Path(os.getenv("MICROSEQ_LOG_DIR", LOG_ROOT)).expanduser()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        logfile = log_dir / "microseq.log" 
 
-    root = logging.getLogger() # guarding against double-installation 
+
+    # ------- roll previous run a la Nextflow! --------------------- 
+    if logfile.exists():
+        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        logfile.rename(logfile.with_suffix(f".log.{ts}"))
+
+    logfile.parent.mkdir(parents=True, exist_ok=True) 
+
+    # --- guard against re-init ----------
+    root = logging.getLogger() 
     if root.handlers and not force:
-        return 
-    
-    root.handlers.clear()
-    root.setLevel(level or logging.INFO)# this is default if caller omitted so take note 
-    
-    fmt = logging.Formatter("%(asctime)s  %(levelname)-7s  %(name)s:  %(message)s")
+        return logfile 
 
-    fh = RotatingFileHandler(
-            file_path,
-            maxBytes=max_bytes,
-            backupCount=backup_count,
+    root.handlers.clear() 
+    root.setLevel(level or logging.INFO) 
+
+    fmt = logging.Formatter(
+            "%(asctime)s  %(levelname)-7s  %(name)s:  %(message)s"
             )
+
+    # always have a primary FileHandler (overwrite mode) 
+    fh = logging.FileHandler(logfile, mode="w")
     fh.setFormatter(fmt)
     root.addHandler(fh) 
 
-    if console:  # console handler 
+    # size based rotation (keeps .log, .log.1, etc.) 
+    if rotate_mb:
+        rotate = RotatingFileHandler(
+                logfile, maxBytes=rotate_mb * 1024 * 1024, backupCount=3
+                )
+        rotate.setFormatter(fmt)
+        root.addHandler(rotate) 
+
+    if console:
         ch = logging.StreamHandler(sys.stderr)
         ch.setFormatter(fmt)
         root.addHandler(ch) 
 
+    root.info("Logging to %s", logfile)
+    return logfile  
+     
 
-    root.info("Logging to %s", file_path)
-    return file_path 
 
-def expand_db_path(template: str) -> str:
-    db_home = os.environ.get("MICROSEQ_DB_HOME", os.path.expanduser("~/.microseq_dbs"))
-    return template.replace("${MICROSEQ_DB_HOME}", db_home)
 
-def set_module_level(module_name: str, level: int) -> None: 
-    """
-    Change verbosity of one sub-logger at runtime. 
-
-    Example
-    ______ 
-    >>>> set_module_level("microseq_tests.blast", logging.ERROR)
-    """
-    logging.getLogger(module_name).setLevel(level) 
