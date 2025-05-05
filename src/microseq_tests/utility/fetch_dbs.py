@@ -170,8 +170,7 @@ export MICROSEQ_LOG_DIR="{log_dir}"
     cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
     log(f"✓ config.yaml updated at {cfg_path}")
 
-    print("\nDone! Open a **new** shell (or `source ~/.bashrc`) and test:")
-    print("   microseq blast -i example.fasta -d gg2 -o hits.tsv\n")
+    print("\nDone! Open a new shell (or `source ~/.bashrc`) and test it using the smoke test I have setup in github install:")
 
 if __name__ == "__main__":
     main()
