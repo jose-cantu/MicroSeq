@@ -52,7 +52,7 @@ db_root = Path(
 ).resolve()
 
 log_dir = Path(
-    args.log_dir or DEFAULT_LOG
+        args.log_dir or ask("Where should logs be stored?", str(DEFAULT_LOG)) 
 ).resolve()
 
 db_root.mkdir(parents=True, exist_ok=True)

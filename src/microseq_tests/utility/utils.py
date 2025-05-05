@@ -11,14 +11,16 @@ def _find_repo_root(start: Path | None = None) -> Path:
     Climb parents until we hit a file that marks the top of the project (which in this case its pyproject.toml, or .git). Fallback: 
 LOG_ROOT = ROOT/ "logs" # repo-local fallback option the package root inside site-packages. 
     """
-    here = start or Path(__file__).resolve()
-    for parent in [here, *here.parents]:
-        if (parent / "pyproject.toml").exists() \
-                or (parent / "setup.cfg").exists() \
-                or (parent / ".git").exists():
-                    return parent 
-    # installed wheel -> use the package root on site-packages 
-    return pkg_resources.files("microseq_tests").resolve () 
+    here = start or Path(__file__).resolve() 
+    for p in [here, *here.parents]:
+        if (p / "pyproject.toml").exists() or (p / ".git").exists():
+            return p 
+
+    # inside a wheel / site-packages 
+    return Path(__file__).resolve().parents[1] # microseq_tests 
+
+ROOT = _find_repo_root()
+LOG_ROOT = ROOT / "logs" 
 
 def expand_db_path(template: str) -> str:
     """
