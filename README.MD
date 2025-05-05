@@ -20,8 +20,12 @@ conda activate MicroSeq
 
 # 3 Install & download databases 
 pip install -e .  # This sets the current version of MicroSeq 
-microseq-setup    # downloads 16S Databases GG2, SILVA, NCBI16S, updates ~/.bashrc ~3GB of space, one-off; can use --quiet to skip prompts (default then) or --db-root or --log-dir to specify where you want the DBs to be stored instead of default (~/.microseq_dbs) or the logs to be stored instead of default (microseq_tests/logs)  
-source ~/.bashrc  # reloads BLASTDB exports (or you can open a new shell next time?) 
+microseq-setup    # prompts for DB + log locations 
+## - add --quiet to skip prompts and it will set it up via defaults 
+## - add --db-root /path/dbs to override default ~/.microseq_dbs 
+## - add --log-dir /path/logs to override default microseq_tests/logs 
+
+source ~/.bashrc  # reloads new exports (or you can open a new shell next time?) 
 
 # Sanity check you can run to make sure databses work with blasting  
 
@@ -41,6 +45,15 @@ Executable from your $PATH you can use from MicroSeq (they come from 'pyproject.
 `microseq-gui` - launches the GUI thats underdevelopment 
 
 `microseq-setup` - one-off helper that downloads reference database 
+Note: `microseq-setup` does 4 jobs here::
+First it downloads and indexes GG2, SILVA, and NCBI16S into $MICROSEQ_DB_HOME (default is ~/.microseq_dbs)
+2nd it creates the log folder if path is specified (default is microseq_tests/logs) otherwise. 
+3rd it appends the needed export block I made to ~/.bashrc or ~/.zshrc or inside the MicroSeq conda env `$CONDA_PREFIX/etc/conda/activate.d/microseq.sh`.
+This guarantess that `conda activate MicroSeq` picks up and sets the vars made. 
+Finally 4th it writes config/config.yaml so the libary code can fall back on the same path if exports are missing. 
+`source ~/.bashrc` is only required in the very first interactive shell so you inherit the exports I made without logging out. The next login or new terminal they are already present and ready to go. The `--quiet` flag is used if you want to run the whole thing non-interactively. 
+
+
 `microseq-fix-tsv` - utlitity that normalises BLAST tables so they can be parsed through post blast sub command =) 
 
 ## Key features
