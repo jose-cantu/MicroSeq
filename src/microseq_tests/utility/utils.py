@@ -53,7 +53,7 @@ def load_config(config_path: str | Path = CONF_PATH):
         return yaml.safe_load(f)
 
 
-def setup_logging(*, level: int | None = None, console: bool = True, force: bool = False, rotate_mb: int | None = None,) -> Path:
+def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, console: bool = True, force: bool = False, rotate_mb: int | None = None,) -> Path:
     """
     If $MICROSEQ_LOG_FILE is set -> use that exact path I recommend you do. 
     Else if $MICROSEQ_LOG_DIR is set instead -> microseq.log in that folder.
@@ -87,15 +87,15 @@ def setup_logging(*, level: int | None = None, console: bool = True, force: bool
        (useful inside pytest).
     """
     # ----- pick a destination path --------------------------------------
-    explicit = os.getenv("MICROSEQ_LOG_FILE")
+    explicit = os.getenv("MICROSEQ_LOG_FILE") # this is designed to make sure explicity file always wins but can be overwritten 
     if explicit:
         logfile = Path(explicit).expanduser() 
 
-    else: 
-        log_dir = Path(os.getenv("MICROSEQ_LOG_DIR", LOG_ROOT)).expanduser()
-        log_dir.mkdir(parents=True, exist_ok=True)
-        logfile = log_dir / "microseq.log" 
-
+    # env-var directory next here 
+    else:
+        root_dir = Path(os.getenv("MICROSEQ_LOG_DIR", log_dir)).expanduser() 
+        root_dir.mkdir(parents=True, exist_ok=True)
+        logfile = root_dir / "microseq.log" 
 
     # ------- roll previous run a la Nextflow! --------------------- 
     if logfile.exists():

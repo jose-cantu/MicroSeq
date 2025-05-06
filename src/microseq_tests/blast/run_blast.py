@@ -4,8 +4,9 @@ import logging, os, subprocess
 from pathlib import Path 
 from typing import Optional, Callable 
 from Bio import SeqIO 
+from microseq_tests.utility.utils import load_config, expand_db_path
+from microseq_tests.utility.progress import _tls # access to parent progress bar 
 
-from microseq_tests.utility.utils import load_config, expand_db_path 
 
 L = logging.getLogger(__name__) 
 PathLike = str | Path 
@@ -114,7 +115,13 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
         raise RuntimeError(f"blastn exited with code {rc}") 
 
     if on_progress:
-        on_progress(100) # final tick in progress bar 
+        on_progress(100) # final tick in progress bar GUI/tqdm callback 
+
+    # ---- tic outer stage bar exactly once --------------------
+    parent = getattr(_tls, "current", None)
+    if parent:
+        parent.update(1) 
+
     L.info("BLAST finished OK -> %s", out_tsv)
 
     # optional no hit logging setup ------------------ 

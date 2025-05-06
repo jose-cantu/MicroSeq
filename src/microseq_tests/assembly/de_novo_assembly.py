@@ -1,4 +1,6 @@
 """
+microseq_tests/src/microseq_tests/assembly/de_novo_assembly.py 
+
 de_novo_assembly.py
 
 Wraps CAP3 for simple single-file assemblies. 

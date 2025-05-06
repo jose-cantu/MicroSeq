@@ -1,6 +1,6 @@
 # src/microseq_tests/microseq.py
 from __future__ import annotations
-from tqdm.auto import tqdm 
+from microseq_tests.utility.progress import stage_bar, _tls  
 import argparse, pathlib, logging, shutil, glob, sys, subprocess     
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
@@ -16,7 +16,8 @@ from microseq_tests.utility.add_taxonomy import run_taxonomy_join
 from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq 
 from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta
 from Bio import SeqIO 
-from functools import partial 
+from functools import partial
+from microseq_tests.utility.merge_hits import merge_hits as merged_hits 
 
 
 
@@ -194,9 +195,11 @@ def main() -> None:
 
     elif args.cmd == "blast":
         total = sum(1 for _ in SeqIO.parse(args.input, "fasta"))
-        if total == 0:
+        if total == 0:          # fallback for FASTQ 
             total = sum(1 for _ in SeqIO.parse(args.input, "fastq"))
-        with tqdm(total=total, unit="seq") as bar: 
+
+        # treat this as one monolithic bar for all isolates/samples in one run 
+        with stage_bar(total, desc="blast", unit="seq"):
             run_blast(
                 pathlib.Path(args.input),  # temporary patch for blasting and post biom only will need to think around 
                 args.db,
@@ -205,37 +208,15 @@ def main() -> None:
                 qcov=args.qcov,
                 max_target_seqs = args.max_target_seqs, 
                 threads=args.threads,
-                on_progress=lambda p: bar.update(p - bar.n),
+                # I removed the on_progress var here since the nested helper updates parent bar via thread-local _tls 
                 log_missing=pathlib.Path(args.log_missing) if args.log_missing else None, 
             )
 
     elif args.cmd == "merge-hits":
         # resolve globs after argparse to keep it cross-platform functional 
-        
-        paths = [] 
-        for spec in args.input:
-            g = glob.glob(spec) 
-            paths.extend(g if g else [spec]) # keep literal no match 
-        
-        if not paths: 
-            logging.error("No TSV files matched")
-            sys.exit(1) 
-
-        out = pathlib.Path(args.output).expanduser().resolve()
-        out.parent.mkdir(parents=True, exist_ok=True) 
-
-        logging.info("Merging %d RSV -> %s", len(paths), out) 
-        with out.open("w") as w:
-            for i, p in enumerate(paths):
-                with open(p) as r:
-                    for line in r:
-                        # keep header (# ...) only from the 1st file 
-                        if i and line.startswith("#"):
-                            continue 
-                        w.write(line) 
-
-
-        print("✓ merged →", out) 
+        from microseq_tests.utility.merge_hits import merge_hits 
+        merged = merge_hits(args.input, args.output) 
+        print("✓ merged →", merged) 
 
 
     elif args.cmd == "postblast":

@@ -1,0 +1,5 @@
+2025-05-06 13:58:35,278  INFO     root:  Logging to /Users/josecantu/microseq_tests/logs/microseq.log
+2025-05-06 13:58:35,285  INFO     microseq_tests.post_blast_analysis:  Loaded hits_tax.tsv as explicit TSV rows=250
+2025-05-06 13:58:35,293  INFO     microseq_tests.post_blast_analysis:  Loaded meta.tsv as explicit TSV rows=5
+2025-05-06 13:58:35,335  INFO     microseq_tests.post_blast_analysis:  Wrote /private/var/folders/3j/xb8vjkbd4vgcqx940q7q55q80000gn/T/pytest-of-josecantu/pytest-5/test_postblast_pipeline0/profile.biom (shape (2, 4))
+2025-05-06 13:58:35,349  INFO     microseq_tests.post_blast_analysis:  Wrote /private/var/folders/3j/xb8vjkbd4vgcqx940q7q55q80000gn/T/pytest-of-josecantu/pytest-5/test_postblast_pipeline0/profile.csv

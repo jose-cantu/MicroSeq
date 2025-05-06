@@ -7,6 +7,8 @@ from typing import List, Optional
 from Bio import SeqIO                         
 import logging, shutil
 
+from microseq_tests.utility.progress import stage_bar 
+
 # ----------------------------------------------------------------------
 # Single‑read sliding‑window trim
 # ----------------------------------------------------------------------
@@ -54,11 +56,11 @@ def trim_folder(
     """
     For every *.fastq in input_dir ....
 
-    • keep reads whose sliding‑window core avg Q ≥ per_base_q
-    • write per‑read stats to *_avg_qual.txt
-    • if file avg Q ≥ file_q_threshold  → trimmed FASTQ in passed_qc_fastq/
-      else                                  move FASTQ to failed_qc_fastq/
-    • append one summary row to *combined_tsv* (if provided)
+    keep reads whose sliding‑window core avg Q ≥ per_base_q
+    write per‑read stats to *_avg_qual.txt
+    if file avg Q ≥ file_q_threshold  → trimmed FASTQ in passed_qc_fastq/
+      else move FASTQ to failed_qc_fastq/
+    append one summary row to combined_tsv (if provided)
     """
     input_dir  = Path(input_dir)
     output_dir = Path(output_dir)
@@ -72,46 +74,51 @@ def trim_folder(
         comb = open(combined_tsv, "a")
         if comb.tell() == 0:
             comb.write("file\treads\tavg_len\tavg_q\n")
+    
+    fastqs = list(input_dir.glob("*.fastq")) 
+    # --------------------Single outer bar for this folder ------------------------
+    with stage_bar(len(fastqs), desc="trim", unit="file") as bar:
+        for fq in fastqs:
+            base = fq.stem
+            stats_path   = output_dir / f"{base}_avg_qual.txt"
+            trimmed_path = passed_dir / f"{base}_trimmed.fastq"
 
-    # ------------------------------------------------------------------
-    for fq in input_dir.glob("*.fastq"):
-        base = fq.stem
-        stats_path   = output_dir / f"{base}_avg_qual.txt"
-        trimmed_path = passed_dir / f"{base}_trimmed.fastq"
+            reads = bases = qsum = 0
+            trimmed_recs = []
 
-        reads = bases = qsum = 0
-        trimmed_recs = []
+            for rec in SeqIO.parse(fq, "fastq"):
+                trimmed = dynamic_trim(rec, window_size, per_base_q)
+                if not trimmed:
+                    continue
+                ph = trimmed.letter_annotations["phred_quality"]
+                reads += 1
+                bases += len(trimmed)
+                qsum  += sum(ph)
+                trimmed_recs.append(trimmed)
 
-        for rec in SeqIO.parse(fq, "fastq"):
-            trimmed = dynamic_trim(rec, window_size, per_base_q)
-            if not trimmed:
-                continue
-            ph = trimmed.letter_annotations["phred_quality"]
-            reads += 1
-            bases += len(trimmed)
-            qsum  += sum(ph)
-            trimmed_recs.append(trimmed)
+            # avg per file on kept bases
+            avg_q   = qsum  / bases if bases else 0
+            avg_len = bases / reads if reads else 0
 
-        # avg per file on kept bases
-        avg_q   = qsum  / bases if bases else 0
-        avg_len = bases / reads if reads else 0
+            # -- save per‑read stats --------------------------------------
+            with open(stats_path, "w") as fh:
+                for r in trimmed_recs:
+                    ph = r.letter_annotations["phred_quality"]
+                    fh.write(f"{r.id}\t{len(r)}\t{sum(ph)/len(ph):.2f}\n")
 
-        # -- save per‑read stats --------------------------------------
-        with open(stats_path, "w") as fh:
-            for r in trimmed_recs:
-                ph = r.letter_annotations["phred_quality"]
-                fh.write(f"{r.id}\t{len(r)}\t{sum(ph)/len(ph):.2f}\n")
+            # -- pass / fail ----------------------------------------------
+            if avg_q < file_q_threshold:
+                (failed_dir / fq.name).write_bytes(fq.read_bytes())
+                (failed_dir / stats_path.name).write_bytes(stats_path.read_bytes())
+                L.info("[FAIL] %s  (avgQ %.2f)", fq.name, avg_q)
+            else:
+                SeqIO.write(trimmed_recs, trimmed_path, "fastq")
+                L.info("[PASS] %s → %s (avgQ %.2f)", fq.name, trimmed_path, avg_q)
+                if comb:
+                    comb.write(f"{fq.name}\t{reads}\t{avg_len:.1f}\t{avg_q:.2f}\n")
 
-        # -- pass / fail ----------------------------------------------
-        if avg_q < file_q_threshold:
-            (failed_dir / fq.name).write_bytes(fq.read_bytes())
-            (failed_dir / stats_path.name).write_bytes(stats_path.read_bytes())
-            L.info("[FAIL] %s  (avgQ %.2f)", fq.name, avg_q)
-        else:
-            SeqIO.write(trimmed_recs, trimmed_path, "fastq")
-            L.info("[PASS] %s → %s (avgQ %.2f)", fq.name, trimmed_path, avg_q)
-            if comb:
-                comb.write(f"{fq.name}\t{reads}\t{avg_len:.1f}\t{avg_q:.2f}\n")
+            # tick parent bar once per FASTQ 
+            bar.update(1)  
 
     if comb:
         comb.close()
