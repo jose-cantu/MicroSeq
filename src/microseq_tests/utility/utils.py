@@ -53,7 +53,7 @@ def load_config(config_path: str | Path = CONF_PATH):
         return yaml.safe_load(f)
 
 
-def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, console: bool = True, force: bool = False, rotate_mb: int | None = None,) -> Path:
+def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, console: bool = True, force: bool = False, rotate_mb: int | None = None, log_file_prefix: str = "microseq", max_bytes: int | None = None, backup_count: int = 3) -> Path:
     """
     If $MICROSEQ_LOG_FILE is set -> use that exact path I recommend you do. 
     Else if $MICROSEQ_LOG_DIR is set instead -> microseq.log in that folder.
@@ -86,7 +86,11 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, c
         Reinstall handlers even if logging was already configured
        (useful inside pytest).
     """
-    # ----- pick a destination path --------------------------------------
+    # tranlates the legacy kwargs to current behavior I have it designed for ----
+    if max_bytes and rotate_mb is None: 
+        rotate_mb = max_bytes // (1024 * 1024) or 1 
+
+   # ----- pick a destination path --------------------------------------
     explicit = os.getenv("MICROSEQ_LOG_FILE") # this is designed to make sure explicity file always wins but can be overwritten 
     if explicit:
         logfile = Path(explicit).expanduser() 
@@ -95,7 +99,7 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, c
     else:
         root_dir = Path(os.getenv("MICROSEQ_LOG_DIR", log_dir)).expanduser() 
         root_dir.mkdir(parents=True, exist_ok=True)
-        logfile = root_dir / "microseq.log" 
+        logfile = root_dir / f"{log_file_prefix}.log" 
 
     # ------- roll previous run a la Nextflow! --------------------- 
     if logfile.exists():
@@ -104,7 +108,7 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, c
 
     logfile.parent.mkdir(parents=True, exist_ok=True) 
 
-    # --- guard against re-init ----------
+    # --- guard against re-init configuring root logger ----------
     root = logging.getLogger() 
     if root.handlers and not force:
         return logfile 
@@ -116,19 +120,17 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, c
             "%(asctime)s  %(levelname)-7s  %(name)s:  %(message)s"
             )
 
-    # always have a primary FileHandler (overwrite mode) 
-    fh = logging.FileHandler(logfile, mode="w")
-    fh.setFormatter(fmt)
-    root.addHandler(fh) 
-
+    # always have a primary FileHandler (overwrite mode) or RotatingFileHandler 
     # size based rotation (keeps .log, .log.1, etc.) 
-    if rotate_mb:
-        rotate = RotatingFileHandler(
-                logfile, maxBytes=rotate_mb * 1024 * 1024, backupCount=3
+    if rotate_mb and rotate_mb > 0: 
+        handler = RotatingFileHandler(
+                logfile, maxBytes=rotate_mb * 1024 * 1024, backupCount=backup_count
                 )
-        rotate.setFormatter(fmt)
-        root.addHandler(rotate) 
-
+    else:
+        handler = logging.FileHandler(logfile, mode="w")
+    handler.setFormatter(fmt)
+    root.addHandler(handler) 
+    
     if console:
         ch = logging.StreamHandler(sys.stderr)
         ch.setFormatter(fmt)

@@ -7,8 +7,7 @@ from typing import List, Optional
 from Bio import SeqIO                         
 import logging, shutil
 
-from microseq_tests.utility.progress import stage_bar 
-
+from microseq_tests.utility.progress import stage_bar  
 # ----------------------------------------------------------------------
 # Single‑read sliding‑window trim
 # ----------------------------------------------------------------------

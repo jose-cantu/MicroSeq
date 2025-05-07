@@ -1,7 +1,8 @@
 # src/microseq_tests/microseq.py
 from __future__ import annotations
-from microseq_tests.utility.progress import stage_bar, _tls  
-import argparse, pathlib, logging, shutil, glob, sys, subprocess     
+import argparse, pathlib, logging, shutil, glob, sys, subprocess   
+from microseq_tests.utility.progress import stage_bar 
+from microseq_tests.utility.merge_hits import merge_hits 
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
 from microseq_tests.pipeline import (
@@ -214,8 +215,9 @@ def main() -> None:
 
     elif args.cmd == "merge-hits":
         # resolve globs after argparse to keep it cross-platform functional 
-        from microseq_tests.utility.merge_hits import merge_hits 
-        merged = merge_hits(args.input, args.output) 
+        from microseq_tests.utility.merge_hits import merge_hits  
+
+        merged = merge_hits(args.input, args.output) # progress bar & logging  
         print("✓ merged →", merged) 
 
 
