@@ -58,7 +58,13 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
 
     Path(out_tsv).parent.mkdir(parents=True, exist_ok=True)
 
-    outfmt = "6 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle"
+
+    # honour YAML if present, fall back to a sensible default 
+    outfmt = cfg.get("blast", {}).get(
+            "outfmt",
+            "7 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle",
+            ) 
+
     cmd=["blastn",
          "-task", "blastn", # why not? 
          "-query", str(q),   # casting q to str before passing to subprocess 
