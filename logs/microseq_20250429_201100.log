@@ -1,4 +1,0 @@
-2025-04-29 20:11:00,214  INFO     root:  Logging to /home/jason/microseq_tests/logs/microseq_20250429_201100.log
-2025-04-29 20:11:00,246  INFO     microseq_tests.blast.run_blast:  RUN BLAST:blastn -task blastn -query /tmp/pytest-of-jason/pytest-3/test_default_workdir0/demo.fasta -db greengenes2_db -max_target_seqs 1 -perc_identity 50.0 -qcov_hsp_perc 10.0 -out /tmp/pytest-of-jason/pytest-3/test_default_workdir0/hits.tsv -outfmt 6 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle -num_threads 1
-2025-04-29 20:11:00,424  INFO     microseq_tests.blast.run_blast:  Progress 100 %
-2025-04-29 20:11:00,602  INFO     microseq_tests.blast.run_blast:  BLAST finished OK -> /tmp/pytest-of-jason/pytest-3/test_default_workdir0/hits.tsv

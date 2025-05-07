@@ -113,7 +113,7 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, c
 
 
     # ------- roll previous run a la Nextflow! --------------------- 
-    if log_file_prefix == "microseq" and logfile.exists():
+    if rotate_mb is None and log_file_prefix == "microseq" and logfile.exists():
         ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         logfile.rename(logfile.with_suffix(f".log.{ts}")) 
 

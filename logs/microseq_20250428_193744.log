@@ -1,4 +1,0 @@
-2025-04-28 19:37:44,669 INFO: Logging to logs/microseq_20250428_193744.log
-2025-04-28 19:37:44,692 INFO: AB1→FASTQ wrote 4 files to tmp_fastq
-2025-04-28 19:37:44,693 INFO: FASTQ→FASTA wrote merged.fasta
-2025-04-28 19:37:44,694 INFO: RUN BLAST:blastn -task blastn -query merged.fasta -db greengenes2_db -max_target_seqs 5 -perc_identity 97.0 -qcov_hsp_perc 80.0 -out merged.hits.tsv -outfmt 6 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle -num_threads 1

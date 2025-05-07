@@ -1,5 +1,0 @@
-2025-05-06 18:29:52,633  INFO     root:  Logging to /home/jason/microseq_tests/logs/microseq.log
-2025-05-06 18:29:52,650  INFO     microseq_tests.trimming.biopy_trim:  [PASS] 39764266.fastq → /tmp/pytest-of-jason/pytest-0/test_ab1_trim_to_fasta0/run_667f58981dee464e8d83b58fcd1fb9a6/passed_qc_fastq/39764266_trimmed.fastq (avgQ 46.67)
-2025-05-06 18:29:52,650  INFO     microseq_tests.trimming.biopy_trim:  [PASS] 39764278.fastq → /tmp/pytest-of-jason/pytest-0/test_ab1_trim_to_fasta0/run_667f58981dee464e8d83b58fcd1fb9a6/passed_qc_fastq/39764278_trimmed.fastq (avgQ 54.90)
-2025-05-06 18:29:52,650  INFO     microseq_tests.trimming.biopy_trim:  [PASS] 39764260.fastq → /tmp/pytest-of-jason/pytest-0/test_ab1_trim_to_fasta0/run_667f58981dee464e8d83b58fcd1fb9a6/passed_qc_fastq/39764260_trimmed.fastq (avgQ 52.11)
-2025-05-06 18:29:52,651  INFO     microseq_tests.trimming.biopy_trim:  [PASS] 39764269.fastq → /tmp/pytest-of-jason/pytest-0/test_ab1_trim_to_fasta0/run_667f58981dee464e8d83b58fcd1fb9a6/passed_qc_fastq/39764269_trimmed.fastq (avgQ 55.43)

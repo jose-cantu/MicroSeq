@@ -1,5 +1,0 @@
-2025-04-29 20:11:24,105  INFO     root:  Logging to /home/jason/microseq_tests/logs/microseq_20250429_201124.log
-2025-04-29 20:11:24,114  INFO     microseq_tests.post_blast_analysis:  Loaded hits_tax.tsv as explicit TSV rows=250
-2025-04-29 20:11:24,117  INFO     microseq_tests.post_blast_analysis:  Loaded meta.tsv as explicit TSV rows=5
-2025-04-29 20:11:24,135  INFO     microseq_tests.post_blast_analysis:  Wrote /tmp/pytest-of-jason/pytest-3/test_postblast_pipeline0/profile.biom (shape (2, 4))
-2025-04-29 20:11:24,137  INFO     microseq_tests.post_blast_analysis:  Wrote /tmp/pytest-of-jason/pytest-3/test_postblast_pipeline0/profile.csv

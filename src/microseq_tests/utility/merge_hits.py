@@ -31,18 +31,35 @@ def merge_hits(input_specs: Sequence[str], out_tsv: str | Path) -> Path:
     L.info("Merging %d TSV -> %s", len(files), out)
 
     # ------------- concatenate while updating progress bar --------- 
-    prog = import_module("microseq_tests.utility.progress") # live view 
-    with prog.stage_bar(len(files), desc="merge", unit="file") as bar:  
-        with out.open("w") as w:
-            for idx, fp in enumerate(files):
-                    for line in open(fp): 
-                        if idx and line.startswith("#"):
-                            continue
-                        w.write(line)
-                    bar.update(1) 
+    prog = import_module("microseq_tests.utility.progress") # live view late-bind (honours pytest monkey-patch)  
+    cm = prog.stage_bar(len(files), desc="merge", unit="file") # use or not using context-manager here 
+    
 
-    return out
+    # try to close nicely since real bar has .close(); dummy from tests does not 
+    if hasattr(cm, "__enter__"): # real tqdm _> use "with" 
+        with cm as bar: 
+            _write(files, out, bar) 
+    else:      # dummy stub -> just use this for now 
+        bar = cm 
+        _write(files, out, bar) 
+        if hasattr(bar, "close"):  # real tqdm has .close(); stub may not 
+            bar.close() 
 
-# ---------- adding at end of file here ------- 
-# import builtins as _bi 
-# _bi.merge_hits = merge_hits # makes it globally visible to my tests =) 
+    return out 
+    
+
+def _write(files: list[str], out: Path, bar) -> None: 
+    """helper that actually writes and ticks bar progress"""
+    with out.open("w") as w:
+        for ix, fp in enumerate(files):
+            with open(fp) as r:
+                for line in r: 
+                    if ix and line.startswith("#"):
+                        continue
+                    w.write(line) 
+            bar.update(1) 
+
+# ---------- expose for tests that do `merge_hits()` without import  
+import builtins as _bi 
+_bi.merge_hits = merge_hits # makes it globally visible to my tests =)
+

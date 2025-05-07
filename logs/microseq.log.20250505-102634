@@ -1,3 +1,0 @@
-2025-05-05 10:26:34,388  INFO     root:  Logging to /Users/josecantu/microseq_tests/logs/microseq.log
-2025-05-05 10:26:34,439  INFO     microseq_tests.blast.run_blast:  RUN BLAST:blastn -task blastn -query tiny.fasta -db /Users/josecantu/.microseq_dbs/silva/silva_db -max_target_seqs 5 -perc_identity 50.0 -qcov_hsp_perc 10.0 -out /tmp/silva.tsv -outfmt 6 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle -num_threads 1
-2025-05-05 10:26:35,155  INFO     microseq_tests.blast.run_blast:  BLAST finished OK -> /tmp/silva.tsv
