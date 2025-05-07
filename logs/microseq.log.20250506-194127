@@ -1,0 +1,2 @@
+2025-05-06 19:41:27,957  INFO     root:  Logging to /home/jason/microseq_tests/logs/microseq.log
+2025-05-06 19:41:27,967  INFO     microseq_tests.trimming.biopy_trim:  [FAIL] trace1.fastq  (avgQ 0.00)

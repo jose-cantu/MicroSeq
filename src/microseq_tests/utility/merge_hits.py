@@ -4,8 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 import logging, glob
 from typing import Sequence  
-from .progress import stage_bar 
-
+from importlib import import_module 
 
 L = logging.getLogger(__name__)
 __all__ = ["merge_hits"] 
@@ -32,14 +31,18 @@ def merge_hits(input_specs: Sequence[str], out_tsv: str | Path) -> Path:
     L.info("Merging %d TSV -> %s", len(files), out)
 
     # ------------- concatenate while updating progress bar --------- 
-    with stage_bar(len(files), desc="merge", unit="file") as bar, \
-        out.open("w") as w:
-        for idx, fp in enumerate(files):
-            with open(fp) as r:     
-                for line in r: 
-                   if idx and line.startswith("#"):
-                        continue
-                   w.write(line)
-            bar.update(1) 
+    prog = import_module("microseq_tests.utility.progress") # live view 
+    with prog.stage_bar(len(files), desc="merge", unit="file") as bar:  
+        with out.open("w") as w:
+            for idx, fp in enumerate(files):
+                    for line in open(fp): 
+                        if idx and line.startswith("#"):
+                            continue
+                        w.write(line)
+                    bar.update(1) 
 
     return out
+
+# ---------- adding at end of file here ------- 
+# import builtins as _bi 
+# _bi.merge_hits = merge_hits # makes it globally visible to my tests =) 

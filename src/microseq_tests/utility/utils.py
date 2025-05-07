@@ -86,27 +86,38 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, c
         Reinstall handlers even if logging was already configured
        (useful inside pytest).
     """
-    # tranlates the legacy kwargs to current behavior I have it designed for ----
-    if max_bytes and rotate_mb is None: 
-        rotate_mb = max_bytes // (1024 * 1024) or 1 
-
+    # tranlates the legacy kwargs to current behavior I have it designed for rotate_mb ----
+    rotate_bytes: int | None = None 
+    if max_bytes is not None: # new tests use this 
+        rotate_bytes = int(max_bytes) # bytes as is 
+    elif rotate_mb is not None: 
+        rotate_bytes = int(rotate_mb * 1024 * 1024) 
+    
    # ----- pick a destination path --------------------------------------
     explicit = os.getenv("MICROSEQ_LOG_FILE") # this is designed to make sure explicity file always wins but can be overwritten 
     if explicit:
         logfile = Path(explicit).expanduser() 
+        root_dir = logfile.parent 
 
     # env-var directory next here 
     else:
         root_dir = Path(os.getenv("MICROSEQ_LOG_DIR", log_dir)).expanduser() 
         root_dir.mkdir(parents=True, exist_ok=True)
-        logfile = root_dir / f"{log_file_prefix}.log" 
+
+
+        if log_file_prefix == "microseq":
+            logfile = root_dir / "microseq.log" 
+        else:
+            ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            logfile = root_dir / f"{log_file_prefix}_{ts}.log"
+
 
     # ------- roll previous run a la Nextflow! --------------------- 
-    if logfile.exists():
+    if log_file_prefix == "microseq" and logfile.exists():
         ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        logfile.rename(logfile.with_suffix(f".log.{ts}"))
+        logfile.rename(logfile.with_suffix(f".log.{ts}")) 
 
-    logfile.parent.mkdir(parents=True, exist_ok=True) 
+
 
     # --- guard against re-init configuring root logger ----------
     root = logging.getLogger() 
@@ -120,11 +131,11 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, c
             "%(asctime)s  %(levelname)-7s  %(name)s:  %(message)s"
             )
 
-    # always have a primary FileHandler (overwrite mode) or RotatingFileHandler 
+    # one or other handler (tests expect a single file handler here)  
     # size based rotation (keeps .log, .log.1, etc.) 
-    if rotate_mb and rotate_mb > 0: 
+    if rotate_bytes:  
         handler = RotatingFileHandler(
-                logfile, maxBytes=rotate_mb * 1024 * 1024, backupCount=backup_count
+                logfile, maxBytes=rotate_bytes, backupCount=backup_count
                 )
     else:
         handler = logging.FileHandler(logfile, mode="w")

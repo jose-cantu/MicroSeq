@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import List, Optional
 from Bio import SeqIO                         
 import logging, shutil
+from importlib import import_module 
 
-from microseq_tests.utility.progress import stage_bar  
+
 # ----------------------------------------------------------------------
 # Single‑read sliding‑window trim
 # ----------------------------------------------------------------------
@@ -76,7 +77,8 @@ def trim_folder(
     
     fastqs = list(input_dir.glob("*.fastq")) 
     # --------------------Single outer bar for this folder ------------------------
-    with stage_bar(len(fastqs), desc="trim", unit="file") as bar:
+    prog = import_module("microseq_tests.utility.progress") 
+    with prog.stage_bar(len(fastqs), desc="trim", unit="file") as bar:
         for fq in fastqs:
             base = fq.stem
             stats_path   = output_dir / f"{base}_avg_qual.txt"
@@ -116,8 +118,6 @@ def trim_folder(
                 if comb:
                     comb.write(f"{fq.name}\t{reads}\t{avg_len:.1f}\t{avg_q:.2f}\n")
 
-            # tick parent bar once per FASTQ 
-            bar.update(1)  
 
     if comb:
         comb.close()
