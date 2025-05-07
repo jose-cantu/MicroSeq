@@ -12,7 +12,7 @@ from pathlib import Path
 import io, textwrap, pytest 
 
 # functions that are going to be tested 
-from microseq_tests.microseq import merged_hits 
+from microseq_tests.microseq import merge_hits 
 from microseq_tests.trimming.biopy_trim import trim_folder 
 import microseq_tests.utility.progress as pg 
 

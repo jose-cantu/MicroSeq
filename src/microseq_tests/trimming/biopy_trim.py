@@ -9,6 +9,13 @@ from importlib import import_module
 L = logging.getLogger(__name__)
 
 
+# ------- helper functions ----------------------
+def _tick_safe(bar, inc: int = 1) -> None: 
+    """ Calls bar.update(inc) only if bar exposes that attribute."""
+    if hasattr(bar, "update"):
+        bar.update(inc)  # safety guard 
+
+
 # ----------------------------------------------------------------------
 # Single‑read sliding‑window trim
 # ----------------------------------------------------------------------
@@ -57,6 +64,11 @@ def _trim_all(
     comb: Optional[open],
     bar,
 ) -> None:
+    """
+      Core loop: trims each FASTQ, writes per-read stats, dispatches files
+    to passed_dir / failed_dir, and updates the progress bar once
+    per input file.
+    """ 
     for fq in fastqs:
         base         = fq.stem
         stats_path   = stats_root / f"{base}_avg_qual.txt"
@@ -95,8 +107,7 @@ def _trim_all(
             if comb:
                 comb.write(f"{fq.name}\t{reads}\t{avg_len:.1f}\t{avg_q:.2f}\n")
                 
-        bar.update(1)
-        
+        _tick_safe(bar) # exactly one tick per FASTQ  
         
 # ────────────────────────────────────────────────────────────────────────
 # public folder-level driver
@@ -113,12 +124,16 @@ def trim_folder(
     **kwargs,
 ) -> None:
     """
-    Quality-trim all *.fastq in input_dir and write results underneath
-    output_dir (passed_qc_fastq/, failed_qc_fastq/, per-read stat files …).
-    
-    A single outer progress bar shows one tick per FASTQ file processed.
-    Works both in normal runs (real `tqdm`) and inside the test suite
-    (where `stage_bar` is replaced by a bare dummy object).
+    Quality-trim every *.fastq in input_dir and write results under
+    output_dir:
+
+      ├── passed_qc_fastq/
+      ├── failed_qc_fastq/
+      └── per-read stat files + combined TSV
+
+    A single outer progress bar ticks once per FASTQ.  Works both with
+    a real tqdm bar and with the dummy bar used by the test-suite’s
+    monkey-patch.
     """
     input_dir  = Path(input_dir)
     output_dir = Path(output_dir)
@@ -126,7 +141,8 @@ def trim_folder(
     failed_dir = output_dir.parent / "failed_qc_fastq"
     for p in (output_dir, passed_dir, failed_dir):
         p.mkdir(parents=True, exist_ok=True)
-        
+     
+     # combined summary 
     comb: Optional[open] = None
     if combined_tsv:
         comb = open(combined_tsv, "a")
@@ -137,11 +153,10 @@ def trim_folder(
     
     # late-bind progress helper so pytest can monkey-patch it
     prog = import_module("microseq_tests.utility.progress")
-    cm   = prog.stage_bar(len(fastqs), desc="trim", unit="file")
+    cm_or_gen   = prog.stage_bar(len(fastqs), desc="trim", unit="file")
     
-    if hasattr(cm, "__enter__"):
-        with cm as bar:
-            _trim_all(
+    def _run(bar):
+        _trim_all(
                 fastqs,
                 window_size=window_size,
                 per_base_q=per_base_q,
@@ -150,22 +165,22 @@ def trim_folder(
                 failed_dir=failed_dir,
                 stats_root=output_dir,
                 comb=comb,
-                bar=bar,
+                bar=bar,   # inside _trim_all still call bar.update 
             )
-    else:                                      # dummy bar in tests
-        bar = cm
-        _trim_all(
-            fastqs,
-            window_size=window_size,
-            per_base_q=per_base_q,
-            file_q_threshold=file_q_threshold,
-            passed_dir=passed_dir,
-            failed_dir=failed_dir,
-            stats_root=output_dir,
-            comb=comb,
-            bar=bar,
-        )
-        if hasattr(bar, "close"):
+    if hasattr(cm_or_gen, "__enter__"):  # proper-context manager 
+        with cm_or_gen as bar:
+            _run(bar) 
+
+    else:                        # generator or bare bar 
+        try:
+            bar = next(cm_or_gen) # unwrap generator 
+        except StopIteration:
+            bar = cm_or_gen 
+        _run(bar) 
+
+        if hasattr(cm_or_gen, "close"):
+            cm_or_gen.close() 
+        if hasattr(bar, "close") and bar is not cm_or_gen:
             bar.close()
             
     if comb:

@@ -1,0 +1,6 @@
+2025-05-07 13:36:47,765  INFO     root:  Logging to /Users/josecantu/microseq_tests/logs/microseq_20250507-133647.log
+2025-05-07 13:36:47,820  INFO     microseq_tests.blast.run_blast:  RUN BLAST:blastn -task blastn -query /private/var/folders/3j/xb8vjkbd4vgcqx940q7q55q80000gn/T/pytest-of-josecantu/pytest-15/test_verbose_level0/demo.fasta -db greengenes2_db -max_target_seqs 1 -perc_identity 50.0 -qcov_hsp_perc 10.0 -out /private/var/folders/3j/xb8vjkbd4vgcqx940q7q55q80000gn/T/pytest-of-josecantu/pytest-15/test_verbose_level0/h.tsv -outfmt 6 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle -num_threads 1
+2025-05-07 13:36:47,842  INFO     microseq_tests.blast.run_blast:  Progress 100 %
+2025-05-07 13:36:47,845  INFO     microseq_tests.blast.run_blast:  Progress 200 %
+2025-05-07 13:36:47,845  INFO     microseq_tests.blast.run_blast:  Progress 300 %
+2025-05-07 13:36:48,065  INFO     microseq_tests.blast.run_blast:  BLAST finished OK -> /private/var/folders/3j/xb8vjkbd4vgcqx940q7q55q80000gn/T/pytest-of-josecantu/pytest-15/test_verbose_level0/h.tsv

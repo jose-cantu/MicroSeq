@@ -1,6 +1,7 @@
 # ---- src/microseq_tests/utility/utils.py --------------------- 
 from __future__ import annotations 
-import yaml, logging, os, sys, datetime  
+import yaml, logging, os, sys
+from datetime import datetime
 from pathlib import Path 
 from logging.handlers import RotatingFileHandler
 import importlib.resources as pkg_resources 
@@ -85,6 +86,11 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, c
     force : bool, default False
         Reinstall handlers even if logging was already configured
        (useful inside pytest).
+
+    Returns
+    ----------
+    pathlib.Path 
+    The path of the log file in use. 
     """
     # tranlates the legacy kwargs to current behavior I have it designed for rotate_mb ----
     rotate_bytes: int | None = None 
@@ -94,38 +100,44 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, c
         rotate_bytes = int(rotate_mb * 1024 * 1024) 
     
    # ----- pick a destination path --------------------------------------
-    explicit = os.getenv("MICROSEQ_LOG_FILE") # this is designed to make sure explicity file always wins but can be overwritten 
-    if explicit:
-        logfile = Path(explicit).expanduser() 
+    explicit_file = os.getenv("MICROSEQ_LOG_FILE") # this is designed to make sure explicity file always wins but can be overwritten 
+    if explicit_file:
+        logfile = Path(explicit_file).expanduser() 
+        logfile.parent.mkdir(parents=True, exist_ok=True) 
         root_dir = logfile.parent 
 
-    # env-var directory next here 
+    # explicit argument outranks env-var  
     else:
-        root_dir = Path(os.getenv("MICROSEQ_LOG_DIR", log_dir)).expanduser() 
+        root_dir = (
+            Path(log_dir).expanduser() # arg provided 
+            if log_dir is not None 
+            else Path(os.getenv("MICROSEQ_LOG_DIR", LOG_ROOT)).expanduser()
+            )
         root_dir.mkdir(parents=True, exist_ok=True)
 
 
-        if log_file_prefix == "microseq":
-            logfile = root_dir / "microseq.log" 
-        else:
-            ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            logfile = root_dir / f"{log_file_prefix}_{ts}.log"
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        logfile = root_dir / f"{log_file_prefix}_{ts}.log"
 
 
-    # ------- roll previous run a la Nextflow! --------------------- 
-    if rotate_mb is None and log_file_prefix == "microseq" and logfile.exists():
-        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    # ------- roll previous run a la Nextflow naming microseq.log! --------------------- 
+    if (
+        log_file_prefix == "microseq" 
+        and rotate_bytes is None 
+        and logfile.exists()
+    ): 
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S") 
         logfile.rename(logfile.with_suffix(f".log.{ts}")) 
 
 
 
     # --- guard against re-init configuring root logger ----------
-    root = logging.getLogger() 
-    if root.handlers and not force:
+    root_logger = logging.getLogger() 
+    if root_logger.handlers and not force:
         return logfile 
 
-    root.handlers.clear() 
-    root.setLevel(level or logging.INFO) 
+    root_logger.handlers.clear() 
+    root_logger.setLevel(level or logging.INFO) 
 
     fmt = logging.Formatter(
             "%(asctime)s  %(levelname)-7s  %(name)s:  %(message)s"
@@ -134,20 +146,20 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, c
     # one or other handler (tests expect a single file handler here)  
     # size based rotation (keeps .log, .log.1, etc.) 
     if rotate_bytes:  
-        handler = RotatingFileHandler(
+        fh = RotatingFileHandler(
                 logfile, maxBytes=rotate_bytes, backupCount=backup_count
                 )
     else:
-        handler = logging.FileHandler(logfile, mode="w")
-    handler.setFormatter(fmt)
-    root.addHandler(handler) 
+        fh = logging.FileHandler(logfile, mode="w")
+    fh.setFormatter(fmt)
+    root_logger.addHandler(fh) 
     
     if console:
         ch = logging.StreamHandler(sys.stderr)
         ch.setFormatter(fmt)
-        root.addHandler(ch) 
+        root_logger.addHandler(ch) 
 
-    root.info("Logging to %s", logfile)
+    root_logger.info("Logging to %s", logfile)
     return logfile  
      
 

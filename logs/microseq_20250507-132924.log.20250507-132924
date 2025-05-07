@@ -1,0 +1,2 @@
+2025-05-07 13:29:24,214  INFO     root:  Logging to /Users/josecantu/microseq_tests/logs/microseq_20250507-132924.log
+2025-05-07 13:29:24,251  INFO     microseq_tests.trimming.biopy_trim:  [FAIL] trace1.fastq  (avgQ 0.00)
