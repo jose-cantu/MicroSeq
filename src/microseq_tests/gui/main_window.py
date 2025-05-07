@@ -187,9 +187,11 @@ class MainWindow(QMainWindow):
                 qcov=self.qcov_spin.value(),
                 max_target_seqs=self.hits_spin.value(),
                 threads=self.threads_spin.value(),
-                # foward progress bar signal to run_blast 
-                on_progress=self.progress.emit,
+                # prgress bar -> Worker.progress -> GUI thread 
+                on_progress=None, # placeholder 
                 )
+        # now wire the real callback 
+        worker._kwargs["on_progress"] = worker.progress.emit 
         # injecting wrapper + args into Worker; moves into new thread 
         thread = QThread(self) # autodeleted with window 
         worker.moveToThread(thread) 
