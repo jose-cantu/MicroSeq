@@ -1,6 +1,6 @@
 # -- src/micrseq_tests/blast/run_blast.py ---------------
 from __future__ import annotations 
-import logging, os, subprocess 
+import logging, os, subprocess, shutil  
 from pathlib import Path 
 from typing import Optional, Callable 
 from Bio import SeqIO 
@@ -9,7 +9,12 @@ from microseq_tests.utility.progress import _tls # access to parent progress bar
 
 
 L = logging.getLogger(__name__) 
-PathLike = str | Path 
+PathLike = str | Path
+
+FIELD_LIST = [ "qseqid","sseqid","pident","qlen","qcovhsp","length","evalue","bitscore","stitle"]
+def header_row() -> str: 
+    """Returns the TSV header line for BLAST hits including final newline. """ 
+    return "\t".join(FIELD_LIST) + "\n" 
 
 # db_key is the shorthand string for "gg2" or "silva" best keep it str here for future reference 
 def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
@@ -59,11 +64,16 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
     Path(out_tsv).parent.mkdir(parents=True, exist_ok=True)
 
 
-    # honour YAML if present, fall back to a sensible default 
-    outfmt = cfg.get("blast", {}).get(
-            "outfmt",
-            "7 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle",
-            ) 
+    # column layout I want here 
+    DEFAULT_OUTFMT = f"6 {' '.join(FIELD_LIST)}" 
+
+    # grabbing from config or default to here if nothing in config 
+    cfg_blast = cfg.get("blast", {})
+    outfmt = cfg_blast.get("outfmt", DEFAULT_OUTFMT) 
+
+    # BLAST will write to a temp file first 
+    tmp_out = Path(out_tsv).with_suffix(".blasttmp")   
+
 
     cmd=["blastn",
          "-task", "blastn", # why not? 
@@ -72,8 +82,8 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
          "-max_target_seqs", str(max_target_seqs), # keep only the best alignment here HSP that has the best-overall score
          "-perc_identity", str(pct_id),
          "-qcov_hsp_perc", str(qcov),  # here I am requiring ≥ 80% of query to align.... 
-         "-out", str(out_tsv),
          "-outfmt", outfmt,
+         "-out", str(tmp_out), # temporary path will append blast with header 
          "-num_threads", str(threads),
          ]
 
@@ -126,7 +136,30 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
     # ---- tic outer stage bar exactly once --------------------
     parent = getattr(_tls, "current", None)
     if parent:
-        parent.update(1) 
+        parent.update(1)
+
+
+    # post-processing adding header here --------------
+    header_needed  = outfmt.startswith("6 ") 
+    temp_empty = tmp_out.stat().st_size == 0 
+
+    # branch here ----- 
+    if header_needed: 
+        # Decide your empty-fily policy here so 
+        if temp_empty:
+            # zero hits -> means header-only file 
+            with open(out_tsv, "w") as fh:
+                fh.write(header_row())  
+        else:
+            # hits present head is appended then data is transfered over to final results file 
+            with open(out_tsv, "w") as final_fh, tmp_out.open("r") as blast_fh:
+                final_fh.write(header_row()) 
+                shutil.copyfileobj(blast_fh, final_fh) # copies over blast results after header row is appeded first  
+    else: 
+        # other formats (such as 7) no custom header 
+        shutil.move(tmp_out, out_tsv) 
+
+    tmp_out.unlink(missing_ok=True) # cleanup either way 
 
     L.info("BLAST finished OK -> %s", out_tsv)
 
