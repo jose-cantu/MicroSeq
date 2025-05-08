@@ -69,9 +69,9 @@ def dl(url: str, dest: Path) -> None:
     log(f"→ downloading {url}")
     urllib.request.urlretrieve(url, dest)
 
-def run(cmd: list[str]) -> None:
-    log("+" + " ".join(cmd))
-    subprocess.run(cmd, check=True)
+def run(cmd: list) -> None: # accept Path or str 
+    log("+" + " ".join(map(str, cmd))) # stringify for loggin 
+    subprocess.run(list(map(str,cmd)), check=True)
 
 def makeblastdb(fasta: Path, out_prefix: Path) -> None:
     if (out_prefix.with_suffix(".nsq")).exists():
@@ -117,7 +117,28 @@ def fetch_silva() -> None:
         log("→ extracting SILVA")
         with gzip.open(gz, "rb") as fin, open(fasta, "wb") as fout:
             shutil.copyfileobj(fin, fout)
-    makeblastdb(fasta, sd / "silva_db")
+
+    silva_tax = sd / "taxonomy.tsv"
+    if not silva_tax.exists():
+        gz_url = ("https://ftp.arb-silva.de/release_138.1/Exports/"
+            "taxonomy/taxmap_slv_ssu_ref_nr_138.1.txt.gz")
+        tax_gz = sd / "silva_taxmap.gz" 
+        dl(gz_url, tax_gz) 
+
+        log("-> extracting SILVA taxonomy")
+        import gzip, csv 
+        with gzip.open(tax_gz, "rt") as fin, silva_tax.open("w") as fout: 
+            w = csv.writer(fout, delimiter="\t", lineterminator="\n")
+            w.writerow(["sseqid", "lineage"]) 
+            for line in fin:
+                parts = line.rstrip("\n").split("\t")
+                acc = parts[0] # accession 
+                lineage = parts[-1] # last column is lineage 
+                w.writerow([acc, lineage]) 
+
+    # build the BLAST index only once 
+    if not (sd / "silva_db.nsq").exists():  #.nsq is one makeblastdb's outputs acting as a safety guard not to redownload  
+        makeblastdb(fasta, sd / "silva_db") 
 
 def fetch_ncbi() -> None:
     nd = db_root / "ncbi"; nd.mkdir(exist_ok=True)
@@ -126,6 +147,32 @@ def fetch_ncbi() -> None:
     if not (nd / "16S_ribosomal_RNA.nsq").exists():
         log("→ extracting NCBI 16S")
         tarfile.open(tgz).extractall(nd)
+
+
+    # generating accession -> lineage taxid table created acc_taxid.tsv once 
+    tax_tsv = nd / "taxonomy.tsv" 
+    if not tax_tsv.exists():
+        log("-> generating NCBI taxonomy TSV (this may take a minute please wait... =)")
+
+        acc_tax = nd / "acc_taxid.tsv" 
+        run(["blastdbcmd", "-db", "16S_ribosomal_RNA", "-entry", "all", "-outfmt", "%a\t%T", "-out", acc_tax]) 
+
+        # taxid -> lineage via TaxonKit 
+        log("-> running TaxonKit lineage (TaxonKit will fetch taxonomy DB if missing)") 
+        with tax_tsv.open("w") as out_fh:
+            subprocess.run(
+                    ["taxonkit", "lineage", "-P", "-n", str(acc_tax)], 
+                    check=True, 
+                    stdout=out_fh 
+                    )
+        # add header so pandas reads correct columns names 
+        with tax_tsv.open("r+") as fh: 
+            data = fh.read() 
+            fh.seek(0) 
+            fh.write("sseqid\tlineage\n")
+            fh.write(data) 
+    else:
+        log("✓ taxonomy.tsv already present, skipping TaxonKit") 
 
 # ────────────────────────── main driver ─────────────────────────────────
 def main() -> None:

@@ -19,7 +19,9 @@ dependencies:
   - typing_extensions
   - biom-format # Needed for BIOM 
   - h5py # necessary for BIOM
-  - pandas 
+  - pandas
+  - taxonkit # for parsing and creating taxonomy.tsv for NCBI16s and SILVA  
+  - ete3 
 
   # external bio-tools
   - trimmomatic    # adds trimmomatic to $CONDA_PREFIX/bin  
