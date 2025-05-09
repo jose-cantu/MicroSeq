@@ -8,7 +8,10 @@ tools:
 databases:
   gg2:
     blastdb: ${MICROSEQ_DB_HOME}/gg2/greengenes2_db
+    taxonomy: ${MICROSEQ_DB_HOME}/gg2/taxonomy.tsv
   silva:
     blastdb: ${MICROSEQ_DB_HOME}/silva/silva_db
+    taxonomy: ${MICROSEQ_DB_HOME}/silva/taxonomy.tsv
   ncbi:
     blastdb: ${MICROSEQ_DB_HOME}/ncbi/16S_ribosomal_RNA
+    taxonomy: ${MICROSEQ_DB_HOME}/ncbi/taxonomy.tsv

@@ -84,6 +84,29 @@ def extract_member(zip_path: Path, pattern: str, out_path: Path) -> None:
         with zf.open(member) as fin, open(out_path, "wb") as fout:
             shutil.copyfileobj(fin, fout)
 
+
+# ------ Adding TaxonKit helper -------------------------------------
+TAXONKIT_DB = Path.home() / ".taxonkit"
+def ensure_taxdump() -> None: 
+    """
+    Download and unpack the four core NCBI tax-dump files if they are missing 
+    (names.dmp, nodes.dmp, delnodes.dmp, merged.dmp). 
+    """
+    needed = {"names.dmp", "nodes.dmp", "delnodes.dmp", "merged.dmp"}
+    existing = {p.name for p in TAXONKIT_DB.iterdir() if p.is_file()}
+    if needed <= existing: 
+        return # already present 
+
+    TAXONKIT_DB.mkdir(parents=True, exist_ok=True)
+    dump = TAXONKIT_DB / "taxdump.tar.gz" 
+    dl("ftp://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz", dump)
+    
+    log("-> extracting NCBI taxdump") 
+    with tarfile.open(dump) as tf: 
+        for m in tf.getmembers(): 
+            if m.name.split("/")[-1] in needed:
+                tf.extract(m, TAXONKIT_DB) 
+
 # ───────────────────── database download functions ──────────────────────
 def fetch_gg2() -> None:
     gg = db_root / "gg2"; gg.mkdir(exist_ok=True)
@@ -121,19 +144,21 @@ def fetch_silva() -> None:
     silva_tax = sd / "taxonomy.tsv"
     if not silva_tax.exists():
         gz_url = ("https://ftp.arb-silva.de/release_138.1/Exports/"
-            "taxonomy/taxmap_slv_ssu_ref_nr_138.1.txt.gz")
-        tax_gz = sd / "silva_taxmap.gz" 
+            "taxonomy/taxmap_slv_ssu_ref_138.1.txt.gz")
+        tax_gz = sd / "tax_slv_ref.gz" 
         dl(gz_url, tax_gz) 
 
         log("-> extracting SILVA taxonomy")
         import gzip, csv 
         with gzip.open(tax_gz, "rt") as fin, silva_tax.open("w") as fout: 
             w = csv.writer(fout, delimiter="\t", lineterminator="\n")
-            w.writerow(["sseqid", "lineage"]) 
-            for line in fin:
-                parts = line.rstrip("\n").split("\t")
-                acc = parts[0] # accession 
-                lineage = parts[-1] # last column is lineage 
+            w.writerow(["sseqid", "taxonomy"]) 
+            for i, ln in enumerate(fin):
+                if i == 0: # first record = helper -> skip this 
+                    continue 
+                fields = ln.rstrip("\n").split("\t")
+                acc = fields[0] # primary Acession column I need 
+                lineage = fields[3].rstrip(";") # path semicolon delimited lineage that I need as well parsing out last ; post process 
                 w.writerow([acc, lineage]) 
 
     # build the BLAST index only once 
@@ -142,6 +167,8 @@ def fetch_silva() -> None:
 
 def fetch_ncbi() -> None:
     nd = db_root / "ncbi"; nd.mkdir(exist_ok=True)
+
+    # ---- downloading BLAST database ------------ 
     tgz = nd / "16S_ribosomal_RNA.tar.gz"
     dl("ftp://ftp.ncbi.nlm.nih.gov/blast/db/16S_ribosomal_RNA.tar.gz", tgz)
     if not (nd / "16S_ribosomal_RNA.nsq").exists():
@@ -151,28 +178,54 @@ def fetch_ncbi() -> None:
 
     # generating accession -> lineage taxid table created acc_taxid.tsv once 
     tax_tsv = nd / "taxonomy.tsv" 
-    if not tax_tsv.exists():
-        log("-> generating NCBI taxonomy TSV (this may take a minute please wait... =)")
+    if tax_tsv.exists():
+        log("✓ taxonomy.tsv already present, skipping TaxonKit")
+        return 
+    
 
-        acc_tax = nd / "acc_taxid.tsv" 
-        run(["blastdbcmd", "-db", "16S_ribosomal_RNA", "-entry", "all", "-outfmt", "%a\t%T", "-out", acc_tax]) 
+    log("-> generating NCBI taxonomy TSV (this may take a minute please wait... =)")
 
-        # taxid -> lineage via TaxonKit 
-        log("-> running TaxonKit lineage (TaxonKit will fetch taxonomy DB if missing)") 
-        with tax_tsv.open("w") as out_fh:
-            subprocess.run(
-                    ["taxonkit", "lineage", "-P", "-n", str(acc_tax)], 
-                    check=True, 
-                    stdout=out_fh 
-                    )
-        # add header so pandas reads correct columns names 
-        with tax_tsv.open("r+") as fh: 
-            data = fh.read() 
-            fh.seek(0) 
-            fh.write("sseqid\tlineage\n")
-            fh.write(data) 
-    else:
-        log("✓ taxonomy.tsv already present, skipping TaxonKit") 
+
+    # accession -> taxid (blastdbcmd) 
+    acc_tax = nd / "acc_taxid.tsv" 
+    run(["blastdbcmd", "-db", "16S_ribosomal_RNA", "-entry", "all", "-outfmt", "%a\t%T", "-out", acc_tax]) 
+
+    # taxid -> lineage via TaxonKit 
+    log("-> running TaxonKit lineage (TaxonKit will fetch taxonomy DB if missing)") 
+
+    tmp_path = nd / "lineage_raw.tsv" 
+    ensure_taxdump() # download nodes.dmp etc if missing
+    # lineage -> reformt -> tmp_path 
+    with tmp_path.open("w", encoding="utf-8") as fh_out:
+        p1 = subprocess.Popen(
+                ["taxonkit", "lineage", 
+                 "-n", # add scientific names 
+                 "-i", "2",  # taxid is column 2 of acc_tax 
+                 str(acc_tax)],
+                stdout=subprocess.PIPE, text=True)
+
+        p2 = subprocess.Popen(
+                ["taxonkit", "reformat", "-d", "/", 
+                "-f", "{{d}};{{p}};{{c}};{{o}};{{f}};{{g}};{{s}}"],
+                 stdin=p1.stdout, stdout=fh_out, text=True) 
+
+        p1.stdout.close() 
+        if p1.wait() or p2.wait():
+            raise RuntimeError("TaxonKit pipeline failed")
+
+        # rewrite tmp -> two-column TSV 
+    with tmp_path.open(encoding="utf-8") as src, tax_tsv.open("w") as dst:
+            dst.write("sseqid\ttaxonomy\n")
+            for ln in src:
+                cols = ln.rstrip("\n").split("\t", 3)
+                if len(cols) < 3: # some rows may have been filtered out 
+                    continue 
+                acc, lineage = cols[0], cols[2] # take full lineage 
+                lineage = lineage.split(";", 1)[-1] 
+                dst.write(f"{acc}\t{lineage}\n") 
+
+    tmp_path.unlink(missing_ok=True) # clean up 
+           
 
 # ────────────────────────── main driver ─────────────────────────────────
 def main() -> None:
@@ -210,9 +263,12 @@ export MICROSEQ_LOG_DIR="{log_dir}"
     cfg = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
     cfg["logging"] = {"dir": str(log_dir)}
     cfg["databases"] = {
-        "gg2":   {"blastdb": "${MICROSEQ_DB_HOME}/gg2/greengenes2_db"},
-        "silva": {"blastdb": "${MICROSEQ_DB_HOME}/silva/silva_db"},
-        "ncbi":  {"blastdb": "${MICROSEQ_DB_HOME}/ncbi/16S_ribosomal_RNA"}
+        "gg2":   {"blastdb": "${MICROSEQ_DB_HOME}/gg2/greengenes2_db",
+            "taxonomy": "${MICROSEQ_DB_HOME}/gg2/taxonomy.tsv"},
+        "silva": {"blastdb": "${MICROSEQ_DB_HOME}/silva/silva_db",
+            "taxonomy": "${MICROSEQ_DB_HOME}/silva/taxonomy.tsv"},
+        "ncbi":  {"blastdb": "${MICROSEQ_DB_HOME}/ncbi/16S_ribosomal_RNA",
+            "taxonomy": "${MICROSEQ_DB_HOME}/ncbi/taxonomy.tsv"},
     }
     cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
     log(f"✓ config.yaml updated at {cfg_path}")
