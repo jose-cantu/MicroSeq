@@ -196,32 +196,22 @@ def fetch_ncbi() -> None:
     tmp_path = nd / "lineage_raw.tsv" 
     ensure_taxdump() # download nodes.dmp etc if missing
     # lineage -> reformt -> tmp_path 
-    with tmp_path.open("w", encoding="utf-8") as fh_out:
-        p1 = subprocess.Popen(
-                ["taxonkit", "lineage", 
-                 "-n", # add scientific names 
-                 "-i", "2",  # taxid is column 2 of acc_tax 
-                 str(acc_tax)],
-                stdout=subprocess.PIPE, text=True)
+    with tmp_path.open("w") as out_fh: 
+        subprocess.run(
+                ["taxonkit", "lineage", "-n", "-i", "2", str(acc_tax)],
+                check=True, stdout=out_fh
+                )
 
-        p2 = subprocess.Popen(
-                ["taxonkit", "reformat", "-d", "/", 
-                "-f", "{{d}};{{p}};{{c}};{{o}};{{f}};{{g}};{{s}}"],
-                 stdin=p1.stdout, stdout=fh_out, text=True) 
-
-        p1.stdout.close() 
-        if p1.wait() or p2.wait():
-            raise RuntimeError("TaxonKit pipeline failed")
 
         # rewrite tmp -> two-column TSV 
-    with tmp_path.open(encoding="utf-8") as src, tax_tsv.open("w") as dst:
+    with tmp_path.open() as src, tax_tsv.open("w") as dst:
             dst.write("sseqid\ttaxonomy\n")
             for ln in src:
                 cols = ln.rstrip("\n").split("\t", 3)
                 if len(cols) < 3: # some rows may have been filtered out 
                     continue 
                 acc, lineage = cols[0], cols[2] # take full lineage 
-                lineage = lineage.split(";", 1)[-1] 
+                lineage = lineage.split(";", 1)[-1] # removes lineage past Domain rank which I don't want here  
                 dst.write(f"{acc}\t{lineage}\n") 
 
     tmp_path.unlink(missing_ok=True) # clean up 
