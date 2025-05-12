@@ -1,0 +1,22 @@
+sample_id	taxonomy	evalue	bitscore	pident	qcovhsp
+qseqid		evalue	bitscore	pident	qcovhsp
+demo1	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus petrasii	6.22e-135	482	97.288	98
+demo1	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus pragensis	6.22e-135	482	97.288	98
+demo1	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus pragensis	6.22e-135	482	97.288	98
+demo1	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__	6.22e-135	482	97.288	98
+demo1	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus capitis	6.22e-135	482	97.288	98
+demo2	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis	3.22e-151	536	100.000	99
+demo2	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis	3.22e-151	536	100.000	99
+demo2	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis	3.22e-151	536	100.000	99
+demo2	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis	3.22e-151	536	100.000	99
+demo2	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis	3.22e-151	536	100.000	99
+demo4	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__	1.12e-150	535	99.668	100
+demo4	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis	1.12e-150	535	99.668	100
+demo4	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__	1.12e-150	535	99.668	100
+demo4	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis	1.12e-150	535	99.668	100
+demo4	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis	1.12e-150	535	99.668	100
+demo5	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus petrasii	1.12e-150	535	99.668	100
+demo5	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus pragensis	1.12e-150	535	99.668	100
+demo5	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus pragensis	1.12e-150	535	99.668	100
+demo5	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__	1.12e-150	535	99.668	100
+demo5	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus capitis	1.12e-150	535	99.668	100

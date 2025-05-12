@@ -1,0 +1,22 @@
+sample_id	taxonomy	evalue	bitscore	pident	qcovhsp
+qseqid		evalue	bitscore	pident	qcovhsp
+demo1	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	2.15e-136	488	97.627	98
+demo1	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	2.62e-135	484	97.627	98
+demo1	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	9.14e-135	483	97.627	98
+demo1	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	9.14e-135	483	97.627	98
+demo1	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	9.14e-135	482	97.288	98
+demo2	Bacteria;Actinobacteriota;Actinobacteria;Propionibacteriales;Propionibacteriaceae;Cutibacterium	1.11e-152	542	100.000	100
+demo2	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	1.11e-152	542	100.000	100
+demo2	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	1.11e-152	542	100.000	100
+demo2	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	1.11e-152	542	100.000	100
+demo2	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	1.11e-152	542	100.000	100
+demo4	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	1.11e-152	542	100.000	100
+demo4	Bacteria;Firmicutes;Clostridia;Clostridiales;Clostridiaceae;Clostridium sensu stricto 13	1.11e-152	542	100.000	100
+demo4	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	1.11e-152	542	100.000	100
+demo4	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	1.11e-152	542	100.000	100
+demo4	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	1.11e-152	542	100.000	100
+demo5	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	1.36e-151	538	99.667	100
+demo5	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	4.73e-151	537	99.667	100
+demo5	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	4.73e-151	537	99.667	100
+demo5	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	4.73e-151	537	99.667	100
+demo5	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus	1.65e-150	535	99.668	100
