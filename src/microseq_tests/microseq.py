@@ -1,6 +1,6 @@
 # src/microseq_tests/microseq.py
 from __future__ import annotations
-import argparse, pathlib, logging, shutil, glob, sys, subprocess   
+import argparse, pathlib, logging, shutil, glob, sys, subprocess, os   
 from microseq_tests.utility.progress import stage_bar 
 from microseq_tests.utility.merge_hits import merge_hits 
 import microseq_tests.trimming.biopy_trim as biopy_trim
@@ -77,17 +77,17 @@ def main() -> None:
     p_blast.add_argument("--log-missing", metavar="PATH", help="Append sample IDs that yield zero hits to this file for review.")
 
 
-    # -- TSV Merge Sub command --- 
+    # -- TSV Merge Sub --
     p_merge = sp.add_parser("merge-hits", help="Concatenate many BLAST TSV files into one large TSV")
     p_merge.add_argument("-i", "--input", nargs="+", required=True, metavar="TSV", help="Either a list of *.tsv or a single glob/dir (use shell-globs yay lol)", 
                          )
     p_merge.add_argument("-o", "--output", required=True, metavar="TSV", help="Destination merged TSV",) 
                          
-    # taxonomy join after postblast (GG2 only) 
-    p_tax = sp.add_parser("add_taxonomy", help="Append Greengenes2 taxon names to a BLAST table")
-    p_tax.add_argument("-i", "--hits", required=True, help="Blast merge table (needs sseqid & qseqid)") 
-    p_tax.add_argument("-t", "--taxonomy", required=True, help="Greengenes2 taxonomy.tsv") 
-    p_tax.add_argument("-o", "--output", required=True, help="Output CSV/TSV == Perferable do TSV please!")
+    # taxonomy join after postblast + database autolookup 
+    p_tax = sp.add_parser("add_taxonomy", help="Append a taxonomy column to a BLAST table")
+    p_tax.add_argument("-i", "--hits", required=True, metavar="TSV", help="Blast merge table (needs sseqid & qseqid)")
+    p_tax.add_argument("-d", "--db", required=True, choices=db_choices, help="Database key (gg2, silva, ncbi) autolocate taxonomy.tsv")
+    p_tax.add_argument("-o", "--output", required=True, help="Output TSV with appended taxonomy inplace!")
 
 
     # postblast BIOM 
@@ -251,10 +251,16 @@ def main() -> None:
             print(f" ✓ JSON : {json_out}") 
             
 
-    elif args.cmd == "add_taxonomy": 
+    elif args.cmd == "add_taxonomy":
+    # --db key -> ${MICROSEQ_DB_HOME}/key-db-used/taxonomy.tsv 
+        root = pathlib.Path(os.environ.get("MICROSEQ_DB_HOME", "~/.microseq_dbs")).expanduser() 
+        tax_fp = root / args.db / "taxonomy.tsv" 
+        if not tax_fp.exists():
+            raise FileNotFoundError(
+                    f"expected {tax_fp} - run microseq-setup first please? Thank you. =)") 
         run_taxonomy_join(
                 pathlib.Path(args.hits).resolve(),
-                pathlib.Path(args.taxonomy).expanduser().resolve(),
+                tax_fp.resolve(),
                 pathlib.Path(args.output).resolve(),
                 )
         print(f" ✓ CSV+tax : {args.output}")
