@@ -1,4 +1,6 @@
-#!/usr/bin/env python3 
+#!/usr/bin/env python3
+
+# src/microseq_tests/utility/add_taxonomy.py 
 
 """
 add_taxonomy.py - append GG2 taxon names to a MicroSeq BLAST table. =) 
@@ -29,13 +31,13 @@ def _strip_accession(s: str) -> str | None:
 def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path) -> None:
     # ------------------------------------------------------------------ #
     # added a new revision in here auto-convert space or comma-delimited files to real TABs moving forward
-    COLS = [ 
-        "qseqid", "sseqid", "pident", "qlen", "qcovhsp", "length", "evalue", "bitscore", "stitle",
-            ]
-
-
-    sep = "\t" if hits_fp.suffix.lower() == ".tsv" else None 
-    hits = pd.read_csv(normalise_tsv(hits_fp), sep=sep, engine="python", header=None, names=COLS,).rename(columns={"qseqid": "sample_id"}) 
+    sep = "\t" if hits_fp.suffix.lower() == ".tsv" else None
+    hits = pd.read_csv(
+            normalise_tsv(hits_fp),
+            sep=sep,
+            engine="python", # auto-deatect header row 
+            dtype=str, 
+            ).rename(columns={"qseqid": "sample_id"})
    # canonicalize the subject ID so it can match the taxonomy table for each of the databases 
     hits["sseqid"] = ( 
        hits["sseqid"].astype(str)
@@ -60,10 +62,10 @@ def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path) -> None:
     n_unmatched = merged["taxonomy"].isna().sum()
     print(f"[add_taxonomy] {n_unmatched}/{len(merged)} rows unmatched") 
 
-    # --- reoder for post-BLAST 
-    cols   = ["sample_id", "taxonomy", "evalue", "bitscore", "pident", "qcovhsp"]
-    merged = merged[cols]
-    
+    # keep every original blast column, then tack taxonomy on the end 
+    blast_cols = hits.columns.tolist() # order from input file 
+    merged = merged[blast_cols + ["taxonomy"]] 
+
     out_sep = "\t" if out_fp.suffix.lower() in {".tsv", ".txt"} else ","
     merged.to_csv(out_fp, sep=out_sep, index=False)
     print(f"[add_taxonomy] wrote {out_fp}") 

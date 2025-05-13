@@ -75,6 +75,7 @@ def main() -> None:
     p_blast.add_argument("--qcov", type=float, default=80.0, help="query coverage %% (default: %(default)s) again you can adjust value based on needs of project")
     p_blast.add_argument("--max_target_seqs", type=int, default=5, help="How many DB hits to retain per query (passed to BLAST")
     p_blast.add_argument("--log-missing", metavar="PATH", help="Append sample IDs that yield zero hits to this file for review.")
+    p_blast.add_argument("--clean-titles", action="store_true", help="Strip the accession & extra fields from stitle," "leaves a tidy Genus-Species handy label") 
 
 
     # -- TSV Merge Sub --
@@ -210,7 +211,8 @@ def main() -> None:
                 max_target_seqs = args.max_target_seqs, 
                 threads=args.threads,
                 # I removed the on_progress var here since the nested helper updates parent bar via thread-local _tls 
-                log_missing=pathlib.Path(args.log_missing) if args.log_missing else None, 
+                log_missing=pathlib.Path(args.log_missing) if args.log_missing else None,
+                clean_titles=args.clean_titles 
             )
 
     elif args.cmd == "merge-hits":
@@ -254,16 +256,18 @@ def main() -> None:
     elif args.cmd == "add_taxonomy":
     # --db key -> ${MICROSEQ_DB_HOME}/key-db-used/taxonomy.tsv 
         root = pathlib.Path(os.environ.get("MICROSEQ_DB_HOME", "~/.microseq_dbs")).expanduser() 
-        tax_fp = root / args.db / "taxonomy.tsv" 
+        tax_fp = (root / args.db / "taxonomy.tsv").resolve() # canonical path  
         if not tax_fp.exists():
             raise FileNotFoundError(
-                    f"expected {tax_fp} - run microseq-setup first please? Thank you. =)") 
-        run_taxonomy_join(
-                pathlib.Path(args.hits).resolve(),
-                tax_fp.resolve(),
-                pathlib.Path(args.output).resolve(),
-                )
-        print(f" ✓ CSV+tax : {args.output}")
+                    f"expected {tax_fp} - run microseq-setup first please? Thank you. =)")
+
+        # normalizing the other CLI paths as well 
+        hits_fp = pathlib.Path(args.hits).expanduser().resolve()  
+        output_fp = pathlib.Path(args.output).expanduser().resolve() 
+
+
+        run_taxonomy_join(hits_fp, tax_fp, output_fp)
+        print(f" ✓ CSV+tax : {output_fp}")
 
 
 if __name__ == "__main__":

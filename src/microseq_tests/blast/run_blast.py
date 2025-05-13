@@ -6,7 +6,7 @@ from typing import Optional, Callable
 from Bio import SeqIO 
 from microseq_tests.utility.utils import load_config, expand_db_path
 from microseq_tests.utility.progress import _tls # access to parent progress bar 
-
+import pandas as pd 
 
 L = logging.getLogger(__name__) 
 PathLike = str | Path
@@ -18,7 +18,7 @@ def header_row() -> str:
 
 # db_key is the shorthand string for "gg2" or "silva" best keep it str here for future reference 
 def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
-              pct_id: float = 97.0, qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, on_progress: Optional[Callable[[int], None]] = None, log_missing: PathLike | None = None,) -> None:
+              pct_id: float = 97.0, qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, on_progress: Optional[Callable[[int], None]] = None, log_missing: PathLike | None = None, clean_titles: bool = False) -> None:
     """
     Run blastn against one of the configured 16 S databases.
     You will also emit a percentage progress bar I have set to make it look more a      ppealing. =) 
@@ -49,13 +49,12 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
     # safety make sure query even exists before spawning BLAST .... 
     q = Path(query_fa)
     if not q.is_file():
-        raise FileNotFoundError(q)
-
+        raise FileNotFoundError(q) 
     # compute total queries here 
 
     total = sum(1 for _ in SeqIO.parse(q, "fasta"))
     if total == 0:    # input is FASTQ 
-        total = sum(1 for _ in SeqIO.parse(q, "fastq")) 
+        total = sum(1 for _ in SeqIO.parse(q, "fastq")) # blast now accepts fastq on the offchance the user wants to use fastq instead of fasta.....  
     if total == 0:
         raise ValueError(
             f"{q} contains no FASTA/FASTQ records - nothing to BLAST" 
@@ -163,6 +162,23 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
 
     L.info("BLAST finished OK -> %s", out_tsv)
 
+    # after BLAST call finishes this here will help in cleaning 
+    if clean_titles:
+        import re 
+        # keep only Genus-Species (dropping sseqid and hitlength information from database attached to name of ID) 
+        df = pd.read_csv(tmp_out, sep="\t", names=FIELD_LIST, dtype=str) 
+
+        df["stitle"] = (
+            df["stitle"]
+            .str.split("|").str[-1] # drop gi|...|ref|.... 
+            .str.lstrip(">")  # stray '>' and whitespace assuming fastq is used here.......  
+            .str.strip() 
+            .str.replace(r"^[A-Z]{2}\d{6}(?:\.\d+){0,2}\s+", "", regex=True) # SILVA "JN193283" prefix
+            )
+        df.to_csv(args.output, sep="\t", index=False, header=False)
+    
+    else: 
+        shutil.move(tmp_out, args.output) 
     # optional no hit logging setup ------------------ 
 
     if log_missing:

@@ -74,8 +74,9 @@ def _detect_sample_col(meta: pd.DataFrame,
 def _tax_depth(taxon: str | float) -> int:
     """Return how many ranks are filled in the lineage string."""
     if not isinstance(taxon, str):
-        return 0 # NaN or non-string means depth of 0. 
-    return sum(bool(seg.split("__")[1]) for seg in taxon.split(";")) 
+        return 0 # NaN or non-string means depth of 0.
+    parts = [seg.split("__", 1)[-1] for seg in taxon.split(";")] # strip prefix if present 
+    return sum(bool(p.strip()) for p in parts) 
 
 
 
