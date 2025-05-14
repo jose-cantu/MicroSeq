@@ -89,7 +89,7 @@ def main() -> None:
     p_tax.add_argument("-i", "--hits", required=True, metavar="TSV", help="Blast merge table (needs sseqid & qseqid)")
     p_tax.add_argument("-d", "--db", required=True, choices=db_choices, help="Database key (gg2, silva, ncbi) autolocate taxonomy.tsv")
     p_tax.add_argument("-o", "--output", required=True, help="Output TSV with appended taxonomy inplace!")
-    p_tax.add_argument("--fill-species", action="store_true", help="When SILVA lineage ends at genus and pident is %, " "append Genus-Species from stitle")  
+    p_tax.add_argument("--fill-species", action="store_true", help="When SILVA lineage ends at genus and pident is ≥97%%, " "append Genus-Species from stitle")  
 
 
     # postblast BIOM 
@@ -267,7 +267,7 @@ def main() -> None:
         output_fp = pathlib.Path(args.output).expanduser().resolve() 
 
 
-        run_taxonomy_join(hits_fp, tax_fp, output_fp)
+        run_taxonomy_join(hits_fp, tax_fp, output_fp, fill_species=args.fill_species)
         print(f" ✓ CSV+tax : {output_fp}")
 
 

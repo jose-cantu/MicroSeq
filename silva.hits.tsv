@@ -1,21 +1,21 @@
-qseqid 	sseqid          	pident  	qlen 	qcovhsp 	length 	evalue    	bitscore 	stitle                                                                                                                  
-demo1  	JN175379.1.1420 	 97.627 	 300 	     98 	   295 	2.15e-136 	     488 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus caprae                     
-demo1  	JX006285.1.1443 	 97.627 	 300 	     98 	   295 	2.62e-135 	     484 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;bacterium NLAE-zl-H36                     
-demo1  	AF467410.1.1544 	 97.627 	 300 	     98 	   295 	9.14e-135 	     483 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;uncultured Staphylococcus sp.             
-demo1  	AB233325.1.1454 	 97.627 	 300 	     98 	   295 	9.14e-135 	     483 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus capitis subsp. urealyticus 
-demo1  	D83362.1.1475   	 97.288 	 300 	     98 	   295 	9.14e-135 	     482 	D83362.1.1475 Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus epidermidis  
-demo2  	FJ957836.1.1455 	100.000 	 300 	    100 	   300 	1.11e-152 	     542 	Bacteria;Actinobacteriota;Actinobacteria;Propionibacteriales;Propionibacteriaceae;Cutibacterium;uncultured bacterium    
-demo2  	FJ957660.1.1488 	100.000 	 300 	    100 	   300 	1.11e-152 	     542 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;uncultured Staphylococcus sp.             
-demo2  	FJ957673.1.1495 	100.000 	 300 	    100 	   300 	1.11e-152 	     542 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;uncultured Staphylococcus sp.             
-demo2  	FJ957666.1.1439 	100.000 	 300 	    100 	   300 	1.11e-152 	     542 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;uncultured Staphylococcus sp.             
-demo2  	FJ957697.1.1487 	100.000 	 300 	    100 	   300 	1.11e-152 	     542 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;uncultured bacterium                      
-demo4  	KU922362.1.1405 	100.000 	 300 	    100 	   300 	1.11e-152 	     542 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus epidermidis                
-demo4  	FJ957843.1.1431 	100.000 	 300 	    100 	   300 	1.11e-152 	     542 	Bacteria;Firmicutes;Clostridia;Clostridiales;Clostridiaceae;Clostridium sensu stricto 13;uncultured bacterium           
-demo4  	MH518188.1.1460 	100.000 	 300 	    100 	   300 	1.11e-152 	     542 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus epidermidis                
-demo4  	FJ957657.1.1439 	100.000 	 300 	    100 	   300 	1.11e-152 	     542 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;uncultured bacterium                      
-demo4  	KU922324.1.1397 	100.000 	 300 	    100 	   300 	1.11e-152 	     542 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus epidermidis                
-demo5  	JX006285.1.1443 	 99.667 	 300 	    100 	   300 	1.36e-151 	     538 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;bacterium NLAE-zl-H36                     
-demo5  	AF467410.1.1544 	 99.667 	 300 	    100 	   300 	4.73e-151 	     537 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;uncultured Staphylococcus sp.             
-demo5  	AB233325.1.1454 	 99.667 	 300 	    100 	   300 	4.73e-151 	     537 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus capitis subsp. urealyticus 
-demo5  	JN175379.1.1420 	 99.667 	 300 	    100 	   300 	4.73e-151 	     537 	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus caprae                     
-demo5  	D83362.1.1475   	 99.668 	 300 	    100 	   301 	1.65e-150 	     535 	D83362.1.1475 Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus epidermidis  
+qseqid	sseqid	pident	qlen	qcovhsp	length	evalue	bitscore	stitle
+demo1	JN175379.1.1420	97.627	300	98	295	2.15e-136	488	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus caprae
+demo1	JX006285.1.1443	97.627	300	98	295	2.62e-135	484	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;bacterium NLAE-zl-H36
+demo1	AF467410.1.1544	97.627	300	98	295	9.14e-135	483	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;uncultured Staphylococcus sp.
+demo1	AB233325.1.1454	97.627	300	98	295	9.14e-135	483	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus capitis subsp. urealyticus
+demo1	D83362.1.1475	97.288	300	98	295	9.14e-135	482	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus epidermidis
+demo2	FJ957836.1.1455	100.000	300	100	300	1.11e-152	542	Bacteria;Actinobacteriota;Actinobacteria;Propionibacteriales;Propionibacteriaceae;Cutibacterium;uncultured bacterium
+demo2	FJ957660.1.1488	100.000	300	100	300	1.11e-152	542	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;uncultured Staphylococcus sp.
+demo2	FJ957673.1.1495	100.000	300	100	300	1.11e-152	542	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;uncultured Staphylococcus sp.
+demo2	FJ957666.1.1439	100.000	300	100	300	1.11e-152	542	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;uncultured Staphylococcus sp.
+demo2	FJ957697.1.1487	100.000	300	100	300	1.11e-152	542	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;uncultured bacterium
+demo4	KU922362.1.1405	100.000	300	100	300	1.11e-152	542	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus epidermidis
+demo4	FJ957843.1.1431	100.000	300	100	300	1.11e-152	542	Bacteria;Firmicutes;Clostridia;Clostridiales;Clostridiaceae;Clostridium sensu stricto 13;uncultured bacterium
+demo4	MH518188.1.1460	100.000	300	100	300	1.11e-152	542	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus epidermidis
+demo4	FJ957657.1.1439	100.000	300	100	300	1.11e-152	542	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;uncultured bacterium
+demo4	KU922324.1.1397	100.000	300	100	300	1.11e-152	542	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus epidermidis
+demo5	JX006285.1.1443	99.667	300	100	300	1.36e-151	538	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;bacterium NLAE-zl-H36
+demo5	AF467410.1.1544	99.667	300	100	300	4.73e-151	537	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;uncultured Staphylococcus sp.
+demo5	AB233325.1.1454	99.667	300	100	300	4.73e-151	537	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus capitis subsp. urealyticus
+demo5	JN175379.1.1420	99.667	300	100	300	4.73e-151	537	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus caprae
+demo5	D83362.1.1475	99.668	300	100	301	1.65e-150	535	Bacteria;Firmicutes;Bacilli;Staphylococcales;Staphylococcaceae;Staphylococcus;Staphylococcus epidermidis

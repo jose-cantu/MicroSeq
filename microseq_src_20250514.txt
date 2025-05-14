@@ -1,0 +1,3087 @@
+
+
+### ====  compare_to_taxfile.py  ==== ###
+#!/usr/bin/env python3
+"""
+compare_to_taxfile.py
+Check where SILVA’s curated lineage stops at genus while the BLAST title
+(stitle) appears to specify a species.
+
+usage:
+    python compare_to_taxfile.py  silva.tax.tsv  ~/.microseq_dbs/silva/taxonomy.tsv
+"""
+from __future__ import annotations
+import sys, re
+from pathlib import Path
+import pandas as pd
+
+if len(sys.argv) != 3:
+    sys.exit("usage: compare_to_taxfile.py <silva.tax.tsv> <taxonomy.tsv>")
+
+taxed_path   = Path(sys.argv[1]).expanduser().resolve()   # output of add_taxonomy
+raw_tax_path = Path(sys.argv[2]).expanduser().resolve()   # SILVA taxonomy.tsv
+
+# ── helpers ────────────────────────────────────────────────────────────
+def last_rank(line):
+    if not isinstance(line, str):
+        return None
+    parts = [p.strip() for p in line.split(";") if p.strip()]
+    return parts[-1].split("__", 1)[-1] if parts else None       # strip d__/p__ etc.
+
+species_pat = re.compile(r"\b([A-Z][a-zA-Z]+[_\s][a-z][-a-z0-9]*)\b")
+def species_from_title(line):
+    if not isinstance(line, str):
+        return None
+    m = species_pat.search(line)
+    return m.group(1).replace(" ", "_") if m else None
+
+# ── 1. load both tables ────────────────────────────────────────────────
+df  = pd.read_csv(taxed_path, sep="\t", dtype=str)        # 10-column TSV from add_taxonomy
+raw = pd.read_csv(raw_tax_path, sep="\t", dtype=str)      # SILVA lineage
+
+# normalise header names
+raw.columns = raw.columns.str.strip().str.lower()
+id_col  = next(col for col in raw.columns if col in {"feature id", "feature_id", "sseqid"})
+tax_col = next(col for col in raw.columns if col in {"taxon", "taxonomy"})
+
+raw = raw.rename(columns={id_col: "sseqid", tax_col: "tax_raw"})
+
+# ── 2. annotate species from both sources ─────────────────────────────
+df["tax_species"] = df["taxonomy"].map(last_rank)
+df["hit_species"] = df["stitle"].map(species_from_title)
+
+df = df.merge(raw[["sseqid", "tax_raw"]], on="sseqid", how="left")
+df["raw_species"] = df["tax_raw"].map(last_rank)
+
+# ── 3. find genus-only lineages where title claims species ────────────
+mask = (
+    df["hit_species"].notna() &
+    df["raw_species"].notna() &
+    (df["raw_species"].str.count("_") < 1) &   # genus-only in taxonomy.tsv
+    (df["hit_species"] != df["raw_species"])
+)
+
+subset = df.loc[mask, [
+    "sample_id", "sseqid", "pident",
+    "hit_species", "raw_species", "tax_raw", "stitle"
+]]
+
+# ── 4. report ──────────────────────────────────────────────────────────
+print(f"{len(subset)}/{len(df)} accessions have genus-only lineage in "
+      f"{raw_tax_path.name} while the BLAST title carries a species")
+
+if not subset.empty:
+    out = taxed_path.with_suffix(".title_vs_taxfile.tsv")
+    subset.to_csv(out, sep="\t", index=False)
+    print(f"wrote detailed list → {out}")
+
+
+
+### ====  config/config.yaml  ==== ###
+default_workdir: ~/microseq_runs
+logging:
+  dir: /home/jason/microseq_tests/logs
+tools:
+  trimmomatic: trimmomatic
+  blastn: blastn
+  cap3: cap3
+databases:
+  gg2:
+    blastdb: ${MICROSEQ_DB_HOME}/gg2/greengenes2_db
+    taxonomy: ${MICROSEQ_DB_HOME}/gg2/taxonomy.tsv
+  silva:
+    blastdb: ${MICROSEQ_DB_HOME}/silva/silva_db
+    taxonomy: ${MICROSEQ_DB_HOME}/silva/taxonomy.tsv
+  ncbi:
+    blastdb: ${MICROSEQ_DB_HOME}/ncbi/16S_ribosomal_RNA
+    taxonomy: ${MICROSEQ_DB_HOME}/ncbi/taxonomy.tsv
+
+
+### ====  config/environment.yml  ==== ###
+# config/environment.yml : this file is meant to help tell Conda what to install eg 'Conda env create / env update' 
+# to create env for first ime use 'conda env create -f config/envionrment.yml or to update your environment 
+# 'conda env update -f config/environment.yml' 
+
+name: MicroSeq
+channels:
+  - conda-forge 
+  - bioconda  # where trimmomatic, blast, and cap3 live at 
+dependencies:
+  # core language/runtime 
+  - python = 3.10
+
+  # python libraries imported 
+  - pyyaml 
+  - pytest   # test runner 
+  - pyside6     # GUI 
+  - pip # pip-install extras 
+  - pynvim
+  - typing_extensions
+  - biom-format # Needed for BIOM 
+  - h5py # necessary for BIOM
+  - pandas
+  - taxonkit # for parsing and creating taxonomy.tsv for NCBI16s and SILVA  
+  - ete3 
+
+  # external bio-tools
+  - trimmomatic    # adds trimmomatic to $CONDA_PREFIX/bin  
+  - blast          # installs blastn, makeblastdb, etc. 
+  - cap3           # assembler tool used here for sanger seq files  
+
+
+### ====  pyproject.toml  ==== ###
+[build-system]
+requires = ["setuptools>=63", "wheel"]
+build-backend = "setuptools.build_meta" 
+
+[project]
+name = "microseq_tests"
+version = "0.1.0-alpha2"
+description= "MicroSeq sandbox package" 
+readme= "README.MD"
+requires-python = ">=3.9"
+dependencies = [
+  "pyyaml>=6",
+  "biopython>=1.8",
+  "PySide6",
+  "tqdm", 
+  ]
+
+[tool.setuptools]
+package-dir = {"" = "src"}     # tells setuptools hey my code lives here in src/ 
+
+[tools.setuptools.packages.find]
+where = ["src"]    # find all packages unders src/
+
+[project.scripts]
+microseq = "microseq_tests.microseq:main"
+microseq-setup = "microseq_tests.utility.fetch_dbs:main"
+microseq-fix-tsv = "microseq_tests.utility.io_utils:cli"
+microseq-gui = "microseq_tests.gui.__main__:launch" 
+
+
+### ====  scripts/fetch_dbs.py  ==== ###
+#!/usr/bin/env python3 
+"""
+fetch_dbs.py 
+@author José Cantú
+
+Douwnload/ unpack reference databases for MicroSeq:
+    - Greengenes2 (2022.10 backbone full-length) "gg2"
+    - SILVA 138.1 SSU NR99 "silva" 
+    - NCBI 16S_ribosomal_RNA "ncbi16s" 
+
+Files are stored under $MICROSEQ_DB_HOME (default is ~/.microseq_dbs). 
+Each DB direcotry ends up with BLAST-ready indices (makeblastdb -dbtype nucl). 
+
+Run this once, then point config/config.yaml at the same MICROSEQ_DB_HOME.
+
+"""
+
+import os, pathlib, subprocess, urllib.request, tarfile, sys, zipfile, shutil, gzip  
+
+DB_HOME = pathlib.Path(os.environ.get("MICROSEQ_DB_HOME", "~/.microseq_dbs")).expanduser()
+DB_HOME.mkdir(parents=True, exist_ok=True) # path check 
+
+def log(msg: str) -> None:
+    print(f"[fetch_dbs] {msg}")
+    
+    
+def dl(url: str, dest: pathlib.Path) -> None:
+    """Download URL only if dest does not yet exist."""
+    if dest.exists():
+        log(f"good {dest.name} already present")
+        return
+    log(f"→ downloading {url}")
+    urllib.request.urlretrieve(url, dest)
+    
+    
+def run(cmd: list[str]) -> None:
+    """Run shell command (show it, fail loud)."""
+    log("+" + " ".join(cmd))
+    subprocess.run(cmd, check=True)
+    
+    
+def makeblastdb(fasta: pathlib.Path, out_prefix: pathlib.Path) -> None:
+    if (out_prefix.with_suffix(".nsq")).exists():
+        log(f"BLAST index for {out_prefix.name} already exists")
+        return
+    run(
+        ["makeblastdb", "-in", str(fasta), "-dbtype", "nucl", "-out", str(out_prefix)]
+    )
+
+def extract_member(zip_path: pathlib.Path, pattern: str, out_path: pathlib.Path):
+    """
+    Copy the first file in *zip_path* whose name ends‑with *pattern* to *out_path*.
+    Works even when QIIME2 wraps files in random UUID folders.
+    """
+    with zipfile.ZipFile(zip_path) as zf:
+        try:
+            member = next(n for n in zf.namelist() if n.endswith(pattern))
+        except StopIteration:
+            raise ValueError(f"{pattern} not found inside {zip_path.name}")
+        with zf.open(member) as fin, open(out_path, "wb") as fout:
+            shutil.copyfileobj(fin, fout)
+
+    
+def fetch_gg2() -> None:
+    """ Download Greengenes 2 (2024‑09 backbone full‑length) and build BLAST    db. """
+    gg_dir = DB_HOME / "gg2"
+    gg_dir.mkdir(exist_ok=True)
+
+    # Use HTTP to dodge the incomplete‑TLS‑chain problem
+    BASE  = "http://ftp.microbio.me/greengenes_release/2024.09"
+    FILES = {
+        "backbone_fasta": "2024.09.backbone.full-length.fna.qza",
+        "taxonomy":       "2024.09.backbone.tax.qza",
+    }
+
+    # ── download & extract dna‑sequences.fasta ────────────────────────────────
+    backbone_qza = gg_dir / FILES["backbone_fasta"]
+    dl(f"{BASE}/{FILES['backbone_fasta']}", backbone_qza)
+
+    fasta = gg_dir / "dna-sequences.fasta"
+    if not fasta.exists():
+        log("→ extracting dna‑sequences.fasta from QZA")
+        extract_member(backbone_qza, "dna-sequences.fasta", fasta)
+
+
+    # ── taxonomy table ────────────────────────────────────────────────────────
+    tax_qza = gg_dir / FILES["taxonomy"]
+    dl(f"{BASE}/{FILES['taxonomy']}", tax_qza)
+    
+    taxonomy_tsv = gg_dir / "taxonomy.tsv"
+    if not taxonomy_tsv.exists():
+        log("→ extracting taxonomy.tsv from QZA")
+        extract_member(tax_qza, "taxonomy.tsv", taxonomy_tsv)
+    
+
+    # ── build BLAST index (creates .nsq/.nin/.nhr) ────────────────────────────
+    makeblastdb(fasta, gg_dir / "greengenes2_db")
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+    
+    
+# SILVA 138.1 SSU NR99 (truncated fasta)
+def fetch_silva() -> None:
+    silva_dir = DB_HOME / "silva"
+    silva_dir.mkdir(exist_ok=True)
+    
+    url = (
+        "ftp://ftp.arb-silva.de/release_138.1/Exports/"
+        "SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta.gz"
+    )
+    gz = silva_dir / "SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta.gz"
+    dl(url, gz)
+    
+    fasta = silva_dir / "SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta"
+    if not fasta.exists():
+        log("→ extracting SILVA with Python gzip")
+        with gzip.open(gz, "rb") as fin, open(fasta, "wb") as fout:
+            shutil.copyfileobj(fin, fout)
+
+    # Build BLAST index  
+    makeblastdb(fasta, silva_dir / "silva_db")  
+    
+    
+#  NCBI 16S_ribosomal_RNA  (pre‑built BLAST db tar.gz)
+def fetch_ncbi16s() -> None:
+    ncbi_dir = DB_HOME / "ncbi"
+    ncbi_dir.mkdir(exist_ok=True)
+    url = "ftp://ftp.ncbi.nlm.nih.gov/blast/db/16S_ribosomal_RNA.tar.gz"
+    tar_file = ncbi_dir / "16S_ribosomal_RNA.tar.gz"
+    dl(url, tar_file)
+    
+    # the tar already contains BLAST index files
+    if not (ncbi_dir / "16S_ribosomal_RNA.nsq").exists():
+        log("→ extracting NCBI 16S tarball")
+        tarfile.open(tar_file).extractall(ncbi_dir)
+        
+        
+# Run all fetchers
+def main():
+    for fn in (fetch_gg2, fetch_silva, fetch_ncbi16s):
+        try:
+            fn()
+        except Exception as e:
+            log(f"[ERROR] {fn.__name__} failed: {e}")
+            sys.exit(1)
+            
+    log(f"[DONE] all DBs are in {DB_HOME}")
+    
+    
+if __name__ == "__main__":
+    main() 
+
+
+### ====  src/microseq/__init__.py  ==== ###
+from importlib import import_module as _imp 
+_mod = _imp("microseq_tests")
+globals().update(vars(_mod)) # re-export everything 
+import sys 
+sys.modules[__name__] = _mod # one canonical module object 
+
+
+### ====  src/microseq_tests/__init__.py  ==== ###
+# Re-export the thin-wrapper module so callers can 
+# from microseq_tests import pipeline 
+from importlib import import_module as _imp 
+import importlib, sys 
+pipeline = _imp('.pipeline', __name__) # noqa: F401
+
+__all__ = ['pipeline']
+
+sys.modules["microseq"] = importlib.import_module(__name__) 
+__version__ = "0.1.0-alpha2" # bump in version will update 
+
+
+### ====  src/microseq_tests/assembly/__init__.py  ==== ###
+
+
+### ====  src/microseq_tests/assembly/de_novo_assembly.py  ==== ###
+"""
+microseq_tests/src/microseq_tests/assembly/de_novo_assembly.py 
+
+de_novo_assembly.py
+
+Wraps CAP3 for simple single-file assemblies. 
+
+Usage from CLI module:
+    de_novo_assembly("trimmed_reads.fasta", "asm/")
+    
+The CAP3 binary path is read from config.yaml.
+"""
+from __future__ import annotations 
+import logging
+L = logging.getLogger(__name__)
+
+from pathlib import Path
+import subprocess 
+import logging 
+from microseq_tests.utility.utils import load_config, setup_logging 
+
+PathLike = str | Path 
+
+def de_novo_assembly(input_fasta: PathLike, output_dir: PathLike, *, threads: int=1, **kwargs, ) -> Path: 
+    """
+    Run CAP3 on input_fasta. 
+
+    Parameters
+    input_fasta : str 
+        Trimmed reads in FASTA format here. 
+    output_dir: str 
+        Folder where CAP3 files are written in. 
+
+    Returns
+    pathlib.Path
+        Absolute path to ''*.cap.contigs''.
+        """
+    cfg = load_config()
+    cap3_exe = cfg["tools"]["cap3"] # path comes from config file 
+
+    in_path = Path(input_fasta).resolve()
+    out_dir = Path(output_dir).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [cap3_exe, str(in_path), "-p", str(threads)] 
+    L.info("RUN CAP3: %s (cwd=%s)", " ".join(cmd), out_dir)
+
+    try:
+        subprocess.run(cmd, check=True, cwd=out_dir, stderr=subprocess.PIPE, text=True) 
+    except subprocess.CalledProcessError as exc:
+        L.error("CAP3 failed (exit %s):\n%s", exc.returncode, exc.stderr)
+        raise 
+
+    contig_path = out_dir / f"{in_path.name}.cap.contigs"
+    if not contig_path.exists():
+        raise FileNotFoundError(contig_path)
+
+    L.info("CAP3 finished; contigs file: %s", contig_path) 
+    return contig_path 
+
+# optional CLI to call file directly 
+if __name__ == "__main__":
+    import argparse, sys
+    setup_logging()
+    ap = argparse.ArgumentParser(description="De-novo assembly via CAP3")
+    ap.add_argument("-i", "--input", required=True, help="Trimmed FASTA here!")
+    ap.add_argument("-o", "--output", required=True, help="Output directory") 
+    ap.add_argument("--threads", type=int, default=1, help="CPU threads") 
+    args = ap.parse_args() 
+    try:
+        de_novo_assembly(args.input, args.output, threads=args.threads)
+    except Exception as e:
+        L.error(e)
+        sys.exit(1) 
+
+
+
+
+### ====  src/microseq_tests/blast/run_blast.py  ==== ###
+# -- src/micrseq_tests/blast/run_blast.py ---------------
+from __future__ import annotations 
+import logging, os, subprocess, shutil  
+from pathlib import Path 
+from typing import Optional, Callable 
+from Bio import SeqIO 
+from microseq_tests.utility.utils import load_config, expand_db_path
+from microseq_tests.utility.progress import _tls # access to parent progress bar 
+import pandas as pd 
+
+L = logging.getLogger(__name__) 
+PathLike = str | Path
+
+FIELD_LIST = [ "qseqid","sseqid","pident","qlen","qcovhsp","length","evalue","bitscore","stitle"]
+def header_row() -> str: 
+    """Returns the TSV header line for BLAST hits including final newline. """ 
+    return "\t".join(FIELD_LIST) + "\n" 
+
+# db_key is the shorthand string for "gg2" or "silva" best keep it str here for future reference 
+def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
+              pct_id: float = 97.0, qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, on_progress: Optional[Callable[[int], None]] = None, log_missing: PathLike | None = None, clean_titles: bool = False) -> None:
+    """
+    Run blastn against one of the configured 16 S databases.
+    You will also emit a percentage progress bar I have set to make it look more a      ppealing. =) 
+
+    Parameters:
+    query_fa : PathLike
+        FASTA file to search (single sample or contigs).
+    db_key : str
+        Key in `config.yaml` under ``databases:`` (e.g. "gg2", "silva").
+    out_tsv : PathLike
+        Destination TSV file (BLAST 6 columns + extras listed below).
+    Thresholds applied by BLAST before writing to out_tsv. 
+    log_missing 
+        if given, appends isolate-ID to this file when resulting TSV contains ≤ 1 line header only -> zero hits ≥ pct_id / qcov).
+    """
+    cfg = load_config()
+    # look up DB path in config.yaml 
+    try: 
+        tmpl = cfg["databases"][db_key]["blastdb"]
+    except KeyError as e: # bad key 
+        valid = ", ".join(cfg["databases"].keys())
+        raise KeyError(
+                f"[run_blast] unknown DB key '{db_key}'."
+                f"Valid keys: {valid}") from e 
+    
+    blastdb = expand_db_path(tmpl) # fills in $HOME etc. 
+
+    # safety make sure query even exists before spawning BLAST .... 
+    q = Path(query_fa)
+    if not q.is_file():
+        raise FileNotFoundError(q) 
+    # compute total queries here 
+
+    total = sum(1 for _ in SeqIO.parse(q, "fasta"))
+    if total == 0:    # input is FASTQ 
+        total = sum(1 for _ in SeqIO.parse(q, "fastq")) # blast now accepts fastq on the offchance the user wants to use fastq instead of fasta.....  
+    if total == 0:
+        raise ValueError(
+            f"{q} contains no FASTA/FASTQ records - nothing to BLAST" 
+            )
+
+    Path(out_tsv).parent.mkdir(parents=True, exist_ok=True)
+
+
+    # column layout I want here 
+    DEFAULT_OUTFMT = f"6 {' '.join(FIELD_LIST)}" 
+
+    # grabbing from config or default to here if nothing in config 
+    cfg_blast = cfg.get("blast", {})
+    outfmt = cfg_blast.get("outfmt", DEFAULT_OUTFMT) 
+
+    # BLAST will write to a temp file first 
+    tmp_out = Path(out_tsv).with_suffix(".blasttmp")   
+
+
+    cmd=["blastn",
+         "-task", "blastn", # why not? 
+         "-query", str(q),   # casting q to str before passing to subprocess 
+         "-db", blastdb,
+         "-max_target_seqs", str(max_target_seqs), # keep only the best alignment here HSP that has the best-overall score
+         "-perc_identity", str(pct_id),
+         "-qcov_hsp_perc", str(qcov),  # here I am requiring ≥ 80% of query to align.... 
+         "-outfmt", outfmt,
+         "-out", str(tmp_out), # temporary path will append blast with header 
+         "-num_threads", str(threads),
+         ]
+
+    # merge env here so BLASTDB_LMDB_MAP_SIZE is kept 
+    env = os.environ.copy() # start from full parent env 
+
+    # force-set map-size 
+    env.setdefault("BLASTDB_LMDB", "0")
+
+    # remove any pre existing map-size so LMDB can't re-activate 
+    env.pop("BLASTDB_LMDB_MAP_SIZE", None) 
+
+    L.info("RUN BLAST:%s", " ".join(cmd))
+
+    # ------------ progress setup bar callback ------------------------ 
+  
+    if on_progress:
+        on_progress(0) 
+
+    proc = subprocess.Popen(
+            cmd, 
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=env,
+            )
+
+    done, next_log = 0, 5 # log every 5% incrementally ......
+
+    for ln in proc.stdout:
+        if ln and not ln.startswith("#"): # data row, not BLAST banner 
+            done += 1                         # one query finished 
+            pct = int(done / total * 100) 
+
+            if on_progress:                   # GUI / tqdm callback 
+                on_progress(min(pct, 99))    # keep 100% for the end 
+
+            if pct >= next_log: # terminal log 
+                L.info("Progress %d %%", pct)
+                next_log += 5
+
+    rc = proc.wait()
+    if rc:
+        raise RuntimeError(f"blastn exited with code {rc}") 
+
+    if on_progress:
+        on_progress(100) # final tick in progress bar GUI/tqdm callback 
+
+    # ---- tic outer stage bar exactly once --------------------
+    parent = getattr(_tls, "current", None)
+    if parent:
+        parent.update(1)
+
+
+    # post-processing adding header here --------------
+    header_needed  = outfmt.startswith("6 ") 
+    temp_empty = tmp_out.stat().st_size == 0 
+
+    # branch here ----- 
+    if header_needed: 
+        # Decide your empty-fily policy here so 
+        if temp_empty:
+            # zero hits -> means header-only file 
+            with open(out_tsv, "w") as fh:
+                fh.write(header_row())  
+        else:
+            # hits present head is appended then data is transfered over to final results file 
+            with open(out_tsv, "w") as final_fh, tmp_out.open("r") as blast_fh:
+                final_fh.write(header_row()) 
+                shutil.copyfileobj(blast_fh, final_fh) # copies over blast results after header row is appeded first  
+    else: 
+        # other formats (such as 7) no custom header 
+        shutil.move(tmp_out, out_tsv) 
+
+    L.info("BLAST finished OK -> %s", out_tsv)
+
+    # after BLAST call finishes this here will help in cleaning 
+    if clean_titles:
+        import re 
+        # keep only Genus-Species (dropping sseqid and hitlength information from database attached to name of ID that was submitted) 
+        df = pd.read_csv(out_tsv, sep="\t", names=FIELD_LIST, dtype=str) 
+
+        df["stitle"] = (
+            df["stitle"]
+            .str.split("|").str[-1] # drop gi|...|ref|.... 
+            .str.lstrip(">")  # stray '>' and whitespace assuming fastq or stitle is used here.......  
+            .str.strip() # this is what removes the whitespace  
+            .str.replace(r"^[A-Z]{1,4}\d{5,8}(?:\.\d+){0,2}\s+", "", regex=True) # SILVA "JN193283" prefix
+            )
+        df.to_csv(out_tsv, sep="\t", index=False, header=False)
+    
+    else: 
+        shutil.move(tmp_out, out_tsv)
+
+    # final cleanup 
+    tmp_out.unlink(missing_ok=True) 
+
+    # optional no hit logging setup ------------------ 
+
+    if log_missing:
+        n_lines = 0 
+        try:
+            n_lines = sum(1 for _ in Path(out_tsv).open()) 
+        except FileNotFoundError:
+            pass 
+
+        if n_lines <= 1:  # header-only TSV 
+            iso = Path(query_fa).stem
+            L.debug(
+                    "[post-filter] isolate %s -> 0 hits ≥%.1f%% id / ≥%.1f%% qcov",
+                    iso, pct_id, qcov, ) 
+            with open(log_missing, "a") as fh: 
+                fh.write(f"{iso}\n") 
+
+
+
+
+
+
+### ====  src/microseq_tests/gui/__init__.py  ==== ###
+
+
+### ====  src/microseq_tests/gui/__main__.py  ==== ###
+from .main_window import QApplication, MainWindow
+import sys 
+
+app = QApplication(sys.argv)
+w = MainWindow(); w.show()
+sys.exit(app.exec()) 
+
+
+### ====  src/microseq_tests/gui/main_window.py  ==== ###
+# src/microseq_tests/gui
+
+from __future__ import annotations 
+import logging
+L = logging.getLogger(__name__)
+
+import sys, logging, traceback, subprocess, shlex  
+from pathlib import Path 
+from typing import Optional 
+
+from PySide6.QtCore import Qt, QObject, QThread, Signal, Slot, QMetaObject, Q_ARG
+from PySide6.QtWidgets import (
+        QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
+        QHBoxLayout, QPushButton, QLabel, QTextEdit, QSpinBox, QMessageBox, QComboBox, QProgressBar   
+        )
+
+# ==== MicroSeq wrappers ---------- 
+from microseq_tests.pipeline import (
+        run_blast_stage, 
+        run_trim,
+        run_assembly,
+        run_add_tax,
+        run_postblast,
+        )
+from microseq_tests.utility.utils import setup_logging, load_config 
+
+# Worker class ---------------- 
+class Worker(QObject):
+    """Background runner living in its own QThread.""" 
+    finished = Signal(int) # exit-code 0 = success 
+    log = Signal(str) # text lines for log 
+    progress = Signal(int) 
+
+    # Which stage here to run and its kwargs are injected at construction 
+    def __init__(self, fn, *args, **kwargs):
+        super().__init__()
+        self._fn = fn 
+        self._args = args 
+        self._kwargs = kwargs 
+
+
+    @Slot() # design to warn if any errors occur 
+    def run(self):
+        try:
+            # --------- live banner so GUI shows immediate activity -- 
+            L.info("▶ Starting BLAST…")
+            rc = self._fn(*self._args, **self._kwargs) # adjusted to one source of truth here so progress bar is queued to run_blast actual run 
+            L.info("✔ BLAST finished with rc=%s", rc)
+
+        except Exception:
+            self.log.emit(traceback.format_exc())
+            rc = 1 
+        self.finished.emit(rc) 
+
+
+# ---- Main Window Constructor 
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("MicroSeq GUI α") # title for it 
+        self.resize(800, 520) # size of app considering also log space here 
+
+        # widgets --------------------------------------------------------
+        self.fasta_lbl = QLabel("FASTA / AB1: —")
+        browse_btn = QPushButton("Browse..")
+        browse_btn.clicked.connect(self._choose_infile) 
+
+        # label place holder and browse button wired to file picker 
+        self.id_spin = QSpinBox()
+        self.id_spin.setRange(50, 100) # for simplicity I set spinbox ID % 50-100 threshold 
+        self.id_spin.setValue(97) # identity 97% default 
+        self.id_spin.setSuffix(" % ID")
+
+        self.threads_spin = QSpinBox()
+        self.threads_spin.setRange(1, 32)
+        self.threads_spin.setValue(1)
+        self.threads_spin.setSuffix(" CPU")
+
+        # ----- alignment coverage (% of query aligned) 
+        self.qcov_spin = QSpinBox()
+        self.qcov_spin.setRange(10, 100)
+        self.qcov_spin.setValue(80)
+        self.qcov_spin.setSuffix(" % Q-cov")
+
+        # -------- max target hits 
+        self.hits_spin = QSpinBox()
+        self.hits_spin.setRange(1, 500)
+        self.hits_spin.setValue(5)
+        self.hits_spin.setSuffix(" hits") 
+
+        # ------- progress bar ----------
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+
+        # here you just run blast ....
+        self.run_btn = QPushButton("Run Blast")
+        self.run_btn.clicked.connect(self._launch_blast)
+
+        # lets you scroll log output and nowarp keeps long commadn lines intact 
+        self.log_box = QTextEdit(readOnly=True, lineWrapMode=QTextEdit.NoWrap)
+
+        # ---- Layout here will update UX -------------------------
+        top = QHBoxLayout()
+        top.addWidget(self.fasta_lbl)
+        top.addWidget(browse_btn) 
+
+        # horizontal row for file picker 
+        mid = QHBoxLayout()
+        
+        # --- allows for database selection here in UX --------------------
+        self.db_box = QComboBox()   
+        self.db_box.addItems(load_config()["databases"].keys())
+
+
+        mid.addWidget(QLabel("DB"))
+        mid.addWidget(self.db_box)
+
+
+        # --- concerning identity ---- just look at Qlabel it will tell you José 
+        mid.addWidget(QLabel("Identity")) 
+        mid.addWidget(self.id_spin)
+        
+        mid.addWidget(QLabel("Q-cov"))
+        mid.addWidget(self.qcov_spin)
+
+        mid.addWidget(QLabel("Max hits"))
+        mid.addWidget(self.hits_spin) 
+
+        mid.addWidget(QLabel("Threads"))
+        mid.addWidget(self.threads_spin) 
+
+        mid.addWidget(self.progress) 
+        
+        mid.addStretch()  # pushes Run button to the far right here  
+        mid.addWidget(self.run_btn) 
+
+        # vertical stack picker row, settings row, then logpane expands 
+        outer = QVBoxLayout()
+        outer.addLayout(top)
+        outer.addLayout(mid)
+        outer.addWidget(self.log_box) 
+
+        # Embed composite layout as the window's central widget 
+        root = QWidget(); root.setLayout(outer)
+        self.setCentralWidget(root) 
+
+        # state and logging connection 
+        self._infile: Optional[Path] = None 
+        setup_logging(level=logging.INFO) # file + console stderr 
+        logging.getLogger().handlers.append(_QtHandler(self.log_box)) # appended to log_box 
+    
+    # ---- file picker --------------------------
+    def _choose_infile(self):
+# returns path string and intial dir = home filters removes other file types
+        path, _ = QFileDialog.getOpenFileName(
+                self, "Select FASTA/FASTQ/AB1", 
+                str(Path.home()), "Seq files (*.fasta *.fa *.ab1)"
+                )
+        # stores path; updates label for user feedback 
+        if path:
+            self._infile = Path(path)
+            self.fasta_lbl.setText(f"FASTA / AB1: {self._infile.name}") 
+    
+    # ---- Blast Stage Demo ------------------------------
+    # guarding against accidental click 
+    def _launch_blast(self):
+        if not self._infile:
+            QMessageBox.warning(self, "No input", "Choose a file first.")
+            return
+
+        self.progress.setValue(0)  # resets progress bar during each run 
+
+        # derive output file beside input; disables button; logs starts 
+        hits_path = self._infile.with_suffix(".hits.tsv")
+
+        self.run_btn.setEnabled(False)
+        self.log_box.append(f"\n▶ BLAST {self._infile.name} -> {hits_path.name}")
+
+        # worker and thread wiring -------------------
+        worker = Worker(
+                run_blast_stage,
+                self._infile,
+                self.db_box.currentText(),  # default DB key selection 
+                hits_path,
+                identity=self.id_spin.value(),
+                qcov=self.qcov_spin.value(),
+                max_target_seqs=self.hits_spin.value(),
+                threads=self.threads_spin.value(),
+                # prgress bar -> Worker.progress -> GUI thread 
+                on_progress=None, # placeholder 
+                )
+        # now wire the real callback 
+        worker._kwargs["on_progress"] = worker.progress.emit 
+        # injecting wrapper + args into Worker; moves into new thread 
+        thread = QThread(self) # autodeleted with window 
+        worker.moveToThread(thread) 
+
+        # wire signal between log streaming, completion and thread shutdown
+
+        worker.log.connect(self.log_box.append)
+        worker.progress.connect(self.progress.setValue) 
+        thread.started.connect(worker.run)
+        worker.finished.connect(lambda rc: self._done(rc, hits_path))
+        worker.finished.connect(thread.quit)
+
+        # keep references so closeEvent can see them 
+        self._worker = worker 
+        self._thread = thread 
+
+        print("DEBUG – about to start Worker with", self.db_box.currentText(),
+        self.id_spin.value(), self.qcov_spin.value(),
+        self.hits_spin.value(), self.threads_spin.value(), flush=True)
+        thread.start() 
+
+    # Callback -------------------------
+    def _done(self, rc: int, out: Path):
+        # appends outcome indicator to log 
+        msg = "Success" if rc == 0 else f"Failed (exit {rc})"
+        self.log_box.append(f"● {msg}\n") 
+        # dialog only on success; always re-enable run button 
+        if rc == 0:
+            QMessageBox.information(self, "BLAST finished",
+                                    f"Hits table written:\n{out}")
+        self.run_btn.setEnabled(True)
+        self._worker = None
+        self._thread = None 
+    # closeEvent ----------------------------
+    def closeEvent(self, event):
+        """
+        Prevent the window from clsoing while BLAST thread is still running.
+        """
+        if getattr(self, "_thread", None) and self._thread.isRunning():
+            # ask the thread to finish, then auto-close the window
+            self._worker.finished.connect(lambda _: self.close())
+            self._thread.requestInterruption()    # politely signal
+            event.ignore()                        # keep window open
+            self.log_box.append("⚠ Waiting for BLAST thread to finish…")
+        else:
+            event.accept()
+
+
+# Custom QT Logging Handler --------------------------------
+class _QtHandler(logging.Handler):
+    """Relay root-logger records into the GUI log pane.""" 
+    def __init__(self, box: QTextEdit):
+        super().__init__(level=logging.INFO)
+        self._box = box 
+        self.setFormatter(logging.Formatter("%(asctime)s  %(levelname)s:  %(message)s"))
+
+    def emit(self, record):
+        # queued connection ensures thread-safety
+        QMetaObject.invokeMethod(
+            self._box, "append", Qt.QueuedConnection,
+            Q_ARG(str, self.format(record))
+        )
+
+# Application entry point ------------------
+def launch():
+    app = QApplication(sys.argv) 
+    win = MainWindow() 
+    win.show() 
+    sys.exit(app.exec())
+
+# allow: python -m microseq_tests.gui 
+if __name__ == "__main__":
+    launch() 
+
+        
+
+
+
+
+### ====  src/microseq_tests/microseq.py  ==== ###
+# src/microseq_tests/microseq.py
+from __future__ import annotations
+import argparse, pathlib, logging, shutil, glob, sys, subprocess, os   
+from microseq_tests.utility.progress import stage_bar 
+from microseq_tests.utility.merge_hits import merge_hits 
+import microseq_tests.trimming.biopy_trim as biopy_trim
+# ── pipeline wrappers (return rc int, handle logging) ──────────────
+from microseq_tests.pipeline import (
+        run_ab1_to_fastq, run_fastq_to_fasta,) 
+from microseq_tests.utility.utils import setup_logging, load_config 
+from microseq_tests.trimming.quality_trim import quality_trim 
+from microseq_tests.assembly.de_novo_assembly import de_novo_assembly 
+from microseq_tests.blast.run_blast import run_blast
+from microseq_tests.post_blast_analysis import run as postblast_run 
+from microseq_tests.utility.add_taxonomy import run_taxonomy_join
+# ── low-level helpers (do the actual work, return Path/Seq list) ──
+from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq 
+from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta
+from Bio import SeqIO 
+from functools import partial
+from microseq_tests.utility.merge_hits import merge_hits as merged_hits 
+
+
+
+def main() -> None:
+    cfg = load_config() 
+    ap = argparse.ArgumentParser(
+    prog="microseq", description="MicroSeq QC-trim Fastq; optional CAP3 assembly; blastn search; taxonomy join; optional BIOM export")
+    # adding global flags here ...... 
+    ap.add_argument("--workdir", default=cfg.get("default_workdir","data"), help="Root folder for intermediate outputs (default: ./data) note: Yaml is placed as a 2ndary place for a shared repo project which can you modify and change without using workdir flag otherwise use --workdir to point where you want to set up your individual project")
+    ap.add_argument("--threads", type=int, default=1, 
+                    help="CPU threads for parallel stages")
+    ap.add_argument("-v", "--verbose", action="count", default=0, help="-v: info, -vv: use for debugging") 
+    sp = ap.add_subparsers(dest="cmd", required=True)
+
+    # trimming sub command 
+    p_trim = sp.add_parser("trim", help="Quality trimming via Trimmomatic")
+    p_trim.add_argument("-i", "--input", required=True, help="FASTQ")
+    p_trim.add_argument("-o", "--output", required=False, help="ignored when --workdir is used or you can specifiy your own output if you don't want the automated version workdir gives you")
+    p_trim.add_argument("--sanger", dest="sanger", action="store_true", help="Use BioPython trim for abi files Input is the AB1 folder -> convert + trim; autodetected if omitted") 
+    p_trim.add_argument("--no-sanger", dest="sanger", action="store_false", help="Force FASTQ mode") 
+    p_trim.set_defaults(sanger=None) # default = auto-detect in this case 
+    p_trim.add_argument("--link-raw", action="store_true", help="Symlink AB1 traces into workdir instead of copying") 
+    
+    # ── AB1 → FASTQ -------------------------------------------------------
+    p_ab1 = sp.add_parser("ab1-to-fastq",
+                          help="Convert ABI chromatograms to FASTQ")
+    p_ab1.add_argument("-i", "--input_dir",  required=True, metavar="DIR",
+                       help="Folder containing *.ab1 files")
+    p_ab1.add_argument("-o", "--output_dir", required=True, metavar="DIR",
+                       help="Folder to write *.fastq files")
+    p_ab1.add_argument("--overwrite", action="store_true",
+                       help="Re-create FASTQ even if it exists")
+
+    # ── FASTQ → FASTA -----------------------------------------------------
+    p_fq = sp.add_parser("fastq-to-fasta",
+                         help="Merge all FASTQ in a folder into one FASTA")
+    p_fq.add_argument("-i", "--input_dir",    required=True, metavar="DIR",
+                      help="Folder with *.fastq / *.fq")
+    p_fq.add_argument("-o", "--output_fasta", required=True, metavar="FASTA",
+                      help="Output FASTA file path") 
+    
+    # assembly 
+    p_asm = sp.add_parser("assembly", help="De novo assembly via CAP3")
+    p_asm.add_argument("-i", "--input", required=True)
+    p_asm.add_argument("-o", "--output", required=True) 
+
+    # blast 
+    db_choices = list(cfg["databases"].keys())    # e.g. here ['gg2', 'silva', 'ncbi16s']
+    p_blast = sp.add_parser("blast", help="Blast search against 16S DBs")
+    p_blast.add_argument("-i", "--input", required=True)
+    p_blast.add_argument("-d", "--db", choices=db_choices, required=True)
+    p_blast.add_argument("-o", "--output", required=True)
+    p_blast.add_argument("--identity", type=float, default=97.0, help="percent-identity threshold (default: %(default)s) you can adjust value based on needs of project")
+    p_blast.add_argument("--qcov", type=float, default=80.0, help="query coverage %% (default: %(default)s) again you can adjust value based on needs of project")
+    p_blast.add_argument("--max_target_seqs", type=int, default=5, help="How many DB hits to retain per query (passed to BLAST")
+    p_blast.add_argument("--log-missing", metavar="PATH", help="Append sample IDs that yield zero hits to this file for review.")
+    p_blast.add_argument("--clean-titles", action="store_true", help="Strip the accession & extra fields from stitle," "leaves a tidy Genus-Species handy label") 
+
+
+    # -- TSV Merge Sub --
+    p_merge = sp.add_parser("merge-hits", help="Concatenate many BLAST TSV files into one large TSV")
+    p_merge.add_argument("-i", "--input", nargs="+", required=True, metavar="TSV", help="Either a list of *.tsv or a single glob/dir (use shell-globs yay lol)", 
+                         )
+    p_merge.add_argument("-o", "--output", required=True, metavar="TSV", help="Destination merged TSV",) 
+                         
+    # taxonomy join after postblast + database autolookup 
+    p_tax = sp.add_parser("add_taxonomy", help="Append a taxonomy column to a BLAST table")
+    p_tax.add_argument("-i", "--hits", required=True, metavar="TSV", help="Blast merge table (needs sseqid & qseqid)")
+    p_tax.add_argument("-d", "--db", required=True, choices=db_choices, help="Database key (gg2, silva, ncbi) autolocate taxonomy.tsv")
+    p_tax.add_argument("-o", "--output", required=True, help="Output TSV with appended taxonomy inplace!")
+    p_tax.add_argument("--fill-species", action="store_true", help="When SILVA lineage ends at genus and pident is %, " "append Genus-Species from stitle")  
+
+
+    # postblast BIOM 
+    p_BIOM = sp.add_parser("postblast", help="Join BLAST + metadata -> BIOM(+CSV)")
+    p_BIOM.add_argument("-b", "--blast_file", required=True, help="BLAST hits TSV produced by MicroSeq blast =)")
+    p_BIOM.add_argument("-m", "--metadata", required=True, help="Metadata TSV (must have the sample_id column)")
+    p_BIOM.add_argument("-o", "--output_biom", required=True, help="Output .biom path; .csv written alongside")
+    p_BIOM.add_argument("--sample-col", help="Column in metadata to treat as sample_id helps MicroSeq known which column to treat as such if not sample_id itself") 
+    p_BIOM.add_argument("--json", action="store_true", help="Also emit a pretty-printed JSON BIOM alonside") 
+    p_BIOM.add_argument("--post_blast_identity", type=float, default=97.0, help="minimum %% identity to keep when selecting the best hit (default: %(default)s) you also have the decision to modify to what number you please besides the default") 
+    # parse out arguments 
+    args = ap.parse_args()
+
+    LEVEL = {0: logging.WARNING, 1: logging.INFO}.get(args.verbose, logging.DEBUG)
+    setup_logging(level=LEVEL)  # reusing helper, but expose by level 
+
+    # createing the directory for workdir
+    workdir_arg = args.workdir or cfg.get("default_workdir", "data")
+    workdir = pathlib.Path(workdir_arg).expanduser().resolve() 
+    for sub in ("raw", "raw_fastq", "qc", "asm", "blast", "biom", "passed_qc_fastq", "failed_qc_fastq"):
+        (workdir / sub).mkdir(parents=True, exist_ok=True) 
+   
+   # use workdir in every brnach 
+    if args.cmd == "trim":
+        inp = pathlib.Path(args.input)
+        if args.sanger is None:
+            args.sanger = (inp.suffix.lower() == ".ab1") or any(inp.glob("*.ab1"))
+        
+        if args.sanger:
+            # -- preparing raw_ab1 folder copy or symlink --- prefernece for symlink here for me --- 
+            dst = workdir / "raw_ab1"
+
+            # Here you clean up leftovers from a previous run so the command is idempotent assuming you use the same directory... (rare scenario) 
+
+            if dst.exists():
+                if dst.is_symlink() or dst.is_file():
+                    dst.unlink()     # removes stale symlink or stray file 
+                else:
+                    shutil.rmtree(dst)  # removes old directory tree 
+
+            if args.link_raw:
+                # symlink handles file vs directory 
+                dst.symlink_to(inp.resolve(), target_is_directory=inp.is_dir())
+            else: 
+                # physical copy now 
+                if inp.is_dir():
+                    # copy folder into raw_ab1/ 
+                    shutil.copytree(inp, dst, dirs_exist_ok=True)
+                else: 
+                    # single AB1 file 
+                    dst.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(inp, dst / inp.name)
+            
+            # --- convert AB1 to FASTQ --------------- 
+            raw_fastq_dir = workdir / "raw_fastq"
+            ab1_folder_to_fastq(dst, raw_fastq_dir)
+
+            # --- BioPython QC trim writes to passed_qc_fastq/ ------- 
+            trim_out = workdir / "passed_qc_fastq"
+            biopy_trim.trim_folder(
+                    input_dir=raw_fastq_dir,
+                    output_dir=workdir / "qc",
+                    threads=args.threads,
+                    )
+
+            # ---- FASTQ converted to FASTA --------------------
+            fasta = fastq_folder_to_fasta(
+                    trim_out,       # here FASTQs are kept 
+                    workdir / "qc" / "trimmed.fasta" 
+                    )
+        else:
+            # --- Trimmomatic QC for regular FASTQ ---------------
+            out_fq = workdir / "qc" / "trimmed.fastq" 
+            quality_trim(args.input, out_fq, threads=args.threads)
+
+            fasta = fastq_folder_to_fasta(
+                    workdir / "qc", # contains the trimmed.fastq 
+                    workdir / "qc" / "trimmed.fasta" 
+                    )
+        print("FASTA ready:", fasta)
+    
+
+
+    elif args.cmd == "ab1-to-fastq":
+        rc = run_ab1_to_fastq(
+                args.input_dir,
+                args.output_dir,
+                overwrite=args.overwrite,
+                )
+        print(" AB1->FastQ exit-code:", rc)
+
+
+    elif args.cmd == "fastq-to-fasta":
+        rc = run_fastq_to_fasta(
+                args.input_dir,
+                args.output_fasta,
+                )
+        print("FASTQ -> FASTA exit-code:", rc) 
+
+
+    elif args.cmd == "assembly":
+        de_novo_assembly(workdir / "qc" / "trimmed.fasta",
+                         workdir / "asm",
+                         threads=args.threads,
+                         )
+
+    elif args.cmd == "blast":
+        total = sum(1 for _ in SeqIO.parse(args.input, "fasta"))
+        if total == 0:          # fallback for FASTQ 
+            total = sum(1 for _ in SeqIO.parse(args.input, "fastq"))
+
+        # treat this as one monolithic bar for all isolates/samples in one run 
+        with stage_bar(total, desc="blast", unit="seq"):
+            run_blast(
+                pathlib.Path(args.input),  # temporary patch for blasting and post biom only will need to think around 
+                args.db,
+                pathlib.Path(args.output),
+                pct_id=args.identity,
+                qcov=args.qcov,
+                max_target_seqs = args.max_target_seqs, 
+                threads=args.threads,
+                # I removed the on_progress var here since the nested helper updates parent bar via thread-local _tls 
+                log_missing=pathlib.Path(args.log_missing) if args.log_missing else None,
+                clean_titles=args.clean_titles, 
+            )
+
+    elif args.cmd == "merge-hits":
+        # resolve globs after argparse to keep it cross-platform functional 
+        from microseq_tests.utility.merge_hits import merge_hits  
+
+        merged = merge_hits(args.input, args.output) # progress bar & logging  
+        print("✓ merged →", merged) 
+
+
+    elif args.cmd == "postblast":
+        out_biom = workdir / "biom" / args.output_biom 
+        out_biom.parent.mkdir(exist_ok=True, parents=True)
+
+        postblast_run(
+                pathlib.Path(args.blast_file),
+                pathlib.Path(args.metadata),
+                out_biom,
+                write_csv=True,
+                sample_col=args.sample_col,
+                identity_th=args.post_blast_identity, 
+                )
+        print(f" ✓ BIOM : {out_biom}")
+        print(f" ✓ CSV  : {out_biom.with_suffix('.csv')}") 
+
+        if args.json:
+            json_out = out_biom.with_suffix(".json")
+            logging.info("Converting BIOM -> JSON ...")
+
+            if not shutil.which("biom"):
+                logging.error("'biom' CLI not found - install biom-format")
+                sys.exit(1) 
+
+            subprocess.check_call(
+                    ["biom", "convert",
+                     "-i", out_biom, "-o", json_out,
+                     "--to-json"])
+            print(f" ✓ JSON : {json_out}") 
+            
+
+    elif args.cmd == "add_taxonomy":
+    # --db key -> ${MICROSEQ_DB_HOME}/key-db-used/taxonomy.tsv 
+        root = pathlib.Path(os.environ.get("MICROSEQ_DB_HOME", "~/.microseq_dbs")).expanduser() 
+        tax_fp = (root / args.db / "taxonomy.tsv").resolve() # canonical path  
+        if not tax_fp.exists():
+            raise FileNotFoundError(
+                    f"expected {tax_fp} - run microseq-setup first please? Thank you. =)")
+
+        # normalizing the other CLI paths as well 
+        hits_fp = pathlib.Path(args.hits).expanduser().resolve()  
+        output_fp = pathlib.Path(args.output).expanduser().resolve() 
+
+
+        run_taxonomy_join(hits_fp, tax_fp, output_fp)
+        print(f" ✓ CSV+tax : {output_fp}")
+
+
+if __name__ == "__main__":
+    main() 
+
+
+
+
+
+### ====  src/microseq_tests/pipeline.py  ==== ###
+"""
+microseq_tests.pipeline
+Thin wrappers around the five CLI stages.
+Return an int exit-code (0 = success) & raise on fatal errors.
+"""
+
+from __future__ import annotations
+from pathlib import Path
+from typing import Union, Sequence
+import logging
+
+# pull the existing implementation functions
+from microseq_tests.trimming.quality_trim import quality_trim
+from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq as ab1_to_fastq 
+from microseq_tests.trimming.biopy_trim import trim_folder as biopy_trim
+from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta as fastq_to_fasta
+from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
+from microseq_tests.blast.run_blast import run_blast
+from microseq_tests.utility.add_taxonomy import run_taxonomy_join
+from microseq_tests.post_blast_analysis import run as postblast_run
+
+__all__ = [
+        "run_trim",
+        "run_assembly",
+        "run_blast_stage",
+        "run_add_tax",
+        "run_postblast",
+        "run_ab1_to_fastq",
+        "run_fastq_to_fasta",
+        ] 
+
+PathLike = Union[str, Path]
+L = logging.getLogger(__name__)
+
+# ───────────────────────────────────────────────────────── trimming
+def run_trim(input_path: PathLike,
+             workdir: PathLike,
+             sanger: bool = False) -> int:
+    """
+    QC-trim FASTQ or convert+trim an AB1 folder.
+
+    Returns 0 on success.
+    """
+    work = Path(workdir)
+    work.mkdir(parents=True, exist_ok=True)
+
+    if sanger:
+        fastq_dir = work / "raw_fastq"
+        ab1_to_fastq(Path(input_path), fastq_dir)
+        biopy_trim(fastq_dir, work / "qc")
+    else:
+        out_fq = work / "qc" / "trimmed.fastq"
+        quality_trim(input_path, out_fq)
+
+    fastq_to_fasta(work / "qc", work / "qc" / "trimmed.fasta")
+    L.info("Trim finished → %s", work / "qc" / "trimmed.fasta")
+    return 0
+
+
+# ───────────────────────────────────────────────────────── assembly
+def run_assembly(fasta_in: PathLike,
+                 out_dir: PathLike) -> int:
+    de_novo_assembly(Path(fasta_in), Path(out_dir))
+    return 0
+
+
+# ───────────────────────────────────────────────────────── BLAST
+def run_blast_stage(fasta_in: PathLike,
+                    db_key: str,
+                    out_tsv: PathLike,
+                    identity: float = 97.0,
+                    qcov: float = 80.0,
+                    max_target_seqs: int = 5,
+                    threads: int = 1, on_progress=None) -> int:
+    run_blast(fasta_in, db_key, out_tsv,
+              pct_id=identity, qcov=qcov,
+              max_target_seqs=max_target_seqs,
+              threads=threads,
+              on_progress=on_progress)
+    return 0
+
+
+# ───────────────────────────────────────────────────────── add-taxonomy
+def run_add_tax(hits: PathLike,
+                taxonomy_tsv: PathLike,
+                out_tsv: PathLike) -> int:
+    run_taxonomy_join(hits, taxonomy_tsv, out_tsv)
+    return 0
+
+
+# ───────────────────────────────────────────────────────── post-BLAST
+def run_postblast(blast_hits: PathLike,
+                  metadata: PathLike,
+                  out_biom: PathLike,
+                  sample_col: str | None = None,
+                  identity_th: float = 97.0) -> int: 
+    postblast_run(blast_hits, metadata, out_biom,
+                  write_csv=True, sample_col=sample_col, 
+                  identity_th = identity_th)
+    return 0
+
+# ───────────────────────────────────────────────────────── AB1 → FASTQ
+def run_ab1_to_fastq(
+    input_dir: PathLike,
+    output_dir: PathLike,
+    *,
+    overwrite: bool = False,
+) -> int:
+    """
+    Convert every *.ab1 in *input_dir* to FASTQ files in *output_dir*.
+    Returns 0 on success, 1 on failure (and logs the error).
+    """
+    try:
+        written: Sequence[Path] = ab1_to_fastq(input_dir, output_dir, overwrite=overwrite)
+        L.info("AB1→FASTQ wrote %d files to %s", len(written), output_dir)
+        return 0
+    except Exception:
+        L.exception("AB1→FASTQ failed")
+        return 1
+
+
+# ───────────────────────────────────────────────────────── FASTQ → FASTA
+def run_fastq_to_fasta(
+    input_dir: PathLike,
+    output_fasta: PathLike,
+) -> int:
+    """
+    Merge all *.fastq in *input_dir* into a single FASTA *output_fasta*.
+    """
+    try:
+        out = fastq_to_fasta(input_dir, output_fasta)
+        L.info("FASTQ→FASTA wrote %s", out)
+        return 0
+    except Exception:
+        L.exception("FASTQ→FASTA failed")
+        return 1
+
+
+
+### ====  src/microseq_tests/post_blast_analysis.py  ==== ###
+# microseq_test/src/microseq_test/post_blast_analysis.py 
+
+"""
+post_blast_analysis.py 
+Take a BLAST TSV + metadata TSV/CSV => write one-column BIOM + Prism-Friendly CSV mirror. 
+""" 
+
+from __future__ import annotations 
+from pathlib import Path 
+import csv, logging, pandas as pd, numpy as np 
+from biom import Table
+from biom.util import biom_open 
+from microseq_tests.utility.utils import load_config, setup_logging # for default DB paths here
+from microseq_tests.utility.io_utils import normalise_tsv 
+
+setup_logging() # initialize global logging by configure as root logger  
+logger = logging.getLogger(__name__) # Now this then set as the real logger by passing everything from the root logger which doesn't return anything on its own  
+
+# -------
+# constants - expose as CLI flags for later on will write them in master file CLI
+DEFAULT_IDENTITY_TH = 97.0 # % identity threshold using for species-grade hits OTU 
+
+# --- helper function: read table with auto delimiter detecter ---------
+def _smart_read(path: Path) -> pd.DataFrame:
+    """
+    Robust reader that keeps the GG2 lineage intact 
+    *.tsv force tab as the delimiter here so taxnomy strings may contain spaces that autosniffing for whatever reason explode them. 
+    different file such as csv then fall back to older sniffer logic. 
+    """
+    if path.suffix.lower() == ".tsv":
+        df = pd.read_csv(normalise_tsv(path), sep='\t')
+        logger.info(f"Loaded {path.name} as explicit TSV rows={len(df)}")
+        return df 
+
+    sample = path.read_text(errors="replace")[:1024]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters="\t,;")
+        sep = dialect.delimiter
+    except csv.Error:
+        sep = r"\s+"
+    df = pd.read_csv(path, sep=sep, engine="python")
+    logger.info(f"Loaded {path.name} with delimiter = '{sep}' rows={len(df)}")
+    return df 
+
+# ----- helper function: choose the metadata column matching BLAST sample_IDs ------- 
+def _detect_sample_col(meta: pd.DataFrame, 
+    blast_ids: set[str],
+    preferred: str | None = None) -> str:
+    """Return name of metadata column to treat as sample_id.""" 
+    
+    # explicit --sample-col flag to use 
+    if preferred and preferred in meta.columns:
+        return preferred 
+
+    # config.yaml default 
+    cfg_col = load_config().get("metadata", {}).get("sample_col")
+    if cfg_col and cfg_col in meta.columns:
+        return cfg_col 
+
+    # canonical name 
+    if "sample_id" in meta.columns:
+        return "sample_id" 
+
+    # fuzzy overlap > 80% 
+    for col in meta.columns:
+        overlap = blast_ids & set(meta[col].astype(str)) 
+        if len(overlap) / len(blast_ids) >= 0.8:
+            return col 
+
+    raise ValueError("No metadata column matches BLAST sample IDs either rename to sample_id or use the --sample-col flag") 
+
+
+# ---taxonomy depth function here for tie-breaking (e-values) ------------- Note this assumed you blasted against GG2 ONLY given how its parsed out 
+def _tax_depth(taxon: str | float) -> int:
+    """Return how many ranks are filled in the lineage string."""
+    if not isinstance(taxon, str):
+        return 0 # NaN or non-string means depth of 0.
+    parts = [seg.split("__", 1)[-1] for seg in taxon.split(";")] # strip prefix if present 
+    return sum(bool(p.strip()) for p in parts) 
+
+
+
+# --- chosing the best hit per sample ------------
+
+def _choose_best_hit(df: pd.DataFrame, *, identity_th: float) -> pd.DataFrame:
+    """
+    Best hit per sample with robustness:
+        keep only rows meeting species‑level identity (≥97 %)
+        then choose lowest e‑value, deepest taxonomy, highest bitscore
+    """
+    # filter on identity threshold (qcov already filtered upstream)
+    if "pident" in df.columns:
+        df["pident"] = pd.to_numeric(df["pident"], errors="coerce")
+        df = df[df["pident"] >= identity_th].copy()
+
+    if df.empty:
+        raise ValueError("No BLAST hits survive identity threshold")
+
+    df.loc[:, "tax_depth"] = df["taxonomy"].map(_tax_depth)
+    df = df.sort_values(
+        ["sample_id", "evalue", "tax_depth", "bitscore"],
+        ascending=[True, True, False, False]
+    )
+    return (
+        df.groupby("sample_id", as_index=False)
+          .first()
+          .drop(columns="tax_depth")
+    )
+
+
+
+
+# ---CSV mirror for prism -----------------
+def biom_to_csv(biom_path: Path) -> Path: 
+    """Convert one-column BIOM to Prism friendly wide CSV (samples in rows).""" 
+    with biom_open(str(biom_path)) as fh: 
+        table = Table.from_hdf5(fh) 
+
+    df = table.to_dataframe(dense=True).T       # rows = samples  
+    out_csv = biom_path.with_suffix(".csv")
+    df.to_csv(out_csv)
+    logger.info(f"Wrote {out_csv}") 
+    return out_csv 
+
+# ----- running file API! ---------------------------------
+def run(blast_tsv: Path,
+        metadata_tsv: Path, 
+        out_biom: Path,
+        write_csv: bool = True,
+        sample_col: str | None = None,
+        identity_th: float = DEFAULT_IDENTITY_TH) -> None:
+
+        # ---- more tolerant parser: any whitespace, not just tabs ---------
+        blast = _smart_read(blast_tsv)
+        meta = _smart_read(metadata_tsv) 
+
+        # detect/rename sample_id column 
+        col = _detect_sample_col(meta, set(blast["sample_id"].astype(str)), preferred=sample_col) 
+        if col != "sample_id":
+            meta = meta.rename(columns={col: "sample_id"}) 
+
+        best = _choose_best_hit(blast, identity_th=identity_th)
+        merged = best.merge(meta, on="sample_id", how="left") 
+     
+        print(blast.head(), blast.columns) 
+
+        # one count per sample (presence/absence) matrix  
+        mat = (
+            merged.assign(count=1) # add constant 1 
+                  .pivot_table(index="taxonomy", # rows = taxa 
+                                  columns="sample_id", # cols = isolates 
+                                  values="count",
+                                  fill_value=0) # 0/1 matrix 
+                  )
+        biom_table = Table(
+            mat.values,
+            observation_ids=mat.index.tolist(),
+            sample_ids = mat.columns.tolist()
+            )
+        with biom_open(str(out_biom), "w") as fh:
+            biom_table.to_hdf5(fh, "MicroSeq")
+        logger.info(f"Wrote {out_biom} (shape {biom_table.shape})") 
+
+        if write_csv:
+            biom_to_csv(out_biom) 
+
+
+### ====  src/microseq_tests/trimming/__init__.py  ==== ###
+
+
+### ====  src/microseq_tests/trimming/ab1_to_fastq.py  ==== ###
+"""
+ab1_to_fastq.py
+
+convert Sanger chomatograms (.ab1) to single-end FASTQ Phred-33. 
+
+Usage
+
+>>> from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq 
+>>> fastqs = ab1_folder_to_fastq("data/raw", "data/raw_fastq") 
+
+Returns 
+list[pathlib.Path]
+one path per created FASTQ file. 
+"""
+
+from __future__ import annotations 
+from pathlib import Path
+from typing import List 
+from Bio import SeqIO 
+
+def ab1_folder_to_fastq(
+        input_dir: str | Path, 
+        output_dir: str | Path, 
+        *, 
+        overwrite: bool = False,
+        ) -> List[Path]:
+    """
+    Convert every *.ab1 input_dir to FASTQ and write them to output_dir. 
+
+    Paramteres 
+    
+    input_dir : str | Path 
+        Folder containing AB1 chromatograms. 
+    output_dir : str | Path 
+        Where FASTQ files will be written (created if missing). 
+    overwrite : bool, default False 
+        Re-create FASTQ even if it already written 
+
+    Returns 
+    list of Path 
+        Paths to all FASTQ files written. 
+
+    """
+    input_dir = Path(input_dir) 
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True) 
+
+    out_files: list[Path] = [] 
+
+    for ab1 in sorted(input_dir.glob("*ab1")):
+        out_fq = output_dir / f"{ab1.stem}.fastq"
+        if out_fq.exists() and not overwrite:
+            out_files.append(out_fq)
+            continue 
+
+        # SeqIO.convert handles Phred extract from ABIF tags. 
+        SeqIO.convert(ab1, "abi", out_fq, "fastq")
+        out_files.append(out_fq) 
+
+    return out_files 
+
+
+
+
+### ====  src/microseq_tests/trimming/biopy_trim.py  ==== ###
+# src/microseq_tests/trimming/biopy_trim.py 
+from __future__ import annotations
+from pathlib import Path
+from typing import List, Optional, Iterable 
+from Bio import SeqIO                         
+import logging 
+from importlib import import_module 
+
+L = logging.getLogger(__name__)
+
+
+# ------- helper functions ----------------------
+def _tick_safe(bar, inc: int = 1) -> None: 
+    """ Calls bar.update(inc) only if bar exposes that attribute."""
+    if hasattr(bar, "update"):
+        bar.update(inc)  # safety guard 
+
+
+# ----------------------------------------------------------------------
+# Single‑read sliding‑window trim
+# ----------------------------------------------------------------------
+def dynamic_trim(record, win: int = 5, q: int = 20):
+    """
+    Return trimmed SeqRecord or None if the read never reaches quality q. 
+    """
+    quals: List[int] = record.letter_annotations["phred_quality"]
+    n = len(quals)
+    if n < win:
+        return None                            # too short
+
+    # 5′ → 3′
+    left = next(
+        (i for i in range(n - win + 1)
+         if sum(quals[i:i + win]) / win >= q),
+        None,
+    )
+    if left is None:
+        return None
+
+    # 3′ → 5′
+    right = next(
+        (j for j in range(n, win - 1, -1)
+         if sum(quals[j - win:j]) / win >= q),
+        None,
+    )
+    if right is None or right <= left:
+        return None
+
+    return record[left:right]                 # trimmed SeqRecord
+
+
+# ────────────────────────────────────────────────────────────────────────
+# helper that does the real trimming work (keeps outer function compact)
+# ────────────────────────────────────────────────────────────────────────
+def _trim_all(
+    fastqs: Iterable[Path],
+    *,
+    window_size: int,
+    per_base_q: int,
+    file_q_threshold: float,
+    passed_dir: Path,
+    failed_dir: Path,
+    stats_root: Path,
+    comb: Optional[open],
+    bar,
+) -> None:
+    """
+      Core loop: trims each FASTQ, writes per-read stats, dispatches files
+    to passed_dir / failed_dir, and updates the progress bar once
+    per input file.
+    """ 
+    for fq in fastqs:
+        base         = fq.stem
+        stats_path   = stats_root / f"{base}_avg_qual.txt"
+        trimmed_path = passed_dir / f"{base}_trimmed.fastq"
+        
+        reads = bases = qsum = 0
+        trimmed_recs = []
+        
+        for rec in SeqIO.parse(fq, "fastq"):
+            trimmed = dynamic_trim(rec, window_size, per_base_q)
+            if not trimmed:
+                continue
+            ph = trimmed.letter_annotations["phred_quality"]
+            reads += 1
+            bases += len(trimmed)
+            qsum  += sum(ph)
+            trimmed_recs.append(trimmed)
+            
+        avg_q   = qsum  / bases if bases else 0
+        avg_len = bases / reads if reads else 0
+        
+        # per-read stats
+        with open(stats_path, "w") as fh:
+            for r in trimmed_recs:
+                ph = r.letter_annotations["phred_quality"]
+                fh.write(f"{r.id}\t{len(r)}\t{sum(ph)/len(ph):.2f}\n")
+                
+        # pass / fail per file
+        if avg_q < file_q_threshold:
+            (failed_dir / fq.name).write_bytes(fq.read_bytes())
+            (failed_dir / stats_path.name).write_bytes(stats_path.read_bytes())
+            L.info("[FAIL] %s  (avgQ %.2f)", fq.name, avg_q)
+        else:
+            SeqIO.write(trimmed_recs, trimmed_path, "fastq")
+            L.info("[PASS] %s → %s (avgQ %.2f)", fq.name, trimmed_path, avg_q)
+            if comb:
+                comb.write(f"{fq.name}\t{reads}\t{avg_len:.1f}\t{avg_q:.2f}\n")
+                
+        _tick_safe(bar) # exactly one tick per FASTQ  
+        
+# ────────────────────────────────────────────────────────────────────────
+# public folder-level driver
+# ────────────────────────────────────────────────────────────────────────
+def trim_folder(
+    input_dir: str | Path,
+    output_dir: str | Path,
+    *,
+    window_size: int = 5,
+    per_base_q: int = 20,
+    file_q_threshold: float = 20.0,
+    combined_tsv: str | Path | None = None,
+    threads: int = 1,                          # kept for API parity; unused
+    **kwargs,
+) -> None:
+    """
+    Quality-trim every *.fastq in input_dir and write results under
+    output_dir:
+
+      ├── passed_qc_fastq/
+      ├── failed_qc_fastq/
+      └── per-read stat files + combined TSV
+
+    A single outer progress bar ticks once per FASTQ.  Works both with
+    a real tqdm bar and with the dummy bar used by the test-suite’s
+    monkey-patch.
+    """
+    input_dir  = Path(input_dir)
+    output_dir = Path(output_dir)
+    passed_dir = output_dir.parent / "passed_qc_fastq"
+    failed_dir = output_dir.parent / "failed_qc_fastq"
+    for p in (output_dir, passed_dir, failed_dir):
+        p.mkdir(parents=True, exist_ok=True)
+     
+     # combined summary 
+    comb: Optional[open] = None
+    if combined_tsv:
+        comb = open(combined_tsv, "a")
+        if comb.tell() == 0:                   # new file → header
+            comb.write("file\treads\tavg_len\tavg_q\n")
+            
+    fastqs = sorted(input_dir.glob("*.fastq"))
+    
+    # late-bind progress helper so pytest can monkey-patch it
+    prog = import_module("microseq_tests.utility.progress")
+    cm_or_gen   = prog.stage_bar(len(fastqs), desc="trim", unit="file")
+    
+    def _run(bar):
+        _trim_all(
+                fastqs,
+                window_size=window_size,
+                per_base_q=per_base_q,
+                file_q_threshold=file_q_threshold,
+                passed_dir=passed_dir,
+                failed_dir=failed_dir,
+                stats_root=output_dir,
+                comb=comb,
+                bar=bar,   # inside _trim_all still call bar.update 
+            )
+    if hasattr(cm_or_gen, "__enter__"):  # proper-context manager 
+        with cm_or_gen as bar:
+            _run(bar) 
+
+    else:                        # generator or bare bar 
+        try:
+            bar = next(cm_or_gen) # unwrap generator 
+        except StopIteration:
+            bar = cm_or_gen 
+        _run(bar) 
+
+        if hasattr(cm_or_gen, "close"):
+            cm_or_gen.close() 
+        if hasattr(bar, "close") and bar is not cm_or_gen:
+            bar.close()
+            
+    if comb:
+        comb.close() 
+
+
+### ====  src/microseq_tests/trimming/fastq_to_fasta.py  ==== ###
+# src/microseq_tests/trimming/fastq_to_fasta.py 
+from __future__ import annotations 
+from pathlib import Path 
+from typing import Iterable 
+from Bio import SeqIO 
+
+def fastq_folder_to_fasta(input_dir: str | Path, 
+                          out_fa: str | Path) -> Path:
+    """ Merges *.fastq in input_dir into one FASTA file out_fa (output_fasta) """ 
+    input_dir = Path(input_dir)
+    out_fa = Path(out_fa)
+    records: Iterable = []
+    for fq in sorted(input_dir.glob("*.fastq")):
+        records = list(records) + list(SeqIO.parse(fq, "fastq"))
+    out_fa.parent.mkdir(parents=True, exist_ok=True)
+    SeqIO.write(records, out_fa, "fasta") 
+    return out_fa 
+
+
+
+### ====  src/microseq_tests/trimming/quality_trim.py  ==== ###
+# microseq_tests/src/microseq_tests/trimming/quality_trim.py 
+
+from __future__ import annotations 
+import logging
+L = logging.getLogger(__name__)
+
+from pathlib import Path 
+import argparse, subprocess, logging 
+from microseq_tests.utility.utils import load_config, setup_logging 
+
+PathLike = str | Path 
+
+def quality_trim(input_file: PathLike, output_file: PathLike, *, threads: int=1, **kwargs, ) -> Path:
+    """
+    Run Trimmomatic single-end mode and return the absolute path to trimmed FASTAQ/FASTA so down stream steps (assembly, GUI, tests) can chain without guessing. 
+    threads : int 
+    Forwarded to Trimmomatics's threads option. 
+
+        """
+    cfg = load_config()
+    trimm = cfg["tools"]["trimmomatic"]
+
+    cmd = [ 
+        trimm, "SE", "-threads", str(threads), "-phred33",
+        str(input_file), str(output_file),    # <<< cast once here 
+        "SLIDINGWINDOW:5:20",
+        "MINLEN:200",
+        ]
+
+    L.info("RUN Trimmomatic: %s", " ".join(cmd))
+    try:
+        subprocess.run(cmd, check=True, stderr=subprocess.PIPE, text=True)
+    except subprocess.CalledProcessError as e:
+        L.error("Trimmomatic failed (exit %s):\n%s", e.returncode, e.stderr)
+        raise 
+
+    out_path = Path(output_file).resolve()
+    if not out_path.exists():
+        raise FileNotFoundError(out_path)
+    return out_path 
+
+
+def main():
+    setup_logging() # Logging set up to capture all later messages aka Python's root logger (format, level, file handler) 
+    parser = argparse.ArgumentParser(description="Quality trim using Trimmomatic")
+    parser.add_argument("-i", "--input", required=True, help="Input FASTQ")
+    parser.add_argument("-o", "--output", required=True, help="Output FASTQ")
+    args = parser.parse_args() # validates flags being used here otherwise exits with proper flags to use 
+
+    quality_trim(args.input, args.output)
+
+if __name__ == "__main__":
+    main() 
+
+
+### ====  src/microseq_tests/utility/__init__.py  ==== ###
+
+
+### ====  src/microseq_tests/utility/add_taxonomy.py  ==== ###
+#!/usr/bin/env python3
+
+# src/microseq_tests/utility/add_taxonomy.py 
+
+"""
+add_taxonomy.py - append GG2 taxon names to a MicroSeq BLAST table. =) 
+
+Usage case here...
+python add_taxonomy.py \
+        --hits data/biom/ocular_isolates.csv \
+        --taxonomy ~/.microseq_dbs/gg2/taxonomy.tsv \
+        --out data/biom/ocular_isolates_with_tax.csv 
+"""
+from __future__ import annotations 
+import re 
+from pathlib import Path 
+import pandas as pd
+from microseq_tests.utility.io_utils import normalise_tsv 
+
+# -------- helpers -----------------------------------------------------------
+
+# Extract plain genome accession (GCF_012345678) from RS-GCF-... strings
+_ACC_RE = re.compile(r"(GC[AF])[-_](\d+)")
+def _strip_accession(s: str) -> str | None:
+    m = _ACC_RE.search(str(s))
+    return f"{m.group(1)}_{m.group(2)}" if m else None
+
+
+
+
+def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path, fill_species: bool = False) -> None:
+    # ------------------------------------------------------------------ #
+    # added a new revision in here auto-convert space or comma-delimited files to real TABs moving forward
+    sep = "\t" if hits_fp.suffix.lower() == ".tsv" else None
+    hits = pd.read_csv(
+            normalise_tsv(hits_fp),
+            sep=sep,
+            engine="python", # auto-deatect header row 
+            dtype=str, 
+            ).rename(columns={"qseqid": "sample_id"})
+   # canonicalize the subject ID so it can match the taxonomy table for each of the databases 
+    hits["sseqid"] = ( 
+       hits["sseqid"].astype(str)
+           .str.rstrip("|") 
+           .str.split("|").str[-1] # drop gi|.....|ref| or silva|..... 
+           .str.split(" ").str[0] # drop everything after the first space
+           .str.replace(r"\.\d+\.\d+$", "", regex=True)   # Silva special case           
+                      ) 
+    tax = (
+        pd.read_csv(normalise_tsv(taxonomy_fp), sep="\t")                # original columns
+            .rename(                                        # normalise names
+                columns={
+                    "Feature ID": "sseqid",
+                    "Taxon": "taxonomy"
+                }
+            )
+    )
+    # ------------------------------------------------------------------ #
+    # sanity-check
+    
+    merged = hits.merge(tax, on="sseqid", how="left")
+    n_unmatched = merged["taxonomy"].isna().sum()
+    print(f"[add_taxonomy] {n_unmatched}/{len(merged)} rows unmatched")
+    
+    if fill_species:
+
+        needs_fill = merged["taxonomy"].str.count(";") < 6
+        needs_fill &= merged["pident"].astype(float) >= 97.0 
+
+    # keep every original blast column, then tack taxonomy on the end 
+    blast_cols = hits.columns.tolist() # order from input file 
+    merged = merged[blast_cols + ["taxonomy"]] 
+
+    out_sep = "\t" if out_fp.suffix.lower() in {".tsv", ".txt"} else ","
+    merged.to_csv(out_fp, sep=out_sep, index=False)
+    print(f"[add_taxonomy] wrote {out_fp}") 
+
+
+### ====  src/microseq_tests/utility/fetch_dbs.py  ==== ###
+#!/usr/bin/env python3
+"""
+microseq-setup  (fetch_dbs.py)
+
+Download & register reference databases, write env-hook + config.yaml.
+
+Creates
+  ${DB_ROOT}/{gg2,silva,ncbi}/greengenes2_db.*
+  ${LOG_DIR}/                      (empty folder – just the place for logs)
+
+Appends to ~/.bashrc (and ­conda activate hook if inside env)
+
+  export MICROSEQ_DB_HOME="…"
+  export BLASTDB="$MICROSEQ_DB_HOME/gg2:$MICROSEQ_DB_HOME/silva:$MICROSEQ_DB_HOME/ncbi"
+  export BLASTDB_LMDB=0
+  export MICROSEQ_LOG_DIR="…"
+"""
+from __future__ import annotations
+
+import argparse, os, sys, urllib.request, tarfile, zipfile, gzip, \
+       shutil, subprocess, yaml
+from pathlib import Path
+from datetime import datetime
+
+# ───────────────────────────── CLI ──────────────────────────────────────
+ap = argparse.ArgumentParser(
+        prog        = "microseq-setup",
+        description = "Download BLAST DBs and write env-hook / config."
+)
+ap.add_argument("--db-root", metavar="PATH",
+                help="Folder where BLAST databases will live "
+                     "(default: ~/.microseq_dbs)")
+ap.add_argument("--log-dir", metavar="PATH",
+                help="Folder for MicroSeq run logs "
+                     "(default: microseq_tests/logs)")
+ap.add_argument("--quiet", action="store_true",
+                help="Skip interactive prompts")
+args = ap.parse_args()
+
+# ───────────────────────── default paths ────────────────────────────────
+REPO_ROOT   = Path(__file__).resolve().parents[3]          # microseq_tests/
+DEFAULT_LOG = REPO_ROOT / "logs"
+
+def ask(msg: str, default: str) -> Path:
+    if args.quiet:
+        return Path(default).expanduser()
+    ans = input(f"{msg} [{default}] ").strip() or default
+    return Path(ans).expanduser()
+
+db_root = Path(
+    args.db_root or ask("Where should databases be stored?", "~/.microseq_dbs")
+).resolve()
+
+log_dir = Path(
+        args.log_dir or ask("Where should logs be stored?", str(DEFAULT_LOG)) 
+).resolve()
+
+db_root.mkdir(parents=True, exist_ok=True)
+log_dir.mkdir(parents=True, exist_ok=True)
+
+# ───────────────────────── helpers ──────────────────────────────────────
+def log(msg: str) -> None:
+    print(f"[setup] {msg}")
+
+def dl(url: str, dest: Path) -> None:
+    if dest.exists():
+        log(f"✓ {dest.name} already present")
+        return
+    log(f"→ downloading {url}")
+    urllib.request.urlretrieve(url, dest)
+
+def run(cmd: list) -> None: # accept Path or str 
+    log("+" + " ".join(map(str, cmd))) # stringify for loggin 
+    subprocess.run(list(map(str,cmd)), check=True)
+
+def makeblastdb(fasta: Path, out_prefix: Path) -> None:
+    if (out_prefix.with_suffix(".nsq")).exists():
+        return
+    run(["makeblastdb", "-in", fasta, "-dbtype", "nucl", "-out", out_prefix])
+
+def extract_member(zip_path: Path, pattern: str, out_path: Path) -> None:
+    with zipfile.ZipFile(zip_path) as zf:
+        member = next(n for n in zf.namelist() if n.endswith(pattern))
+        with zf.open(member) as fin, open(out_path, "wb") as fout:
+            shutil.copyfileobj(fin, fout)
+
+
+# ------ Adding TaxonKit helper -------------------------------------
+TAXONKIT_DB = Path.home() / ".taxonkit"
+def ensure_taxdump() -> None: 
+    """
+    Download and unpack the four core NCBI tax-dump files if they are missing 
+    (names.dmp, nodes.dmp, delnodes.dmp, merged.dmp). 
+    """
+    TAXONKIT_DB.mkdir(parents=True, exist_ok=True) # creates the folder first if it doesn't exist 
+
+    needed = {"names.dmp", "nodes.dmp", "delnodes.dmp", "merged.dmp"}
+    existing = {p.name for p in TAXONKIT_DB.iterdir() if p.is_file()}
+    if needed <= existing: 
+        return # already present 
+
+    TAXONKIT_DB.mkdir(parents=True, exist_ok=True)
+    dump = TAXONKIT_DB / "taxdump.tar.gz" 
+    dl("ftp://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz", dump)
+    
+    log("-> extracting NCBI taxdump") 
+    with tarfile.open(dump) as tf: 
+        for m in tf.getmembers(): 
+            if m.name.split("/")[-1] in needed:
+                tf.extract(m, TAXONKIT_DB) 
+
+# ───────────────────── database download functions ──────────────────────
+def fetch_gg2() -> None:
+    gg = db_root / "gg2"; gg.mkdir(exist_ok=True)
+    base = "http://ftp.microbio.me/greengenes_release/2024.09"
+    qza  = gg / "2024.09.backbone.full-length.fna.qza"
+    dl(f"{base}/2024.09.backbone.full-length.fna.qza", qza)
+
+    fasta = gg / "dna-sequences.fasta"
+    if not fasta.exists():
+        extract_member(qza, "dna-sequences.fasta", fasta)
+
+    tax_qza = gg / "2024.09.backbone.tax.qza"
+    dl(f"{base}/2024.09.backbone.tax.qza", tax_qza)
+
+    taxonomy = gg / "taxonomy.tsv"
+    if not taxonomy.exists():
+        extract_member(tax_qza, "taxonomy.tsv", taxonomy)
+
+    makeblastdb(fasta, gg / "greengenes2_db")
+
+def fetch_silva() -> None:
+    sd = db_root / "silva"; sd.mkdir(exist_ok=True)
+    gz = sd / "SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta.gz"
+    dl(
+        ("ftp://ftp.arb-silva.de/release_138.1/Exports/"
+         "SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta.gz"),
+        gz
+    )
+    fasta = sd / gz.stem
+    if not fasta.exists():
+        log("→ extracting SILVA")
+        with gzip.open(gz, "rb") as fin, open(fasta, "wb") as fout:
+            shutil.copyfileobj(fin, fout)
+
+    silva_tax = sd / "taxonomy.tsv"
+    if not silva_tax.exists():
+        gz_url = ("https://ftp.arb-silva.de/release_138.1/Exports/"
+            "taxonomy/taxmap_slv_ssu_ref_138.1.txt.gz")
+        tax_gz = sd / "tax_slv_ref.gz" 
+        dl(gz_url, tax_gz) 
+
+        log("-> extracting SILVA taxonomy")
+        import gzip, csv 
+        with gzip.open(tax_gz, "rt") as fin, silva_tax.open("w") as fout: 
+            w = csv.writer(fout, delimiter="\t", lineterminator="\n")
+            w.writerow(["sseqid", "taxonomy"]) 
+            for i, ln in enumerate(fin):
+                if i == 0: # first record = helper -> skip this 
+                    continue 
+                fields = ln.rstrip("\n").split("\t")
+                acc = fields[0] # primary Acession column I need 
+                lineage = fields[3].rstrip(";") # path semicolon delimited lineage that I need as well parsing out last ; post process 
+                w.writerow([acc, lineage]) 
+
+    # build the BLAST index only once 
+    if not (sd / "silva_db.nsq").exists():  #.nsq is one makeblastdb's outputs acting as a safety guard not to redownload  
+        makeblastdb(fasta, sd / "silva_db") 
+
+def fetch_ncbi() -> None:
+    nd = db_root / "ncbi"; nd.mkdir(exist_ok=True)
+
+    # ---- downloading BLAST database ------------ 
+    tgz = nd / "16S_ribosomal_RNA.tar.gz"
+    dl("ftp://ftp.ncbi.nlm.nih.gov/blast/db/16S_ribosomal_RNA.tar.gz", tgz)
+    if not (nd / "16S_ribosomal_RNA.nsq").exists():
+        log("→ extracting NCBI 16S")
+        tarfile.open(tgz).extractall(nd)
+
+
+    # generating accession -> lineage taxid table created acc_taxid.tsv once 
+    tax_tsv = nd / "taxonomy.tsv" 
+    if tax_tsv.exists():
+        log("✓ taxonomy.tsv already present, skipping TaxonKit")
+        return 
+    
+
+    log("-> generating NCBI taxonomy TSV (this may take a minute please wait... =)")
+
+
+    # accession -> taxid (blastdbcmd) 
+    acc_tax = nd / "acc_taxid.tsv" 
+    run(["blastdbcmd", "-db", "16S_ribosomal_RNA", "-entry", "all", "-outfmt", "%a\t%T", "-out", acc_tax]) 
+
+    # taxid -> lineage via TaxonKit 
+    log("-> running TaxonKit lineage (TaxonKit will fetch taxonomy DB if missing)") 
+
+    tmp_path = nd / "lineage_raw.tsv" 
+    ensure_taxdump() # download nodes.dmp etc if missing
+    # lineage -> reformt -> tmp_path 
+    with tmp_path.open("w") as out_fh: 
+        subprocess.run(
+                ["taxonkit", "lineage", "-n", "-i", "2", str(acc_tax)],
+                check=True, stdout=out_fh
+                )
+
+
+        # rewrite tmp -> two-column TSV 
+    with tmp_path.open() as src, tax_tsv.open("w") as dst:
+            dst.write("sseqid\ttaxonomy\n")
+            for ln in src:
+                cols = ln.rstrip("\n").split("\t", 3)
+                if len(cols) < 3: # some rows may have been filtered out 
+                    continue 
+                acc, lineage = cols[0], cols[2] # take full lineage 
+                lineage = lineage.split(";", 1)[-1] # removes lineage past Domain rank which I don't want here  
+                dst.write(f"{acc}\t{lineage}\n") 
+
+    tmp_path.unlink(missing_ok=True) # clean up 
+           
+
+# ────────────────────────── main driver ─────────────────────────────────
+def main() -> None:
+    for fn in (fetch_gg2, fetch_silva, fetch_ncbi):
+        fn()
+    log(f" ✓ All databases downloaded to {db_root}")
+
+    # ---------- env-hook snippet -----------------------------------------
+    snippet = f"""
+# ── MicroSeq auto-export ───────────────────────────────────────────────
+export MICROSEQ_DB_HOME="{db_root}"
+export BLASTDB="$MICROSEQ_DB_HOME/gg2:$MICROSEQ_DB_HOME/silva:$MICROSEQ_DB_HOME/ncbi"
+export BLASTDB_LMDB=0
+export MICROSEQ_LOG_DIR="{log_dir}"
+"""
+
+    def append_once(target: Path, text: str) -> None:
+        if target.exists() and text.strip() in target.read_text():
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("a") as fh:
+            fh.write(text)
+        log(f"✓ exports appended to {target}")
+
+    shell_rc = Path.home() / (os.getenv("SHELL", "/bin/bash").split("/")[-1] + "rc")
+    append_once(shell_rc, snippet)
+
+    if os.getenv("CONDA_PREFIX"):
+        hook = Path(os.getenv("CONDA_PREFIX")) / "etc/conda/activate.d/microseq.sh"
+        append_once(hook, snippet)
+
+    # ---------- patch config.yaml ---------------------------------------
+    cfg_path = REPO_ROOT / "config" / "config.yaml"
+    cfg_path.parent.mkdir(exist_ok=True)
+    cfg = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
+    cfg["logging"] = {"dir": str(log_dir)}
+    cfg["databases"] = {
+        "gg2":   {"blastdb": "${MICROSEQ_DB_HOME}/gg2/greengenes2_db",
+            "taxonomy": "${MICROSEQ_DB_HOME}/gg2/taxonomy.tsv"},
+        "silva": {"blastdb": "${MICROSEQ_DB_HOME}/silva/silva_db",
+            "taxonomy": "${MICROSEQ_DB_HOME}/silva/taxonomy.tsv"},
+        "ncbi":  {"blastdb": "${MICROSEQ_DB_HOME}/ncbi/16S_ribosomal_RNA",
+            "taxonomy": "${MICROSEQ_DB_HOME}/ncbi/taxonomy.tsv"},
+    }
+    cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
+    log(f"✓ config.yaml updated at {cfg_path}")
+
+    print("\nDone! Open a new shell (or `source ~/.bashrc`) and test it using the smoke test I have setup in github install:")
+
+if __name__ == "__main__":
+    main()
+
+
+
+### ====  src/microseq_tests/utility/io_utils.py  ==== ###
+from __future__ import annotations 
+import logging
+L = logging.getLogger(__name__)
+
+from pathlib import Path 
+import re, shutil, logging 
+
+__all__ = ["normalise_tsv"] 
+
+_TAB_RX = re.compile(r"( {2,}|,)") # 2 + spaces or comma 
+_NEEDS_RX = re.compile(r"\t") # have at least one TAB char 
+
+def normalise_tsv(path: str | Path) -> Path:
+    """
+    Ensure path is a true tab-separated file. 
+    Detect if lines contain TABS already then do nothing please. 
+    If not, then collapse 2 space or single commas into one TAB. 
+    Write to a tmp file, then atomically replace the original with the TSV/TAB version
+    """
+    p = Path(path)
+    text = p.read_text()
+
+    if "\t" in text: # already fine here 
+        return p 
+
+    L.info("[fix-tsv] converting spaces / commas to TABS in %s", p.name)
+    fixed = re.sub(r"( {2,}|,)", "\t", text) # 2+ spaces or comma gets turned into TAB format. 
+
+    tmp = p.with_suffix(".tsv.tmp")
+    tmp.write_text(fixed)
+    shutil.move(tmp, p) # atomatic replacement here 
+    return p 
+
+def cli():
+    import sys 
+    for f in sys.argv[1:]:
+        normalise_tsv(f)
+    print("fils is normalised now and ready to run in MicroSeq", *sys.argv[1:]) 
+
+
+### ====  src/microseq_tests/utility/merge_hits.py  ==== ###
+# microseq_tests/src/microseq_tests/utility/merge_hits.py 
+
+from __future__ import annotations 
+from pathlib import Path
+import logging, glob
+from typing import Sequence  
+from importlib import import_module 
+
+L = logging.getLogger(__name__)
+__all__ = ["merge_hits"]
+
+# ---- helpers -----------------------
+def _tick_safe(bar, inc: int = 1) -> None: 
+    """Call bar.update(inc) only if the attribute exists (dummy bars won't here). """ 
+    if hasattr(bar, "update"):
+        bar.update(inc) 
+
+def _write_tsvs(files: list[str], out: Path, bar) -> None: 
+    """Concatenate TSVs, keeping the header of the first file only.""" 
+    with out.open("w") as w: 
+        for idx, fp in enumerate(files): 
+            with open(fp) as r: 
+                for line in r: 
+                    if idx and line.startswith("#"):  # skip dup headers 
+                        continue 
+                    w.write(line) 
+            _tick_safe(bar)  # 1 tick / file 
+
+def merge_hits(input_specs: Sequence[str], out_tsv: str | Path) -> Path: 
+    """ 
+    Concatenate one or more BLAST TSVs into output single file. 
+    input_specs can be literal paths or shell-type patterns. 
+    Only the header lines (starting with '#') fro the first file are kept. 
+
+    Returns the absolute :class: `pathlib.Path` of merged TSV. 
+    """ 
+    files: list[str] = []
+    for spec in input_specs:
+        matches = glob.glob(spec)
+        files.extend(matches if matches else [spec])
+
+    if not files:
+        raise FileNotFoundError("merged_hits: no TSVs matched")
+
+    out = Path(out_tsv).expanduser().resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    L.info("Merging %d TSV -> %s", len(files), out)
+
+    # stage_bar may be tqdm, a bare DummyBar, or a geenrator that yeilds one 
+    prog = import_module("microseq_tests.utility.progress") # live view late-bind (honours pytest monkey-patch)  
+    cm_or_gen = prog.stage_bar(len(files), desc="merge", unit="file") # use or not using context-manager here 
+    
+    # proper context-manager using real tqdm progress bar 
+    if hasattr(cm_or_gen, "__enter__"):  
+        with cm_or_gen as bar: 
+            _write_tsvs(files, out, bar) 
+    else:      
+        # generator that yeilds the bar, or bare bar 
+        try: 
+            bar = next(cm_or_gen) # succeeds for generator variety 
+        except StopIteration:
+            bar = cm_or_gen  # it was already a bare bar 
+
+
+        _write_tsvs(files, out, bar) 
+
+
+        # close if objects expose .close() 
+        if hasattr(cm_or_gen, "close"): 
+            cm_or_gen.close() 
+        if hasattr(bar, "close") and bar is not cm_or_gen:
+            bar.close() 
+
+    return out 
+
+
+
+### ====  src/microseq_tests/utility/progress.py  ==== ###
+# microseq_tests/src/microseq_tests/utility/progress.py 
+
+from __future__ import annotations 
+from contextlib import contextmanager 
+from tqdm import tqdm 
+from typing import Iterator
+import threading, logging 
+
+_tls = threading.local()  # module-level, one per thread 
+L = logging.getLogger(__name__) 
+
+@contextmanager 
+def stage_bar(total: int, *, desc: str = "", unit: str = "") -> Iterator[tqdm]:
+    """
+    Context manager that yields a tqdm and remembers the last one in a thread-local so nested calls 
+    can find their parent automatically. This is used in a nested helper function such as run_blast that calls parent.update(1)
+    without the caller having to pass the bar explicitly. 
+    """ 
+    outer = getattr(_tls, "current", None) 
+    bar = tqdm(total=total, desc=desc, unit=unit, leave=False) # leave = False here so finished bar leaves and only see latest one 
+    _tls.current = bar # make this bar the new "current one" 
+
+    try:
+        yield bar # hand the bar to the "with" block so caller does bar.update() 
+    finally:
+        bar.close() # tidy up 
+        _tls.current = outer # restore previous parent (or None here) 
+
+
+# Legacy shim - old tests import merge_hits through this module. 
+# keeping legacy import at very bottom to avoid circular dependency. 
+from microseq_tests.utility.merge_hits import merge_hits # noqa: E402, F401  
+
+
+### ====  src/microseq_tests/utility/utils.py  ==== ###
+# ---- src/microseq_tests/utility/utils.py --------------------- 
+from __future__ import annotations 
+import yaml, logging, os, sys
+from datetime import datetime
+from pathlib import Path 
+from logging.handlers import RotatingFileHandler
+import importlib.resources as pkg_resources 
+
+# default log directory (can be overwritten via function arg - keep that in mind)
+def _find_repo_root(start: Path | None = None) -> Path: 
+    """
+    Climb parents until we hit a file that marks the top of the project (which in this case its pyproject.toml, or .git). Fallback: 
+LOG_ROOT = ROOT/ "logs" # repo-local fallback option the package root inside site-packages. 
+    """
+    here = start or Path(__file__).resolve() 
+    for p in [here, *here.parents]:
+        if (p / "pyproject.toml").exists() or (p / ".git").exists():
+            return p 
+
+    # inside a wheel / site-packages 
+    return Path(__file__).resolve().parents[1] # microseq_tests 
+
+ROOT = _find_repo_root()
+LOG_ROOT = ROOT / "logs" 
+
+def expand_db_path(template: str) -> str:
+    """
+    Replace ${MICROSEQ_DB_HOME} in template with the environment variable. 
+    If set, otherwise with the value stored in config/config.yaml, 
+    If not then it defaults to ~/.microseq_dbs 
+    """
+    db_home = os.getenv("MICROSEQ_DB_HOME")
+    if not db_home:
+        cfg = load_config() 
+        db_home = cfg.get("microseq_db_home") or "~/.microseq_dbs" 
+    return template.replace("${MICROSEQ_DB_HOME}", os.path.expanduser(db_home)) 
+
+def set_module_level(module_name: str, level: int) -> None: 
+    """
+    Change verbosity of one sub-logger at runtime. 
+
+    Example
+    ______
+    from microseq_tests.utility.utils import set_module_level 
+    >>>> set_module_level("microseq_tests.blast", logging.ERROR)
+    """
+    logging.getLogger(module_name).setLevel(level) 
+
+
+CONF_PATH = ROOT / "config" / "config.yaml"
+def load_config(config_path: str | Path = CONF_PATH):
+    config_path = Path(config_path)
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f)
+
+
+def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, console: bool = True, force: bool = False, rotate_mb: int | None = None, log_file_prefix: str = "microseq", max_bytes: int | None = None, backup_count: int = 3) -> Path:
+    """
+    If $MICROSEQ_LOG_FILE is set -> use that exact path I recommend you do. 
+    Else if $MICROSEQ_LOG_DIR is set instead -> microseq.log in that folder.
+    Otherwise ./log/microseq.log inside the repo.. 
+    
+    If the chose file already exists, rename it to:
+        microseq.log<YYYYMMDD-HHMMSS>  (rolls-on-startup). 
+
+    If rotate_mb is provided, also adds a RotatingFileHandler that rolls every 1.5 MB (maxBytes = rotate_mb * 1 048 576,
+                                                                                     backupCount = 5). 
+
+
+       Configure a timestamped file + console logger.
+       rotate_mb: int None = None so None was used to emulate Nextflow style logging here. 
+
+    Parameters
+    log_dir : str | pathlib.Path
+        Folder for log files (created if missing).
+    log_file_prefix : str, default "microseq"
+        The filename stem; timestamp + ".log" is appended.
+    level : int | None, default logging.INFO 
+        Root verbosity if not already configured.
+    max_bytes : int, default 20_000_000
+        Size threshold before a log file rolls over.
+    backup_count : int, default 3
+        How many rolled files (.log.1 …) to keep.
+    console : bool, default True
+        Also echo log lines to stderr.
+    force : bool, default False
+        Reinstall handlers even if logging was already configured
+       (useful inside pytest).
+
+    Returns
+    ----------
+    pathlib.Path 
+    The path of the log file in use. 
+    """
+    # tranlates the legacy kwargs to current behavior I have it designed for rotate_mb ----
+    rotate_bytes: int | None = None 
+    if max_bytes is not None: # new tests use this 
+        rotate_bytes = int(max_bytes) # bytes as is 
+    elif rotate_mb is not None: 
+        rotate_bytes = int(rotate_mb * 1024 * 1024) 
+    
+   # ----- pick a destination path --------------------------------------
+    explicit_file = os.getenv("MICROSEQ_LOG_FILE") # this is designed to make sure explicity file always wins but can be overwritten 
+    if explicit_file:
+        logfile = Path(explicit_file).expanduser() 
+        logfile.parent.mkdir(parents=True, exist_ok=True) 
+        root_dir = logfile.parent 
+
+    # explicit argument outranks env-var  
+    else:
+        root_dir = (
+            Path(log_dir).expanduser() # arg provided 
+            if log_dir is not None 
+            else Path(os.getenv("MICROSEQ_LOG_DIR", LOG_ROOT)).expanduser()
+            )
+        root_dir.mkdir(parents=True, exist_ok=True)
+
+
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        logfile = root_dir / f"{log_file_prefix}_{ts}.log"
+
+
+    # ------- roll previous run a la Nextflow naming microseq.log! --------------------- 
+    if (
+        log_file_prefix == "microseq" 
+        and rotate_bytes is None 
+        and logfile.exists()
+    ): 
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S") 
+        logfile.rename(logfile.with_suffix(f".log.{ts}")) 
+
+
+
+    # --- guard against re-init configuring root logger ----------
+    root_logger = logging.getLogger() 
+    if root_logger.handlers and not force:
+        return logfile 
+
+    root_logger.handlers.clear() 
+    root_logger.setLevel(level or logging.INFO) 
+
+    fmt = logging.Formatter(
+            "%(asctime)s  %(levelname)-7s  %(name)s:  %(message)s"
+            )
+
+    # one or other handler (tests expect a single file handler here)  
+    # size based rotation (keeps .log, .log.1, etc.) 
+    if rotate_bytes:  
+        fh = RotatingFileHandler(
+                logfile, maxBytes=rotate_bytes, backupCount=backup_count
+                )
+    else:
+        fh = logging.FileHandler(logfile, mode="w")
+    fh.setFormatter(fmt)
+    root_logger.addHandler(fh) 
+    
+    if console:
+        ch = logging.StreamHandler(sys.stderr)
+        ch.setFormatter(fmt)
+        root_logger.addHandler(ch) 
+
+    root_logger.info("Logging to %s", logfile)
+    return logfile  
+     
+
+
+
+
+
+### ====  tests/__init__.py  ==== ###
+
+
+### ====  tests/gen_demo.fasta.py  ==== ###
+#!/usr/bin/env python3 
+"""
+gen_demo_fasta.py builds tests/data/demo.fasta with 5 short records 
+
+Usage:
+    python tests/gen_demo_fasta.py 
+"""
+
+from Bio import SeqIO
+from Bio.Seq import Seq 
+from pathlib import Path 
+import random, itertools, sys 
+
+SCRIPT_DIR = Path(__file__).resolve().parent # .../tests 
+ROOT = SCRIPT_DIR.parent 
+SRC_DIR = ROOT/ "data" / "final_fasta_output_cultivation_repo"
+OUT = SCRIPT_DIR / "data" / "demo.fasta" 
+
+N       = 5        # how many demo sequences
+LENGTH  = 300      # trim to first 300 bp for speed
+
+def main():
+    if not SRC_DIR.exists():
+        sys.exit(f" {SRC_DIR} does not exist – point SRC_DIR to a folder with FASTA files.")
+
+    # gather sequences from every *.fasta in SRC_DIR
+    records = list(
+        itertools.chain.from_iterable(
+            SeqIO.parse(fa, "fasta") for fa in SRC_DIR.glob("*.fasta")
+        )
+    )
+    if len(records) < N:
+        sys.exit(f"❌  only {len(records)} sequences found in {SRC_DIR} – need at least {N}")
+
+    random.seed(42)
+    demo = random.sample(records, N)
+    for i, r in enumerate(demo, 1):
+        r.id, r.description = f"demo{i}", ""
+        r.seq = Seq(str(r.seq)[:LENGTH])
+
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    SeqIO.write(demo, OUT, "fasta")
+    print(f"✓ wrote {OUT} with {len(demo)} records")
+
+if __name__ == "__main__":
+    main()
+
+
+### ====  tests/gui_main.py  ==== ###
+
+
+### ====  tests/test_ab1_convert.py  ==== ###
+import pathlib 
+from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq 
+
+def test_ab1_to_fastq(tmp_path: pathlib.Path):
+    fixtures = pathlib.Path(__file__).parent / "fixtures" 
+    fastqs = ab1_folder_to_fastq(fixtures, tmp_path)
+
+    # should procedure one FASTQ per AB1 file 
+    assert len(fastqs) == len(list(fixtures.glob("*ab1"))) 
+    for fq in fastqs:
+        assert fq.exists()
+        assert fq.stat().st_size > 100 # tiny but non-empty 
+
+
+### ====  tests/test_cli_qol.py  ==== ###
+# tests/test_cli_qol.py
+
+"""
+CLI quality of life tests runned here 
+
+What this test covers....
+default_workdir fallback via config patch I made 
+--link-raw symlink creation 
+-v/-vv logging levels 
+"""
+
+import subprocess, logging, os 
+from pathlib import Path 
+from microseq_tests.utility import utils 
+from microseq_tests.trimming import ab1_to_fastq 
+
+CLI = ["python", "-m", "microseq_tests.microseq"] # invoke module in-process 
+
+def test_default_workdir(tmp_path, monkeypatch):
+    monkeypatch.setattr(utils, "load_config",
+                        lambda: {"default_workdir": str(tmp_path)}) 
+
+    fasta = tmp_path / "demo.fasta"
+    fasta.write_text(">a\nACGT\n")
+
+    out = tmp_path / "hits.tsv"
+    res = subprocess.run(
+            CLI + ["blast", "-i", str(fasta),
+                   "-d", "gg2", 
+                   "-o", str(out),
+                   "--identity", "50", "--qcov", "10", "--max_target_seqs", "1"],
+            capture_output=True)
+    assert res.returncode == 0 
+    assert out.exists() 
+
+# test function for --link-raw 
+def test_link_raw_symlink(tmp_path, monkeypatch):
+    # Create a fake AB1 file
+    (tmp_path / "trace1.ab1").write_bytes(b"ABIF") 
+    workdir = tmp_path / "run" 
+
+    # skip actual conversion ot avoid BioPython parsing here 
+    monkeypatch.setattr(ab1_to_fastq, "ab1_folder_to_fastq",
+                      lambda *a, **k: None) 
+
+    res = subprocess.run(
+            CLI + ["--workdir", str(workdir),
+                   "trim", "-i", str(tmp_path),
+                   "--link-raw"],
+            capture_output=True)
+    assert res.returncode == 0 
+    assert (workdir / "raw_ab1").is_symlink() 
+
+
+# verbose level test function 
+def test_verbose_level(tmp_path):
+    fasta = tmp_path / "demo.fasta" 
+    fasta.write_text("@id\nACGT\n+\n!!!!\n")
+
+    res = subprocess.run(
+    CLI + ["-vv", "--workdir", str(tmp_path),
+           "blast", "-i", str(fasta),
+           "-d", "gg2", "-o", str(tmp_path / "h.tsv"),
+           "--identity", "50", "--qcov", "10", "--max_target_seqs", "1"],
+    capture_output=True, text=True)
+
+    assert res.returncode == 0
+    assert "INFO" in res.stderr              
+
+
+
+
+
+
+
+
+
+
+
+### ====  tests/test_pipeline.py  ==== ###
+# tests/test_pipeline.py 
+
+from pathlib import Path 
+import subprocess, pandas as pd, biom 
+
+DEMO = Path(__file__).parent / "data" / "demo.fasta" 
+META = Path(__file__).parent / "data" / "meta.tsv" 
+TAX_PATH = Path.home() / ".microseq_dbs" / "gg2" / "taxonomy.tsv" 
+# adding as small function here to not repeat subprocess.check_call 
+def run(cmd: list[str]) -> None:
+    """ Exectute cmd (a list of strings) and abort if it fails. """ 
+    subprocess.check_call([str(c) for c in cmd]) 
+
+# writing actual test here 
+def test_postblast_pipeline(tmp_path):
+    blast = tmp_path / "hits.tsv"
+    tax = tmp_path / "hits_tax.tsv"
+    base = tmp_path / "profile" 
+
+    run(["microseq", "blast",
+         "-i", DEMO,
+         "-d", "gg2",
+         "-o", blast,
+         "--identity", "50",
+         "--qcov", "10",
+         "--max_target_seqs", "50", 
+         ]) 
+
+    # add taxnonomy step 
+    run(["microseq", "add_taxonomy",
+         "--hits", str(blast),
+         "--taxonomy", str(TAX_PATH),  
+         "--out", str(tax),
+         ])
+
+    run(["microseq", "postblast",
+         "-b", tax,
+         "-m", META,
+         "--sample-col", "sample_id",
+         "-o", str(base.with_suffix(".biom")),
+         ]) 
+
+
+    biom_f = base.with_suffix(".biom")
+    csv_f = base.with_suffix(".csv")
+
+    assert biom_f.is_file() and csv_f.is_file()
+
+    # ─── BIOM table ───────────────────────────────────────────────────────
+    table = biom.load_table(str(biom_f))
+    assert table.shape[0] >= 1          # ≥ 1 taxon  (rows)
+    assert table.shape[1] >= 2          # ≥ 2 samples (columns)
+
+    # ─── CSV mirror ───────────────────────────────────────────────────────
+    df = pd.read_csv(csv_f, index_col=0)
+    assert df.shape[0] >= 1             # ≥ 1 taxon  (rows)
+    assert df.shape[1] >= 2             # ≥ 2 samples (columns) 
+
+
+### ====  tests/test_pipeline_wrappers.py  ==== ###
+import biom, pandas as pd
+from pathlib import Path
+from microseq_tests import pipeline as mp
+
+DEMO = Path(__file__).parent / "data" / "demo.fasta"
+META = Path(__file__).parent / "data" / "meta.tsv"
+TAX  = Path.home() / ".microseq_dbs" / "gg2" / "taxonomy.tsv"
+
+def test_e2e_wrappers(tmp_path: Path):
+    # 1 trim skipped – demo is already fasta
+    blast_tsv = tmp_path / "hits.tsv"
+    tax_tsv   = tmp_path / "hits_tax.tsv"
+    biom_out  = tmp_path / "profile.biom"
+
+    mp.run_blast_stage(DEMO, "gg2", blast_tsv,
+                       identity=50, qcov=10, max_target_seqs=50)
+    mp.run_add_tax(blast_tsv, TAX, tax_tsv)
+    mp.run_postblast(tax_tsv, META, biom_out)
+
+    table = biom.load_table(str(biom_out))
+    assert table.shape[0] >= 1
+    assert table.shape[1] >= 2
+    assert (biom_out.with_suffix(".csv")).is_file()
+
+
+### ====  tests/test_postblast_identity.py  ==== ###
+# tests/test_postblast_identity.py
+from __future__ import annotations
+import json
+from pathlib import Path
+
+import biom
+import numpy as np          # for a dense BIOM matrix
+import pandas as pd
+import pytest
+
+from microseq_tests.post_blast_analysis import run as postblast_run
+from microseq_tests.utility.add_taxonomy import run_taxonomy_join
+from microseq_tests import microseq as microseq_cli
+
+
+# ---------------------------------------------------------------------------
+# 1. CLI → pipeline passthrough
+# ---------------------------------------------------------------------------
+
+def test_cli_passes_identity(monkeypatch, tmp_path):
+    """Ensure --post_blast_identity reaches postblast_run()."""
+
+    # -- minimal synthetic inputs -------------------------------------------
+    blast_tsv = tmp_path / "hits.tsv"
+    blast_tsv.write_text(
+        "#sample_id\tsseqid\tpident\tevalue\tbitscore\ttaxonomy\n"
+        "S1\tGG2_0001\t99.0\t1e-10\t200\tk__Bacteria; p__Proteobacteria\n"
+    )
+    meta_tsv = tmp_path / "meta.tsv"
+    meta_tsv.write_text("sample_id\nS1\n")
+
+    # -- monkey-capture postblast_run ---------------------------------------
+    captured: dict[str, float] = {}
+
+    def fake_run(blast_file, metadata_file, out_biom, **kw):
+        captured.update(kw)                       # record kwargs
+        # write a valid 1×1 BIOM so caller code doesn’t error
+        table = biom.Table(np.array([[1]]), ["k__Bacteria"], ["S1"])
+        with biom.util.biom_open(out_biom, "w") as fh:
+            table.to_hdf5(fh, "test")
+
+    monkeypatch.setattr("microseq_tests.microseq.postblast_run", fake_run)
+
+    # -- invoke CLI (global flags precede sub-command) -----------------------
+    argv = [
+        "microseq",            # prog name
+        "postblast",
+        "-b", str(blast_tsv),
+        "-m", str(meta_tsv),
+        "-o", "dummy.biom",
+        "--post_blast_identity", "95",
+    ]
+    monkeypatch.setattr("sys.argv", argv)
+    microseq_cli.main()
+
+    assert captured["identity_th"] == 95.0
+
+
+# ---------------------------------------------------------------------------
+# 2. Tail-pipeline sanity check
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("identity", [97.0, 95.0])
+def test_end_to_end_tail(identity, tmp_path):
+    """
+    add_taxonomy → postblast
+    then validate BIOM / CSV / JSON outputs.
+    """
+
+    # --- synthetic BLAST & taxonomy tables ---------------------------------
+    hits = tmp_path / "hits.tsv"
+    hits.write_text(
+        "#sample_id\tsseqid\tpident\tevalue\tbitscore\n"
+        "S1\tGG2_0001\t99.0\t1e-10\t200\n"
+        "S1\tGG2_0002\t94.0\t1e-9\t180\n"
+    )
+
+    tax = tmp_path / "taxonomy.tsv"
+    tax.write_text(
+        "sseqid\ttaxonomy\n"
+        "GG2_0001\tk__Bacteria; p__Firmicutes\n"
+        "GG2_0002\tk__Bacteria; p__Proteobacteria\n"
+    )
+
+    meta = tmp_path / "meta.tsv"
+    meta.write_text("sample_id\tSource\nS1\tEye\n")
+
+    # --- taxonomy join ------------------------------------------------------
+    hits_tax = tmp_path / "hits_tax.tsv"
+    run_taxonomy_join(hits, tax, hits_tax)
+
+    # --- postblast ----------------------------------------------------------
+    biom_out = tmp_path / "out.biom"
+    postblast_run(
+        hits_tax, meta, biom_out,
+        sample_col="sample_id",
+        identity_th=identity,
+    )
+
+    csv_out = biom_out.with_suffix(".csv")
+    assert biom_out.exists() and csv_out.exists()
+
+    # --- validate BIOM dimensions ------------------------------------------
+    with biom.util.biom_open(biom_out) as fh:
+        table = biom.Table.from_hdf5(fh)
+
+    # _choose_best_hit() always keeps *one* row per sample
+    assert table.shape == (1, 1)
+
+    df = pd.read_csv(csv_out, index_col=0)
+    assert len(df) == 1
+
+    # --- JSON export (via BIOM API) ----------------------------------------
+    json_out = biom_out.with_suffix(".json")
+    json_out.write_text(table.to_json("MicroSeq"))
+    # confirm it’s valid JSON
+    json.loads(json_out.read_text())
+
+
+
+### ====  tests/test_progress.py  ==== ###
+# microseq_tests/tests/test_progress.py 
+
+"""
+The goal here is making sure each TSV or fastq ticks exactly once when the helper is wrapped instage_bar 
+The approach used is a temporary monkeypatch == py.test.monkeypatch 
+ - The real progress.stage_bar with a tiny fkae that records and similates how often update() is called. 
+ - The public function merged_hits or trim_folder on a small fixture dataset and asset the counter equals the number of files.
+
+""" 
+from __future__ import annotations 
+from pathlib import Path 
+import io, textwrap, pytest 
+
+# functions that are going to be tested 
+from microseq_tests.microseq import merge_hits 
+from microseq_tests.trimming.biopy_trim import trim_folder 
+import microseq_tests.utility.progress as pg 
+
+# -------------- tiny in-memory fake bar --------------- 
+
+class DummyBar:
+    def __init__(self, total):
+        self.total = total 
+        self.n = 0 
+    def update(self, inc=1):
+        self.n += inc 
+    def close(self):
+        pass 
+    def __enter__(self):
+        return self 
+    def __exit__(self, *exc): 
+        self.close() 
+
+@pytest.fixture() 
+def patch_stage_bar(monkeypatch):
+    """Replace progress.stage_bar with a counter-collecting dummy.""" 
+    counters = {} 
+    def fake_stage_bar(total, *a, **kw):
+        bar = DummyBar(total)
+        counters['bar'] = bar 
+        yield bar 
+    monkeypatch.setattr(pg, "stage_bar", fake_stage_bar)
+    yield counters # give test access to bar after the call 
+
+def test_merge_hits_progress(tmp_path: Path, patch_stage_bar):
+    # create three toy TSVs
+    for i in range(3):
+        (tmp_path / f"f{i}.tsv").write_text(
+            textwrap.dedent("""\
+            # header
+            s1\ts2\t99\t100\t90\t100\t1e-10\t200\ttaxon
+            """)
+        )
+    out = tmp_path / "merged.tsv"
+    
+    # call the public helper that merge-hits CLI also uses
+    merge_hits([str(p) for p in tmp_path.glob("*.tsv")], out)
+    
+    bar = patch_stage_bar['bar']
+    assert bar.total == 3          # three files
+    assert bar.n == 3              # ticked exactly once per file
+    # merged file really exists
+    assert out.exists() and out.stat().st_size > 0
+    
+def test_trim_folder_progress(tmp_path: Path, patch_stage_bar):
+    in_dir  = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    
+    # two minimal FASTQ files (three lines per read)
+    fastq = textwrap.dedent("""\
+        @r1
+        AACGT
+        +
+        !!!!!        """)
+    for name in ("a.fastq", "b.fastq"):
+        (in_dir / name).write_text(fastq)
+        
+    # run the BioPython-based trimmer (very small win/q so it keeps reads)
+    trim_folder(in_dir, out_dir, window_size=1, per_base_q=0)
+    
+    bar = patch_stage_bar['bar']
+    assert bar.total == 2          # two FASTQs
+    assert bar.n == 2              # updated twice
+    # trimmed files were written
+    assert any(out_dir.glob("*_avg_qual.txt")) 
+
+
+
+
+
+### ====  tests/test_trim_pipeline.py  ==== ###
+"""
+tests/test_trim_pipeline.py
+
+❖ Goal
+   ─────
+   • Start at raw ABI traces (tests/fixtures/*.ab1)
+   • microseq trim (‑‑sanger) should:
+       1. convert AB1 → FASTQ               (ab1_to_fastq.py)
+       2. run BioPython sliding‑window QC   (biopy_trim.py)
+       3. write a single combined FASTA     (fastq_folder_to_fasta.py)
+   • We assert that the final FASTA exists and is non‑empty.
+
+This is a smoke test: if any of the three steps break, the CLI
+will exit non‑zero and/or the FASTA won’t appear, so the test fails.
+"""
+
+# ───────────────────────── imports ──────────────────────────
+from pathlib import Path          # pathlib makes path maths ( / , .resolve() … ) easy & OS‑agnostic
+import subprocess                 # run the CLI exactly as a user would
+import sys                        # gives us sys.executable → the Python in the current env
+import uuid                       # create a unique temp workdir per test run
+
+# pytest automatically supplies a `tmp_path` fixture: a unique temporary
+# directory that is cleaned up after the test finishes.
+def test_ab1_trim_to_fasta(tmp_path: Path) -> None:
+    """
+    AB1 → FASTQ → BioPython trim → FASTA
+    """
+    # create a unique sub‑folder inside pytest’s tmp dir
+    work = tmp_path / f"run_{uuid.uuid4().hex}"
+
+    # tests/fixtures/ holds four *.ab1 chromatograms shipped with the repo
+    fixtures = Path(__file__).parent / "fixtures"
+
+    # ───── invoke the CLI (subprocess) ────────────────────
+    result = subprocess.run(
+        [
+            sys.executable,             # same Python that’s running pytest
+            "-m", "microseq_tests.microseq",
+            "--workdir", str(work),
+            "trim",                     # sub‑command
+            "-i", str(fixtures),        # input folder of AB1
+            "--sanger",                 # switch on Sanger mode
+            # no -o: workdir layout writes …/qc/trimmed.fastq(a)
+        ],
+        capture_output=True,            # collect stdout / stderr for debugging
+        text=True,                      # decode bytes → str
+        check=True,                     # raise CalledProcessError if exit≠0
+    )
+
+    # ───── assertion section ──────────────────────────────
+    fasta = work / "qc" / "trimmed.fasta"
+
+    # If CLI crashed, subprocess.run above would already have raised.
+    # Here we make sure the expected artifact exists **and** isn't empty.
+    assert fasta.exists(), (
+        f"FASTA {fasta} not created.\n"
+        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+    )
+
+    # 100 bytes is arbitrary but guarantees we didn’t get an empty stub file
+    assert fasta.stat().st_size > 100, (
+        f"FASTA unexpectedly small ({fasta.stat().st_size} bytes)\n"
+        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+    )
+
+
+
+### ====  tests/test_utils.py  ==== ###
+from __future__ import annotations 
+import sys, inspect
+print("DEBUG python:", sys.executable)
+import microseq_tests, importlib.util
+print("DEBUG pkg:", inspect.getfile(microseq_tests))
+print("DEBUG spec:", importlib.util.find_spec("microseq_tests.utility"))
+import os, logging, pathlib, pytest 
+from microseq_tests.utility.utils import load_config, setup_logging
+
+def test_load_config(): 
+    cfg = load_config("config/config.yaml")
+    assert "tools" in cfg 
+
+def test_setup_logging(tmp_path: pathlib.Path):
+    """
+    tmp_path is a py test fixture that yields a fresh, auto-cleaned path. 
+    """
+    setup_logging(log_dir=str(tmp_path), log_file_prefix="test", force=True)
+    logging.info("hello")
+
+    logging.shutdown() 
+
+    logs = list(tmp_path.glob("test_*.log"))
+    assert logs, "no log file created" 
+
+
+
+### ====  tests/test_utils_logging.py  ==== ###
+# tests/test_utils_logging.py 
+
+import logging  
+from microseq_tests.utility.utils import setup_logging 
+
+def test_setup_logging_handlers(tmp_path):
+    log_file = setup_logging(
+            log_dir=tmp_path,
+            force=True,
+            console=False,
+            max_bytes=1_000,
+            backup_count=1,
+            )
+    root = logging.getLogger()
+    # one file handler only 
+    assert len(root.handlers) == 1 
+    assert log_file.exists()
+    # rollover works 
+    root.info("x" * 2_000) # exceed 1 kb 
+    root.handlers[0].flush() 
+    rotated = log_file.with_suffix(".log.1")
+    assert rotated.exists() 
