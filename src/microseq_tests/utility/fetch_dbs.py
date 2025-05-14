@@ -92,6 +92,8 @@ def ensure_taxdump() -> None:
     Download and unpack the four core NCBI tax-dump files if they are missing 
     (names.dmp, nodes.dmp, delnodes.dmp, merged.dmp). 
     """
+    TAXONKIT_DB.mkdir(parents=True, exist_ok=True) # creates the folder first if it doesn't exist 
+
     needed = {"names.dmp", "nodes.dmp", "delnodes.dmp", "merged.dmp"}
     existing = {p.name for p in TAXONKIT_DB.iterdir() if p.is_file()}
     if needed <= existing: 
@@ -221,7 +223,7 @@ def fetch_ncbi() -> None:
 def main() -> None:
     for fn in (fetch_gg2, fetch_silva, fetch_ncbi):
         fn()
-    log(f"✔  All databases downloaded to {db_root}")
+    log(f" ✓ All databases downloaded to {db_root}")
 
     # ---------- env-hook snippet -----------------------------------------
     snippet = f"""

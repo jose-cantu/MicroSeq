@@ -89,6 +89,7 @@ def main() -> None:
     p_tax.add_argument("-i", "--hits", required=True, metavar="TSV", help="Blast merge table (needs sseqid & qseqid)")
     p_tax.add_argument("-d", "--db", required=True, choices=db_choices, help="Database key (gg2, silva, ncbi) autolocate taxonomy.tsv")
     p_tax.add_argument("-o", "--output", required=True, help="Output TSV with appended taxonomy inplace!")
+    p_tax.add_argument("--fill-species", action="store_true", help="When SILVA lineage ends at genus and pident is %, " "append Genus-Species from stitle")  
 
 
     # postblast BIOM 
@@ -212,7 +213,7 @@ def main() -> None:
                 threads=args.threads,
                 # I removed the on_progress var here since the nested helper updates parent bar via thread-local _tls 
                 log_missing=pathlib.Path(args.log_missing) if args.log_missing else None,
-                clean_titles=args.clean_titles 
+                clean_titles=args.clean_titles, 
             )
 
     elif args.cmd == "merge-hits":

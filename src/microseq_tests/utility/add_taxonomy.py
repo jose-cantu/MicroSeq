@@ -28,7 +28,7 @@ def _strip_accession(s: str) -> str | None:
 
 
 
-def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path) -> None:
+def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path, fill_species: bool = False) -> None:
     # ------------------------------------------------------------------ #
     # added a new revision in here auto-convert space or comma-delimited files to real TABs moving forward
     sep = "\t" if hits_fp.suffix.lower() == ".tsv" else None
@@ -60,7 +60,12 @@ def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path) -> None:
     
     merged = hits.merge(tax, on="sseqid", how="left")
     n_unmatched = merged["taxonomy"].isna().sum()
-    print(f"[add_taxonomy] {n_unmatched}/{len(merged)} rows unmatched") 
+    print(f"[add_taxonomy] {n_unmatched}/{len(merged)} rows unmatched")
+    
+    if fill_species:
+
+        needs_fill = merged["taxonomy"].str.count(";") < 6
+        needs_fill &= merged["pident"].astype(float) >= 97.0 
 
     # keep every original blast column, then tack taxonomy on the end 
     blast_cols = hits.columns.tolist() # order from input file 

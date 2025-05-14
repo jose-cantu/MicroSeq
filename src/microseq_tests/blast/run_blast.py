@@ -158,27 +158,29 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
         # other formats (such as 7) no custom header 
         shutil.move(tmp_out, out_tsv) 
 
-    tmp_out.unlink(missing_ok=True) # cleanup either way 
-
     L.info("BLAST finished OK -> %s", out_tsv)
 
     # after BLAST call finishes this here will help in cleaning 
     if clean_titles:
         import re 
-        # keep only Genus-Species (dropping sseqid and hitlength information from database attached to name of ID) 
-        df = pd.read_csv(tmp_out, sep="\t", names=FIELD_LIST, dtype=str) 
+        # keep only Genus-Species (dropping sseqid and hitlength information from database attached to name of ID that was submitted) 
+        df = pd.read_csv(out_tsv, sep="\t", names=FIELD_LIST, dtype=str) 
 
         df["stitle"] = (
             df["stitle"]
             .str.split("|").str[-1] # drop gi|...|ref|.... 
-            .str.lstrip(">")  # stray '>' and whitespace assuming fastq is used here.......  
-            .str.strip() 
-            .str.replace(r"^[A-Z]{2}\d{6}(?:\.\d+){0,2}\s+", "", regex=True) # SILVA "JN193283" prefix
+            .str.lstrip(">")  # stray '>' and whitespace assuming fastq or stitle is used here.......  
+            .str.strip() # this is what removes the whitespace  
+            .str.replace(r"^[A-Z]{1,4}\d{5,8}(?:\.\d+){0,2}\s+", "", regex=True) # SILVA "JN193283" prefix
             )
-        df.to_csv(args.output, sep="\t", index=False, header=False)
+        df.to_csv(out_tsv, sep="\t", index=False, header=False)
     
     else: 
-        shutil.move(tmp_out, args.output) 
+        shutil.move(tmp_out, out_tsv)
+
+    # final cleanup 
+    tmp_out.unlink(missing_ok=True) 
+
     # optional no hit logging setup ------------------ 
 
     if log_missing:

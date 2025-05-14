@@ -1,6 +1,6 @@
 default_workdir: ~/microseq_runs
 logging:
-  dir: /Users/josecantu/microseq_tests/logs
+  dir: /home/jason/microseq_tests/logs
 tools:
   trimmomatic: trimmomatic
   blastn: blastn
