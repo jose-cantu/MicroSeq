@@ -155,7 +155,8 @@ def run(blast_tsv: Path,
         biom_table = Table(
             mat.values,
             observation_ids=mat.index.tolist(),
-            sample_ids = mat.columns.tolist()
+            sample_ids = mat.columns.tolist(),
+            type_ = "OTU table", 
             )
         with biom_open(str(out_biom), "w") as fh:
             biom_table.to_hdf5(fh, "MicroSeq")
