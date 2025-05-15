@@ -4,7 +4,9 @@ import yaml, logging, os, sys
 from datetime import datetime
 from pathlib import Path 
 from logging.handlers import RotatingFileHandler
-import importlib.resources as pkg_resources 
+import importlib.resources as pkg_resources
+import errno 
+import logging.handlers 
 
 # default log directory (can be overwritten via function arg - keep that in mind)
 def _find_repo_root(start: Path | None = None) -> Path: 
@@ -54,7 +56,7 @@ def load_config(config_path: str | Path = CONF_PATH):
         return yaml.safe_load(f)
 
 
-def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, console: bool = True, force: bool = False, rotate_mb: int | None = None, log_file_prefix: str = "microseq", max_bytes: int | None = None, backup_count: int = 3) -> Path:
+def setup_logging(log_dir: str | Path = LOG_ROOT, *, mode: str = "auto", level: int | None = None, console: bool = True, force: bool = False, rotate_mb: int | None = None, log_file_prefix: str = "microseq", max_bytes: int | None = None, backup_count: int = 3) -> Path:
     """
     If $MICROSEQ_LOG_FILE is set -> use that exact path I recommend you do. 
     Else if $MICROSEQ_LOG_DIR is set instead -> microseq.log in that folder.
@@ -97,7 +99,12 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, c
     if max_bytes is not None: # new tests use this 
         rotate_bytes = int(max_bytes) # bytes as is 
     elif rotate_mb is not None: 
-        rotate_bytes = int(rotate_mb * 1024 * 1024) 
+        rotate_bytes = int(rotate_mb * 1024 * 1024)
+    # --- decide rotation mode --------------------------
+    mode = (mode if mode != "auto" 
+            else os.getenv("MICROSEQ_LOG_MODE", "daily")).lower()
+    if mode not in {"daily", "runid"}:
+        raise ValueError(f"Unknown log mode {mode!r}") 
     
    # ----- pick a destination path --------------------------------------
     explicit_file = os.getenv("MICROSEQ_LOG_FILE") # this is designed to make sure explicity file always wins but can be overwritten 
@@ -119,16 +126,12 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, c
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
         logfile = root_dir / f"{log_file_prefix}_{ts}.log"
 
-
-    # ------- roll previous run a la Nextflow naming microseq.log! --------------------- 
-    if (
-        log_file_prefix == "microseq" 
-        and rotate_bytes is None 
-        and logfile.exists()
-    ): 
-        ts = datetime.now().strftime("%Y%m%d-%H%M%S") 
-        logfile.rename(logfile.with_suffix(f".log.{ts}")) 
-
+    # ---- run-id rename, if requested ------------------------ 
+    if mode == "runid" and logfile.exists():
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S") 
+        new_name = logfile.parent / f"{log_file_prefix}_{ts}.log" 
+        logfile.rename(new_name) 
+        logfile = new_name 
 
 
     # --- guard against re-init configuring root logger ----------
@@ -146,18 +149,34 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, *, level: int | None = None, c
     # one or other handler (tests expect a single file handler here)  
     # size based rotation (keeps .log, .log.1, etc.) 
     if rotate_bytes:  
-        fh = RotatingFileHandler(
-                logfile, maxBytes=rotate_bytes, backupCount=backup_count
-                )
-    else:
-        fh = logging.FileHandler(logfile, mode="w")
+        fh = logging.handlers.RotatingFileHandler(
+                logfile, maxBytes=rotate_bytes, backupCount=backup_count, 
+                encoding="utf-8", delay=True)
+    elif mode == "daily": # time + size rotation 
+        fh = logging.handlers.TimedRotatingFileHandler(logfile, when="midnight", interval=1, backupCount=backup_count, encoding="utf-8", delay=True)
+        if hasattr(fh, "maxBytes"): # Keeping it Python >3.10 hybrid 
+            fh.maxBytes = max_bytes or 20_000_000 
+    else:  # runid and no rotate_bytes 
+        fh = logging.FileHandler(logfile, mode="w", encoding="utf-8", delay=True) 
+
     fh.setFormatter(fmt)
     root_logger.addHandler(fh) 
     
     if console:
         ch = logging.StreamHandler(sys.stderr)
         ch.setFormatter(fmt)
-        root_logger.addHandler(ch) 
+        root_logger.addHandler(ch)
+
+
+    # ---- refresh logs/microseq_latest.log symlink -------------
+    latest = logfile.parent / f"{log_file_prefix}_latest.log" 
+    try:
+        if latest.is_symlink() or latest.exists():
+            latest.unlink()
+        latest.symlink_to(logfile.name) # relative link 
+    except OSError as e: 
+        if e.errno not in (errno.EPERM, errno.EACCES, errno.EEXIST):
+            raise 
 
     root_logger.info("Logging to %s", logfile)
     return logfile  
