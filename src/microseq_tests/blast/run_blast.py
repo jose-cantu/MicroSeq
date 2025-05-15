@@ -173,7 +173,7 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
             .str.strip() # this is what removes the whitespace  
             .str.replace(r"^[A-Z]{1,4}\d{5,8}(?:\.\d+){0,2}\s+", "", regex=True) # SILVA "JN193283" prefix
             )
-        df.to_csv(out_tsv, sep="\t", index=False, header=False)
+        df.to_csv(out_tsv, sep="\t", index=False)
     
     else: 
         shutil.move(tmp_out, out_tsv)
