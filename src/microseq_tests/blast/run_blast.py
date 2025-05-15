@@ -147,8 +147,7 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
         # Decide your empty-fily policy here so 
         if temp_empty:
             # zero hits -> means header-only file 
-            with open(out_tsv, "w") as fh:
-                fh.write(header_row())  
+            Path(out_tsv).write_text(header_row())  
         else:
             # hits present head is appended then data is transfered over to final results file 
             with open(out_tsv, "w") as final_fh, tmp_out.open("r") as blast_fh:
@@ -173,10 +172,7 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
             .str.strip() # this is what removes the whitespace  
             .str.replace(r"^[A-Z]{1,4}\d{5,8}(?:\.\d+){0,2}\s+", "", regex=True) # SILVA "JN193283" prefix
             )
-        df.to_csv(out_tsv, sep="\t", index=False)
-    
-    else: 
-        shutil.move(tmp_out, out_tsv)
+        df.to_csv(out_tsv, sep="\t", index=False)  
 
     # final cleanup 
     tmp_out.unlink(missing_ok=True) 
@@ -184,19 +180,21 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
     # optional no hit logging setup ------------------ 
 
     if log_missing:
-        n_lines = 0 
-        try:
-            n_lines = sum(1 for _ in Path(out_tsv).open()) 
-        except FileNotFoundError:
-            pass 
+        # every record name in the input file (strip leading '>") 
+        all_ids = {rec.id for rec in SeqIO.parse(query_fa, "fasta")}
+        # qseqid column may be int-types; coerce to str 
+        hits_df = pd.read_csv(out_tsv, sep="\t", usecols=["qseqid"], dtype=str)
+        found = set(hits_df["qseqid"]) 
 
-        if n_lines <= 1:  # header-only TSV 
-            iso = Path(query_fa).stem
-            L.debug(
-                    "[post-filter] isolate %s -> 0 hits ≥%.1f%% id / ≥%.1f%% qcov",
-                    iso, pct_id, qcov, ) 
-            with open(log_missing, "a") as fh: 
-                fh.write(f"{iso}\n") 
+        missing = sorted(all_ids - found) 
+        Path(log_missing).parent.mkdir(parents=True, exist_ok=True)
+        with open(log_missing, "w") as fh:
+            fh.write("\n".join(missing) + ("\n" if missing else ""))
+
+        L.info("missing-hits: %d / %d isolates -> %s",
+               len(missing), len(all_ids), log_missing) 
+
+      
 
 
 
