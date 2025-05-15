@@ -75,7 +75,8 @@ def main() -> None:
     p_blast.add_argument("--qcov", type=float, default=80.0, help="query coverage %% (default: %(default)s) again you can adjust value based on needs of project")
     p_blast.add_argument("--max_target_seqs", type=int, default=5, help="How many DB hits to retain per query (passed to BLAST")
     p_blast.add_argument("--log-missing", metavar="PATH", help="Append sample IDs that yield zero hits to this file for review.")
-    p_blast.add_argument("--clean-titles", action="store_true", help="Strip the accession & extra fields from stitle," "leaves a tidy Genus-Species handy label") 
+    p_blast.add_argument("--clean-titles", action="store_true", help="Strip the accession & extra fields from stitle," "leaves a tidy Genus-Species handy label {use for SILVA & NCBI DB not necessary for GG2}")
+    p_blast.add_argument("--threads", type=int, default=1, help="CPU threads to pass to blastn (-num_threads)") 
 
 
     # -- TSV Merge Sub --
