@@ -74,7 +74,8 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
     tmp_out = Path(out_tsv).with_suffix(".blasttmp")   
 
 
-    cmd=["blastn",
+    cmd=["stdbuf", "-oL", "-eL", # line -buffered to see if bar updates real time 
+         "blastn",
          "-task", "blastn", # why not? 
          "-query", str(q),   # casting q to str before passing to subprocess 
          "-db", blastdb,
