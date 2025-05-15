@@ -19,7 +19,19 @@ conda env create -f config/environment.yml
 conda activate MicroSeq 
 
 # 3 Install & download databases 
-pip install -e .  # This sets the current version of MicroSeq 
+pip install -e .  # This sets the current version of MicroSeq
+
+## Chossing a logging mode 
+| Mode | When to choose | Activate |
+|------|----------------|----------|
+| daily (one file per day, rolls at midnight *or* 50 MB) | Laptop, interactive CLI sessions | default<br>`export MICROSEQ_LOG_MODE=daily` |
+| runid (fresh file each run, old file renamed with timestamp) | HPC jobs, Nextflow/Snakemake pipelines | `export MICROSEQ_LOG_MODE=runid`<br>or pass `--mode runid` to `microseq-setup` |
+
+`microseq-setup` will ask “laptop (d) or HPC (r)?”; pick `r` to pre-set to HPC for example 
+`MICROSEQ_LOG_MODE=runid` system-wide.
+
+Tip on logging - `tail -F logs/microseq_latest.log` always follows the active file even after a midnight roll-over or per-run rename. I set a symlink to follow the active log file. 
+
 microseq-setup    # prompts for DB + log locations 
 ## - add --quiet to skip prompts and it will set it up via defaults 
 ## - add --db-root /path/dbs to override default ~/.microseq_dbs 
@@ -54,7 +66,10 @@ Finally 4th it writes config/config.yaml so the libary code can fall back on the
 `source ~/.bashrc` is only required in the very first interactive shell so you inherit the exports I made without logging out. The next login or new terminal they are already present and ready to go. The `--quiet` flag is used if you want to run the whole thing non-interactively. 
 
 
-`microseq-fix-tsv` - utlitity that normalises BLAST tables so they can be parsed through post blast sub command =) 
+`microseq-fix-tsv` - utlitity that normalises BLAST tables so they can be parsed through post blast sub command =)
+
+`microseq-setup` will ask “laptop (d) or HPC (r)?”; pick `r` to pre-set to default  
+`MICROSEQ_LOG_MODE=runid` system-wide.
 
 ## Key features
 

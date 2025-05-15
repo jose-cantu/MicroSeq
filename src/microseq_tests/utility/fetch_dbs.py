@@ -33,6 +33,9 @@ ap.add_argument("--db-root", metavar="PATH",
 ap.add_argument("--log-dir", metavar="PATH",
                 help="Folder for MicroSeq run logs "
                      "(default: microseq_tests/logs)")
+ap.add_argument("--mode", choices=["auto", "daily", "runid"],
+                help="Logging mode to pre-configure "
+                "(default: ask interactively)") 
 ap.add_argument("--quiet", action="store_true",
                 help="Skip interactive prompts")
 args = ap.parse_args()
@@ -57,6 +60,18 @@ log_dir = Path(
 
 db_root.mkdir(parents=True, exist_ok=True)
 log_dir.mkdir(parents=True, exist_ok=True)
+
+
+# ------------------------- Pick logging mode (daily vs runid) ----------
+def choose_mode() -> str:
+    if args.mode:
+        return args.mode 
+    if args.quiet:
+        return "daily"
+    ans = input("Will MicroSeq be run primarily locally on this laptop/PC (d) "
+                "or on an HPC meant for Slurm + Nextflow jobs (r)? [d] ").strip().lower() 
+    return "runid" if ans.startswith("r") else "daily" 
+log_mode = choose_mode () # daily or runid 
 
 # ───────────────────────── helpers ──────────────────────────────────────
 def log(msg: str) -> None:
@@ -232,6 +247,7 @@ export MICROSEQ_DB_HOME="{db_root}"
 export BLASTDB="$MICROSEQ_DB_HOME/gg2:$MICROSEQ_DB_HOME/silva:$MICROSEQ_DB_HOME/ncbi"
 export BLASTDB_LMDB=0
 export MICROSEQ_LOG_DIR="{log_dir}"
+export MICROSEQ_LOG_MODE="{log_mode}" 
 """
 
     def append_once(target: Path, text: str) -> None:
