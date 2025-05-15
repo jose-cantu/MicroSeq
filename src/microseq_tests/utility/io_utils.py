@@ -21,7 +21,17 @@ def normalise_tsv(path: str | Path) -> Path:
     text = p.read_text()
 
     if "\t" in text: # already fine here 
-        return p 
+        return p
+
+    # ------- header repair -----------
+    lines = text.splitlines() 
+    if lines and "\t" not in lines[0]:
+        # if the header still has no TAB, but has >1 word, 
+        # split on any run of space/comma 
+        header_parts = re.split(r"[ ,]+", lines[0].strip())  
+        if len(header_parts) >= 2:
+            lines[0] = "\t".join(header_parts) 
+            text = "\n".join(lines) 
 
     L.info("[fix-tsv] converting spaces / commas to TABS in %s", p.name)
     fixed = re.sub(r"( {2,}|,)", "\t", text) # 2+ spaces or comma gets turned into TAB format. 

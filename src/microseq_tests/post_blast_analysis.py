@@ -11,7 +11,8 @@ import csv, logging, pandas as pd, numpy as np
 from biom import Table
 from biom.util import biom_open 
 from microseq_tests.utility.utils import load_config, setup_logging # for default DB paths here
-from microseq_tests.utility.io_utils import normalise_tsv 
+from microseq_tests.utility.io_utils import normalise_tsv
+from microseq_tests.utility.id_normaliser import NORMALISERS 
 
 setup_logging() # initialize global logging by configure as root logger  
 logger = logging.getLogger(__name__) # Now this then set as the real logger by passing everything from the root logger which doesn't return anything on its own  
@@ -128,11 +129,23 @@ def run(blast_tsv: Path,
         out_biom: Path,
         write_csv: bool = True,
         sample_col: str | None = None,
-        identity_th: float = DEFAULT_IDENTITY_TH) -> None:
+        identity_th: float = DEFAULT_IDENTITY_TH,
+        *, # again force keyword args used avoids accidnetal position mistake args 
+        id_normaliser: str = "none",
+        taxonomy_col: str = "auto") -> None:
 
         # ---- more tolerant parser: any whitespace, not just tabs ---------
         blast = _smart_read(blast_tsv)
-        meta = _smart_read(metadata_tsv) 
+        meta = _smart_read(metadata_tsv)
+
+        # --- aplying chosen ID normaliser ---------------
+        norm = NORMALISERS[id_normaliser]
+        meta["sample_id"] = meta["sample_id"].astype(str).map(norm) 
+        blast["sample_id"] = blast["sample_id"].astype(str).map(norm) 
+
+        # keep a RawID copy for provenance purposes 
+        meta["RawID"] = meta["sample_id"] # full filename preserved can be used on ATIMA 
+        meta = meta.drop_duplicates("sample_id", keep="first") 
 
         # detect/rename sample_id column 
         col = _detect_sample_col(meta, set(blast["sample_id"].astype(str)), preferred=sample_col) 
@@ -141,7 +154,23 @@ def run(blast_tsv: Path,
 
         best = _choose_best_hit(blast, identity_th=identity_th)
         merged = best.merge(meta, on="sample_id", how="left") 
-     
+        
+        # --- resolve taxonomy column ------------------------
+        if taxonomy_col == "auto":
+            def looks_like_tax(col: pd.Series) -> bool: 
+                return (col.astype(str)
+                           .str.count(r"(d__|p__|c__|o__|f__|g__|s__)") >= 4).mean() > 0.9
+            taxonomy_col = next(
+                (c for c in merged.columns if looks_like_tax(merged[c])),
+                None)
+            if taxonomy_col is None:
+                raise ValueError(
+                    "Could not auto-detect taxonomy column; "
+                    "use --taxonomy_col") 
+            logger.info("Auto-detected taxonomy column: %s", taxonomy_col) 
+
+            
+
         print(blast.head(), blast.columns) 
 
         # one count per sample (presence/absence) matrix  
@@ -158,9 +187,19 @@ def run(blast_tsv: Path,
             sample_ids = mat.columns.tolist(),
             type_ = "OTU table", 
             )
+        # attach taxonomy list so ATIMA shows ranks 
+        biom_table = embed_taxonomy_from_metadata(
+            biom_table,
+            merged, # merged has taxonomy_col present 
+            col=taxonomy_col,
+            )
+
         with biom_open(str(out_biom), "w") as fh:
             biom_table.to_hdf5(fh, "MicroSeq")
         logger.info(f"Wrote {out_biom} (shape {biom_table.shape})") 
 
         if write_csv:
-            biom_to_csv(out_biom) 
+            meta_out = out_biom.with_suffix("_metadata.csv")
+            merged.to_csv(meta_out, index=False) # comma-separated 
+            logger.info("ATIMA metadata -> %s", meta_out)
+            biom_to_csv(out_biom) # i'll keep the prism mirror here for now go prism users 
