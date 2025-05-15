@@ -17,7 +17,7 @@ def stage_bar(total: int, *, desc: str = "", unit: str = "") -> Iterator[tqdm]:
     without the caller having to pass the bar explicitly. 
     """ 
     outer = getattr(_tls, "current", None) 
-    bar = tqdm(total=total, desc=desc, unit=unit, leave=False) # leave = False here so finished bar leaves and only see latest one 
+    bar = tqdm(total=total, desc=desc, unit=unit, leave=False, ncols=80, bar_format=("{l_bar}{bar}| " "{n_fmt}/{total_fmt} " "[elapsed: {elapsed} < remaining: {remaining}]"),) # leave = False here so finished bar leaves and only see latest one 
     _tls.current = bar # make this bar the new "current one" 
 
     try:
