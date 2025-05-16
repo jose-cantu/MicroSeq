@@ -12,7 +12,8 @@ from biom import Table
 from biom.util import biom_open 
 from microseq_tests.utility.utils import load_config, setup_logging # for default DB paths here
 from microseq_tests.utility.io_utils import normalise_tsv
-from microseq_tests.utility.id_normaliser import NORMALISERS 
+from microseq_tests.utility.id_normaliser import NORMALISERS
+from microseq_tests.utility.metadata_tools import resolve_duplicates 
 
 setup_logging() # initialize global logging by configure as root logger  
 logger = logging.getLogger(__name__) # Now this then set as the real logger by passing everything from the root logger which doesn't return anything on its own  
@@ -132,7 +133,9 @@ def run(blast_tsv: Path,
         identity_th: float = DEFAULT_IDENTITY_TH,
         *, # again force keyword args used avoids accidnetal position mistake args 
         id_normaliser: str = "none",
-        taxonomy_col: str = "auto") -> None:
+        taxonomy_col: str = "auto",
+        duplicate_policy: str = "error",
+        **kw) -> None:
 
         # ---- more tolerant parser: any whitespace, not just tabs ---------
         blast = _smart_read(blast_tsv)
@@ -145,7 +148,7 @@ def run(blast_tsv: Path,
 
         # keep a RawID copy for provenance purposes 
         meta["RawID"] = meta["sample_id"] # full filename preserved can be used on ATIMA 
-        meta = meta.drop_duplicates("sample_id", keep="first") 
+        meta = resolve_duplicates(meta, policy=duplicate_policy)  
 
         # detect/rename sample_id column 
         col = _detect_sample_col(meta, set(blast["sample_id"].astype(str)), preferred=sample_col) 

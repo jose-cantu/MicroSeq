@@ -96,11 +96,15 @@ def run_postblast(blast_hits: PathLike,
                   identity_th: float = 97.0,
                   *, # forces everything after passed by name, prevent position mistakes 
                   id_normaliser: str = "none",
-                  taxonomy_col: str = "auto") -> int: 
+                  taxonomy_col: str = "auto",
+                  duplicate_policy: str = "error",
+                  **kwargs) -> int: 
     postblast_run(blast_hits, metadata, out_biom,
                   write_csv=True, sample_col=sample_col, 
                   identity_th = identity_th, id_normaliser=id_normaliser,
-                  taxonomy_col=taxonomy_col)
+                  taxonomy_col=taxonomy_col,
+                  duplicate_policy=duplicate_policy,
+                  **kwargs)
     return 0
 
 # ───────────────────────────────────────────────────────── AB1 → FASTQ
