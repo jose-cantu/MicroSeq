@@ -76,7 +76,10 @@ def main() -> None:
     p_blast.add_argument("--max_target_seqs", type=int, default=5, help="How many DB hits to retain per query (passed to BLAST")
     p_blast.add_argument("--log-missing", metavar="PATH", help="Append sample IDs that yield zero hits to this file for review.")
     p_blast.add_argument("--clean-titles", action="store_true", help="Strip the accession & extra fields from stitle," "leaves a tidy Genus-Species handy label {use for SILVA & NCBI DB not necessary for GG2}")
-    p_blast.add_argument("--threads", type=int, default=1, help="CPU threads to pass to blastn (-num_threads)") 
+    p_blast.add_argument("--threads", type=int, default=1, help="CPU threads to pass to blastn (-num_threads)")
+    p_blast.add_argument("--relaxed", action="store_true", help="Run BLAST at loose cutoffs then report at " "--identity/--qcov") 
+    p_blast.add_argument("--relaxed-id", type=float, default=80.0, help="Search percent-identity when --relaxed (default 80)") 
+    p_blast.add_argument("--relaxed-qcov", type=float, default=0.0, help="Search qcov_hsp_perc when --relaxed (default 0)") 
 
 
     # -- TSV Merge Sub --
@@ -207,6 +210,13 @@ def main() -> None:
         total = sum(1 for _ in SeqIO.parse(args.input, "fasta"))
         if total == 0:          # fallback for FASTQ 
             total = sum(1 for _ in SeqIO.parse(args.input, "fastq"))
+        # ---- decide search vs report cutoffs -------------------------- 
+        if args.relaxed:
+            search_id, search_qcov = args.relaxed_id, args.relaxed_qcov 
+        else:
+            search_id, search_qcov = args.identity, args.qcov 
+
+        report_id, report_qcov = args.identity, args.qcov 
 
         # treat this as one monolithic bar for all isolates/samples in one run 
         with stage_bar(total, desc="blast", unit="seq"):
@@ -214,13 +224,14 @@ def main() -> None:
                 pathlib.Path(args.input),  # temporary patch for blasting and post biom only will need to think around 
                 args.db,
                 pathlib.Path(args.output),
-                pct_id=args.identity,
-                qcov=args.qcov,
                 max_target_seqs = args.max_target_seqs, 
                 threads=args.threads,
+                search_id=search_id,
+                search_qcov=search_qcov,
+                report_id=report_id,
+                report_qcov=report_qcov, 
                 # I removed the on_progress var here since the nested helper updates parent bar via thread-local _tls 
-                log_missing=pathlib.Path(args.log_missing) if args.log_missing else None,
-                clean_titles=args.clean_titles, 
+                log_missing=(pathlib.Path(args.log_missing) if args.log_missing else None), clean_titles=args.clean_titles, 
             )
 
     elif args.cmd == "merge-hits":

@@ -34,8 +34,8 @@ def _progress_tail(tmp_path: Path, total: int, callback):
         time.sleep(1)
 
 # db_key is the shorthand string for "gg2" or "silva" best keep it str here for future reference 
-def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
-              pct_id: float = 97.0, qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, on_progress: Optional[Callable[[int], None]] = None, log_missing: PathLike | None = None, clean_titles: bool = False) -> None:
+def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
+              search_id: float = 97.0, search_qcov: float = 80.0, report_id: float = 97.0, report_qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, on_progress: Optional[Callable[[int], None]] = None, log_missing: PathLike | None = None, clean_titles: bool = False) -> None:
     """
     Run blastn against one of the configured 16 S databases.
     You will also emit a percentage progress bar I have set to make it look more a      ppealing. =) 
@@ -103,8 +103,8 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
          "-query", str(q),   # casting q to str before passing to subprocess 
          "-db", blastdb,
          "-max_target_seqs", str(max_target_seqs), # keep only the best alignment here HSP that has the best-overall score
-         "-perc_identity", str(pct_id),
-         "-qcov_hsp_perc", str(qcov),  # here I am requiring ≥ 80% of query to align.... 
+         "-perc_identity", str(search_id),
+         "-qcov_hsp_perc", str(search_qcov),  # here I am requiring ≥ 80% of query to align.... 
          "-outfmt", outfmt,
          "-out", str(tmp_out), # temporary path will append blast with header 
          "-num_threads", str(threads),
@@ -216,24 +216,59 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
     tmp_out.unlink(missing_ok=True) 
 
     # optional no hit logging setup ------------------ 
-
     if log_missing:
-        # every record name in the input file (strip leading '>") 
+        import numpy as np
+        all_hits = out_tsv 
+        hits_ok = (
+            pd.read_csv(all_hits,
+                        sep="\t",
+                        usecols=["qseqid", "pident", "qcovhsp", "length"],
+                        dtype={"qseqid": str})
+              .groupby("qseqid").first()
+        )
+        hits_ok.columns = ["best_pident", "best_qcov", "align_len"]
+
         all_ids = {rec.id for rec in SeqIO.parse(query_fa, "fasta")}
-        # qseqid column may be int-types; coerce to str 
-        hits_df = pd.read_csv(out_tsv, sep="\t", usecols=["qseqid"], dtype=str)
-        found = set(hits_df["qseqid"]) 
+        full = pd.DataFrame(index=sorted(all_ids))
+        full["status"] = np.where(full.index.isin(hits_ok.index), "PASS", "FAIL")
+        full = full.join(hits_ok)
+        
+        full["need_id"] = (report_id - full["best_pident"]).clip(lower=0).round(3)
+        full["need_cov"] = (report_qcov - full["best_qcov"]).clip(lower=0).astype(int) 
+        fail_id  = full["best_pident"] < report_id
+        fail_cov = full["best_qcov"]   < report_qcov
+        both     = fail_id & fail_cov
+        no_alignment = full["best_pident"].isna() 
+        full.loc[no_alignment, "reason"] = "no_alignment" 
+        full.loc[ both, "reason"] = "both"
+        full.loc[ fail_id & ~both, "reason"] = "low_identity"
+        full.loc[ fail_cov & ~both, "reason"] = "low_qcov"
+        full.loc[fail_id | fail_cov | no_alignment, "status"] = "FAIL"
+        full["reason"] = full["reason"].fillna("—")
 
-        missing = sorted(all_ids - found) 
+        base      = Path(log_missing)
+        full_path = base.with_name("hits_full.tsv")
+        hits_path = base.with_name("hits.tsv")
+
+        cols = ["status", "reason", "need_id", "need_cov","best_pident", "best_qcov", "align_len"]
+        (full.reset_index()
+             .rename(columns={"index": "qseqid"})[["qseqid"] + cols]
+        ).to_csv(full_path, sep="\t", index=False)
+
+        pass_ids = full.query("status == 'PASS'").index.astype(str)
+        (pd.read_csv(all_hits, sep="\t", dtype={"qseqid": str})
+             .query("qseqid in @pass_ids")
+        ).to_csv(hits_path, sep="\t", index=False)
+
         Path(log_missing).parent.mkdir(parents=True, exist_ok=True)
-        with open(log_missing, "w") as fh:
-            fh.write("\n".join(missing) + ("\n" if missing else ""))
+        missing_ids = full.query("status == 'FAIL'").index.tolist()
+        Path(log_missing).write_text("\n".join(missing_ids) +
+                                     ("\n" if missing_ids else ""))
 
-        L.info("missing-hits: %d / %d isolates -> %s",
-               len(missing), len(all_ids), log_missing) 
-
-      
-
+        L.info("PASS %d | FAIL %d → %s  (full=%s , hits=%s)",
+               len(pass_ids), len(missing_ids),
+               log_missing, full_path, hits_path)      
+    
 
 
 
