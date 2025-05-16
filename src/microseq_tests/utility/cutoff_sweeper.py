@@ -4,6 +4,7 @@
 cutoff_sweeper.py
 Explore identity / coverage thresholds that yield ~N PASS rows
 from the hits_full / all_hits TSV written by microseq blast --relaxed.
+Also created a variant for postblast predicting what survies after threshold cutoff. 
 """
 
 from __future__ import annotations
@@ -44,6 +45,46 @@ def suggest(path: str | Path,
     # sort by |count - target|  then by higher identity (tie-break)
     results.sort(key=lambda t: (abs(t[2] - target), -t[0], -t[1]))
     return results[:top]
+
+
+
+# Collapse-aware variant that predicts rows/samples that survive MicroSeq postblast
+def suggest_after_collapse(path, meta_cols, target, *, step=1,
+                           id_min=80, id_max=100,
+                           cov_min=0, cov_max=100, top=10):
+    """
+    Predict identity / qcov pairs that yield ≈ target PASS rows
+    after collapsing to one hit per sample (postblast logic). Returns the top (identity, qcov, pass_count) tripples whose PASS samples/rows after per-sample collapse are closest to desired target value. 
+
+    Parameters
+    ----------
+    path : str or Path
+        hits_full.tsv written by `microseq blast --relaxed`
+    meta_cols : list[str]
+        Column(s) that define a unique sample, usually ["sample_id"].
+    target : int
+        Desired number of PASS rows after collapse.
+    step : int or float
+        Grid step size in percent (default 1).
+    Returns
+    -------
+    list[tuple[int, int, int]]
+        (identity, qcov, pass_count) sorted by |pass_count-target|.
+    """
+    # Load only nmeeded columns here 
+    df = pd.read_csv(path, sep="\t", usecols=["best_pident", "best_qcov", "bitscore"] + meta_cols) 
+
+    # keep highest identity (then the highest bitscore == best hit) per sample 
+    best = (df.sort_values(["best_pident", "bitscore"], ascending=False).drop_duplicates(subset=meta_cols, keep="first")) 
+
+    results = []
+    for ident in range(id_min, id_max + 1, step):
+        for qcov in range(cov_min, cov_max + 1, step):
+            mask = (best.best_pident >= ident) & (best.best_qcov >= qcov) 
+            results.append((ident, qcov, int(mask.sum()))) 
+
+    results.sort(key=lambda t: (abs(t[2] - target), -t[0], -t[1]))
+    return results[:top] 
 
 
 if __name__ == "__main__":       # quick CLI use:

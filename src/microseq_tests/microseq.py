@@ -79,8 +79,14 @@ def main() -> None:
     p_blast.add_argument("--threads", type=int, default=1, help="CPU threads to pass to blastn (-num_threads)")
     p_blast.add_argument("--relaxed", action="store_true", help="Run BLAST at loose cutoffs then report at " "--identity/--qcov") 
     p_blast.add_argument("--relaxed-id", type=float, default=80.0, help="Search percent-identity when --relaxed (default 80)") 
-    p_blast.add_argument("--relaxed-qcov", type=float, default=0.0, help="Search qcov_hsp_perc when --relaxed (default 0)") 
+    p_blast.add_argument("--relaxed-qcov", type=float, default=0.0, help="Search qcov_hsp_perc when --relaxed (default 0)")
+    p_blast.add_argument("--export-sweeper", action="store_true", help="Also write hits_full_sweeper.tsv containing " "sample_id, bitscore, clean headers") 
 
+    # sweeper used to predict PASS cutoff point to hit desired TARGET PASS count 
+    p_sweep = sp.add_parser("suggest-cutoffs", help="Suggest identity/qcov pairs to hit TARGET PASS count") 
+    p_sweep.add_argument("table", help="hits_full.tsv from --relaxed run") 
+    p_sweep.add_argument("target", type=int)
+    p_sweep.add_argument("--step", type=int, default=1, help="You can change the step count the default assume a 1% step difference 1 == 1%%") 
 
     # -- TSV Merge Sub --
     p_merge = sp.add_parser("merge-hits", help="Concatenate many BLAST TSV files into one large TSV")
@@ -231,7 +237,8 @@ def main() -> None:
                 report_id=report_id,
                 report_qcov=report_qcov, 
                 # I removed the on_progress var here since the nested helper updates parent bar via thread-local _tls 
-                log_missing=(pathlib.Path(args.log_missing) if args.log_missing else None), clean_titles=args.clean_titles, 
+                log_missing=(pathlib.Path(args.log_missing) if args.log_missing else None), clean_titles=args.clean_titles,
+                export_sweeper=args.export_sweeper, 
             )
 
     elif args.cmd == "merge-hits":
@@ -241,6 +248,10 @@ def main() -> None:
         merged = merge_hits(args.input, args.output) # progress bar & logging  
         print("✓ merged →", merged) 
 
+    elif args.cmd == "suggest-cutoffs":
+        from microseq_tests.utility.cutoff_sweeper import suggest 
+        for i,q,n, in suggest(args.table, args.target, step=args.step): 
+            print(f"{i}% {q}% -> {n} pass") 
 
     elif args.cmd == "postblast":
         out_biom = workdir / "biom" / args.output_biom 

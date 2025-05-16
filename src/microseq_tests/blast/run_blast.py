@@ -6,7 +6,8 @@ from typing import Optional, Callable
 from Bio import SeqIO 
 from microseq_tests.utility.utils import load_config, expand_db_path
 from microseq_tests.utility.progress import _tls # access to parent progress bar 
-import pandas as pd 
+import pandas as pd
+from microseq_tests.utility.id_normaliser import NORMALISERS 
 
 L = logging.getLogger(__name__) 
 PathLike = str | Path
@@ -35,7 +36,7 @@ def _progress_tail(tmp_path: Path, total: int, callback):
 
 # db_key is the shorthand string for "gg2" or "silva" best keep it str here for future reference 
 def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
-              search_id: float = 97.0, search_qcov: float = 80.0, report_id: float = 97.0, report_qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, on_progress: Optional[Callable[[int], None]] = None, log_missing: PathLike | None = None, clean_titles: bool = False) -> None:
+              search_id: float = 97.0, search_qcov: float = 80.0, report_id: float = 97.0, report_qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, on_progress: Optional[Callable[[int], None]] = None, log_missing: PathLike | None = None, clean_titles: bool = False, export_sweeper: bool = False, id_normaliser: str = "strip_suffix" ) -> None: 
     """
     Run blastn against one of the configured 16 S databases.
     You will also emit a percentage progress bar I have set to make it look more a      ppealing. =) 
@@ -201,7 +202,10 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
     if clean_titles:
         import re 
         # keep only Genus-Species (dropping sseqid and hitlength information from database attached to name of ID that was submitted) 
-        df = pd.read_csv(out_tsv, sep="\t", names=FIELD_LIST, dtype=str) 
+        df = pd.read_csv(out_tsv, sep="\t", names=FIELD_LIST, dtype=str)
+        # strip any # banner / padding and create sample_id 
+        df = df.rename(columns=lambda c: c.lstrip("# ").strip())
+        # derive sample_id (example rule: drop well / driection suffix) 
 
         df["stitle"] = (
             df["stitle"]
@@ -219,22 +223,41 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
     if log_missing:
         import numpy as np
         all_hits = out_tsv 
-        hits_ok = (
-            pd.read_csv(all_hits,
-                        sep="\t",
-                        usecols=["qseqid", "pident", "qcovhsp", "length"],
-                        dtype={"qseqid": str})
-              .groupby("qseqid").first()
-        )
-        hits_ok.columns = ["best_pident", "best_qcov", "align_len"]
+        
+        # ---------- read full BLAST table, clean column whitespace --------
+        hits_df = (pd.read_csv(all_hits, sep="\t", dtype=str)
+                   .rename(columns=lambda c: c.lstrip("# ").strip())) 
+
+        # add sample_id once, using the SAME normaliser here as postblast consistent       
+        norm = NORMALISERS[id_normaliser]
+        if "sample_id" not in hits_df.columns:
+            hits_df["sample_id"] = hits_df["qseqid"].map(norm) 
+
+        # optional sweeper file 
+        if export_sweeper: 
+            sweeper_path = Path(log_missing).with_name("hits_full_sweeper.tsv") 
+            hits_df.to_csv(sweeper_path, sep="\t", index=False) 
+            L.info("sweeper table -> %s", sweeper_path) 
+
+        # collapse best hit per qseqid 
+        hits_ok = (hits_df[["qseqid", "sample_id", 
+                            "pident", "qcovhsp",
+                            "length", "bitscore"]] 
+                   .groupby("qseqid").first()) 
+
+
+        hits_ok.columns = ["sample_id","best_pident", "best_qcov", "align_len", "bitscore"]
 
         all_ids = {rec.id for rec in SeqIO.parse(query_fa, "fasta")}
         full = pd.DataFrame(index=sorted(all_ids))
         full["status"] = np.where(full.index.isin(hits_ok.index), "PASS", "FAIL")
         full = full.join(hits_ok)
         
-        full["need_id"] = (report_id - full["best_pident"]).clip(lower=0).round(3)
-        full["need_cov"] = (report_qcov - full["best_qcov"]).clip(lower=0).astype(int) 
+        full["need_id"] = (
+            (report_id - full["best_pident"].fillna(0)).clip(lower=0).round(2)
+        )
+        full["need_cov"] = (
+            (report_qcov - full["best_qcov"].fillna(0)).clip(lower=0).astype("Int64")) 
         fail_id  = full["best_pident"] < report_id
         fail_cov = full["best_qcov"]   < report_qcov
         both     = fail_id & fail_cov
@@ -250,15 +273,13 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
         full_path = base.with_name("hits_full.tsv")
         hits_path = base.with_name("hits.tsv")
 
-        cols = ["status", "reason", "need_id", "need_cov","best_pident", "best_qcov", "align_len"]
+        cols = ["status", "reason", "need_id", "need_cov", "sample_id", "best_pident", "best_qcov", "align_len", "bitscore"]
         (full.reset_index()
              .rename(columns={"index": "qseqid"})[["qseqid"] + cols]
         ).to_csv(full_path, sep="\t", index=False)
 
         pass_ids = full.query("status == 'PASS'").index.astype(str)
-        (pd.read_csv(all_hits, sep="\t", dtype={"qseqid": str})
-             .query("qseqid in @pass_ids")
-        ).to_csv(hits_path, sep="\t", index=False)
+        (pd.read_csv(all_hits, sep="\t", dtype=str).rename(columns=lambda c: c.lstrip("# ").strip()).query("qseqid in @pass_ids")).to_csv(hits_path, sep="\t", index=False)
 
         Path(log_missing).parent.mkdir(parents=True, exist_ok=True)
         missing_ids = full.query("status == 'FAIL'").index.tolist()
