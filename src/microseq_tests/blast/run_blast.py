@@ -247,6 +247,8 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
 
 
         hits_ok.columns = ["sample_id","best_pident", "best_qcov", "align_len", "bitscore"]
+        hits_ok["best_pident"] = pd.to_numeric(hits_ok["best_pident"], errors="coerce")
+        hits_ok["best_qcov"] = pd.to_numeric(hits_ok["best_qcov"], errors="coerce") 
 
         all_ids = {rec.id for rec in SeqIO.parse(query_fa, "fasta")}
         full = pd.DataFrame(index=sorted(all_ids))
