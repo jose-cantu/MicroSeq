@@ -19,7 +19,7 @@ from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta
 from Bio import SeqIO 
 from functools import partial
 from microseq_tests.utility.merge_hits import merge_hits as merged_hits 
-
+from microseq_tests.utility.cutoff_sweeper import suggest_after_collapse as suggest 
 
 
 def main() -> None:
@@ -83,10 +83,15 @@ def main() -> None:
     p_blast.add_argument("--export-sweeper", action="store_true", help="Also write hits_full_sweeper.tsv containing " "sample_id, bitscore, clean headers") 
 
     # sweeper used to predict PASS cutoff point to hit desired TARGET PASS count 
-    p_sweep = sp.add_parser("suggest-cutoffs", help="Suggest identity/qcov pairs to hit TARGET PASS count") 
+    p_sweep = sp.add_parser("suggest-cutoffs", help="Suggest identity/qcov pairs to hit TARGET PASS count of number of samples after per-sample collapse", description=("Given a BLAST sweeper table (*.tsv) from a relaxed search, "
+        "scan identity/qcov combinations and report those that yield a "
+        "post-collapse row count close to TARGET. "
+        "Collapse uses the 'sample_id' column, matching postblast behaviour."
+    ),
+    epilog="Tip: pipe the first line into `microseq filter-hits` to apply the pair"    ) 
     p_sweep.add_argument("table", help="hits_full.tsv from --relaxed run") 
     p_sweep.add_argument("target", type=int)
-    p_sweep.add_argument("--step", type=int, default=1, help="You can change the step count the default assume a 1% step difference 1 == 1%%") 
+    p_sweep.add_argument("--step", type=int, default=1, help="You can change the step count the default assume a grid step size in %% (1 -> 1 %% increments; default %(default)s") 
 
     # -- TSV Merge Sub --
     p_merge = sp.add_parser("merge-hits", help="Concatenate many BLAST TSV files into one large TSV")
@@ -247,10 +252,10 @@ def main() -> None:
 
         merged = merge_hits(args.input, args.output) # progress bar & logging  
         print("✓ merged →", merged) 
-
+    
+    # keep in mind this is used as post-collapse estimate 
     elif args.cmd == "suggest-cutoffs":
-        from microseq_tests.utility.cutoff_sweeper import suggest 
-        for i,q,n, in suggest(args.table, args.target, step=args.step): 
+        for i,q,n, in suggest(args.table, meta_cols=["sample_id"], target=args.target, step=args.step): 
             print(f"{i}% {q}% -> {n} pass") 
 
     elif args.cmd == "postblast":

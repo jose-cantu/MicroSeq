@@ -12,6 +12,29 @@ from pathlib import Path
 from itertools import product
 import pandas as pd
 
+
+# ---------- helper function -----------
+
+def _load_hits(path: Path | str, 
+               meta_cols: list[str] | None,
+               need_bitscore: bool):
+    """Return a DataFrame with columns:
+        pident, qcovhsp, [bitscore], + meta_cols (renamed & uniform) """
+    cols = pd.read_csv(path, sep="\t", nrows=0).columns 
+    pid_col = "best_pident" if "best_pident" in cols else "pident"
+    qcov_col = "best_qcov" if "best_qcov" in cols else "qcovhsp" 
+
+    use = [pid_col, qcov_col]
+    if need_bitscore:
+        use.append("bitscore")
+    if meta_cols:
+        use += meta_cols 
+
+    df = pd.read_csv(path, sep="\t", usecols=use)
+    df = df.rename(columns={pid_col: "pident", qcov_col: "qcovhsp"})
+    return df 
+
+
 def suggest(path: str | Path,
             target: int,
             *,
@@ -32,8 +55,8 @@ def suggest(path: str | Path,
         step     : both stepped by `step` %
     """
     path = Path(path)
-    df = pd.read_csv(path, sep="\t", usecols=["best_pident", "best_qcov"])
-    best = df[["best_pident", "best_qcov"]].to_numpy()
+    df = _load_hits(path, meta_cols=None, need_bitscore=False)
+    best = df[["pident", "qcovhsp"]].to_numpy()
 
     results: list[tuple[int, int, int]] = []
     for ident, qcov in product(range(id_min, id_max + 1, step),
@@ -72,15 +95,15 @@ def suggest_after_collapse(path, meta_cols, target, *, step=1,
         (identity, qcov, pass_count) sorted by |pass_count-target|.
     """
     # Load only nmeeded columns here 
-    df = pd.read_csv(path, sep="\t", usecols=["best_pident", "best_qcov", "bitscore"] + meta_cols) 
+    df = _load_hits(path, meta_cols=meta_cols, need_bitscore=True)  
 
     # keep highest identity (then the highest bitscore == best hit) per sample 
-    best = (df.sort_values(["best_pident", "bitscore"], ascending=False).drop_duplicates(subset=meta_cols, keep="first")) 
+    best = (df.sort_values(["pident", "bitscore"], ascending=False).drop_duplicates(subset=meta_cols, keep="first")) 
 
     results = []
     for ident in range(id_min, id_max + 1, step):
         for qcov in range(cov_min, cov_max + 1, step):
-            mask = (best.best_pident >= ident) & (best.best_qcov >= qcov) 
+            mask = (best.pident >= ident) & (best.qcovhsp >= qcov) 
             results.append((ident, qcov, int(mask.sum()))) 
 
     results.sort(key=lambda t: (abs(t[2] - target), -t[0], -t[1]))
