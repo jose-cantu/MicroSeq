@@ -1,6 +1,6 @@
 # -- src/micrseq_tests/blast/run_blast.py ---------------
 from __future__ import annotations 
-import logging, os, subprocess, shutil  
+import logging, os, subprocess, shutil, re, functools, threading, time  
 from pathlib import Path 
 from typing import Optional, Callable 
 from Bio import SeqIO 
@@ -14,7 +14,24 @@ PathLike = str | Path
 FIELD_LIST = [ "qseqid","sseqid","pident","qlen","qcovhsp","length","evalue","bitscore","stitle"]
 def header_row() -> str: 
     """Returns the TSV header line for BLAST hits including final newline. """ 
-    return "\t".join(FIELD_LIST) + "\n" 
+    return "\t".join(FIELD_LIST) + "\n"
+
+# progress helper: tail the temporary TSV once per second
+def _progress_tail(tmp_path: Path, total: int, callback):
+    """Background reader that counts unique qseqid already written."""
+    seen: set[str] = set()
+    while not getattr(_progress_tail, "stop", False):
+        if tmp_path.exists():
+            with tmp_path.open() as fh:
+                for ln in fh:
+                    if ln.startswith("#") or not ln:
+                        continue
+                    qseqid = ln.split("\t", 1)[0]
+                    seen.add(qseqid)
+        if callback:
+            pct = int(len(seen) / total * 100)
+            callback(min(pct, 99))
+        time.sleep(1)
 
 # db_key is the shorthand string for "gg2" or "silva" best keep it str here for future reference 
 def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
@@ -59,6 +76,12 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
         raise ValueError(
             f"{q} contains no FASTA/FASTQ records - nothing to BLAST" 
             )
+    # ------ parent tqdm bar auto-callback -------------------- 
+    parent_bar = getattr(_tls, "current", None)
+    if on_progress is None and parent_bar is not None: 
+        on_progress = lambda pct: parent_bar.update(
+            max(0, int(pct * total / 100) - parent_bar.n) 
+            ) 
 
     Path(out_tsv).parent.mkdir(parents=True, exist_ok=True)
 
@@ -101,9 +124,17 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
     # ------------ progress setup bar callback ------------------------ 
   
     if on_progress:
-        on_progress(0) 
+        on_progress(0)
+    _progress_tail.stop = False # reset flag
+    tailer = threading.Thread(
+        target=_progress_tail,
+        args=(tmp_out, total, on_progress),
+        daemon=True
+        )
+    tailer.start() 
 
-    proc = subprocess.Popen(
+    try:
+        proc = subprocess.Popen(
             cmd, 
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -112,23 +143,29 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike,
             env=env,
             )
 
-    done, next_log = 0, 5 # log every 5% incrementally ......
+        done, next_log = 0, 5 # log every 5% incrementally ......
 
-    for ln in proc.stdout:
-        if ln and not ln.startswith("#"): # data row, not BLAST banner 
-            done += 1                         # one query finished 
-            pct = int(done / total * 100) 
+        for ln in proc.stdout:
+            if ln and not ln.startswith("#"): # data row, not BLAST banner 
+                done += 1                         # one query finished 
+                pct = int(done / total * 100) 
 
-            if on_progress:                   # GUI / tqdm callback 
-                on_progress(min(pct, 99))    # keep 100% for the end 
+                if on_progress:                   # GUI / tqdm callback 
+                    on_progress(min(pct, 99))    # keep 100% for the end 
 
-            if pct >= next_log: # terminal log 
-                L.info("Progress %d %%", pct)
-                next_log += 5
+                if pct >= next_log: # terminal log 
+                    L.info("Progress %d %%", pct)
+                    next_log += 5
 
-    rc = proc.wait()
-    if rc:
-        raise RuntimeError(f"blastn exited with code {rc}") 
+        rc = proc.wait() 
+
+        if rc:
+            raise RuntimeError(f"blastn exited with code {rc}") 
+    
+    finally:
+        _progress_tail.stop = True # tell loop to exit 
+        tailer.join() # wait for it to finish 
+
 
     if on_progress:
         on_progress(100) # final tick in progress bar GUI/tqdm callback 
