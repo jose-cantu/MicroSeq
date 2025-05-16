@@ -15,3 +15,7 @@ microseq_dbs/
 # keeping logs from building up 
 logs/*.log 
 config/config.yaml
+# runtime artefacts
+logs/
+tmp_smoke/
+*.log
