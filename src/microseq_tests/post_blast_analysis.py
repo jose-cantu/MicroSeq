@@ -138,7 +138,7 @@ def run(blast_tsv: Path,
         sample_col: str | None = None,
         identity_th: float = DEFAULT_IDENTITY_TH,
         *, # again force keyword args used avoids accidnetal position mistake args 
-        id_normaliser: str = "none",
+        id_normaliser: str = "none", 
         taxonomy_col: str = "auto",
         duplicate_policy: str = "error",
         **kw) -> None:
@@ -146,8 +146,13 @@ def run(blast_tsv: Path,
         # ---- more tolerant parser: any whitespace, not just tabs ---------
         blast = _smart_read(blast_tsv)
         meta = _smart_read(metadata_tsv)
-
-        # --- aplying chosen ID normaliser ---------------
+        
+        # ---- id-normaliser config -> pull rule from YAML 
+        if id_normaliser == "config":
+            cfg_norm = load_config().get("metadata", {}).get("sample_id_normaliser") 
+            if cfg_norm:
+                id_normaliser = cfg_norm 
+        # --- aplying chosen ID normaliser --------------
         norm = NORMALISERS[id_normaliser]
         meta["sample_id"] = meta["sample_id"].astype(str).map(norm) 
         blast["sample_id"] = blast["sample_id"].astype(str).map(norm) 
@@ -214,7 +219,20 @@ def run(blast_tsv: Path,
 
         with biom_open(str(out_biom), "w") as fh:
             biom_table.to_hdf5(fh, "MicroSeq")
-        logger.info(f"Wrote {out_biom} (shape {biom_table.shape})") 
+        logger.info(f"Wrote {out_biom} (shape {biom_table.shape})")
+        
+        obs_ids = biom_table.ids(axis="observation")
+        tax_df  = pd.DataFrame(
+            [parse_lineage(oid) for oid in obs_ids],
+            index=obs_ids,
+        )
+        tax_df.index.name = "OTU_ID"
+        tax_df.reset_index(inplace=True)
+
+        tax_csv = out_biom.with_name(out_biom.stem + "_taxonomy_only.csv")
+        tax_df.to_csv(tax_csv, index=False)
+        logger.info("Wrote taxonomy-only CSV → %s", tax_csv)
+
 
         if write_csv:
             meta_out = out_biom.with_name(out_biom.stem + "_metadata.csv")

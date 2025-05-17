@@ -4,38 +4,58 @@ Embed full-length taxonomy strings from a metadata DataFrame intoa BIOM Table.
 """
 
 from __future__ import annotations 
-from typing import Mapping 
+from typing import Mapping, Dict 
 from biom import Table 
-import pandas as pd 
+import pandas as pd
+import re  
+from .taxonomy_utils import parse_lineage 
+
+def parse_lineage(lineage: str) -> Dict[str, str]:
+    """
+    Parse a semicolon-delimited lineage like
+        d__Bacteria; p__Firmicutes; c__Bacilli; …
+    into the seven canonical ranks.  Missing ranks → ''.
+    """
+    lineage = lineage.strip()
+    rank_specs = [
+        ("Domain",  r"d__"),
+        ("Phylum",  r"p__"),
+        ("Class",   r"c__"),
+        ("Order",   r"o__"),
+        ("Family",  r"f__"),
+        ("Genus",   r"g__"),
+        ("Species", r"s__"),
+    ]
+    out: Dict[str, str] = {}
+    for col, prefix in rank_specs:
+        m = re.search(re.escape(prefix) + r"([^;]+)", lineage)
+        out[col] = m.group(1).strip() if m and m.group(1).strip() else ""
+    return out
+
 
 def embed_taxonomy_from_metadata(
-    tb1: Table,
-    meta: pd.DataFrame,
+    tbl,
+    df,
     *,
-    col: str = "gg_taxon",
-    ) -> Table:
+    col: str = "taxonomy",   # column in df that already holds the lineage strings
+):
     """
-    For every OTU row in tb1 find the first sample where it is present (>0),
-    lookup meta.loc[sample, col], split on delimiters, and attach as the 
-    'taxonomy' metadata field expected by ATIMA/QIIME.
+    Embed a seven-rank taxonomy dict *and* the BIOM-spec 'taxonomy' list
+    onto every observation in `tbl`.
 
-    The function mutates the Table in place and also reutnrs it so you write 
-    tb1 = embed_taxonomy_from_metadata(tb1, meta).
+    Assumes each observation-ID is the full lineage string (as created by
+    pivot_table(index="taxonomy", …) earlier in the pipeline).
     """
-    # --------------------- building a Lookup SampleID -> taxonomy string ------ 
-    lookup: Mapping[str, str] = meta.set_index("SampleID")[col].to_dict() 
+    # Build lookup   lineage-string → {'Domain': 'Bacteria', …}
+    lut = {row[col]: parse_lineage(row[col]) for _, row in df.iterrows()}
 
-    tax_meta = {} 
-    for otu in tb1.ids(axis="observation"):
-        sample_idx = tb1.data(otu, axis="observation").nonzero()[0][0] # first hit 
-        sample_id = tb1.ids(axis="sample")[sample_idx]
-        tax_str = lookup.get(sample_id) 
-        if tax_str is None: 
-            raise KeyError(f"Sample {sample_id} missing {col} column") 
-        tax_meta[otu] = {"taxonomy": split_tax(tax_str)} 
+    def _obs_meta(obs_id):
+        parsed = lut.get(obs_id, {})
+        return {"taxonomy": list(parsed.values()), **parsed}
 
-    tb1.add_metadata(tax_meta, axis="observation")
-    return tb1 
+    tbl.add_metadata(_obs_meta, axis="observation", inplace=True)
+    return tbl
+
 
 # small helper to unit-test independently 
 def split_tax(tax_string: str) -> list[str]:

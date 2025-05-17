@@ -15,3 +15,6 @@ databases:
   ncbi:
     blastdb: ${MICROSEQ_DB_HOME}/ncbi/16S_ribosomal_RNA
     taxonomy: ${MICROSEQ_DB_HOME}/ncbi/taxonomy.tsv
+
+metadata:
+  sample_id_normaliser: strip_suffix_legacy 
