@@ -1,6 +1,7 @@
 # src/microseq_tests/microseq.py
 from __future__ import annotations
-import argparse, pathlib, logging, shutil, glob, sys, subprocess, os   
+import argparse, pathlib, logging, shutil, glob, sys, subprocess, os 
+import pandas as pd 
 from microseq_tests.utility.progress import stage_bar 
 from microseq_tests.utility.merge_hits import merge_hits 
 import microseq_tests.trimming.biopy_trim as biopy_trim
@@ -19,8 +20,9 @@ from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta
 from Bio import SeqIO 
 from functools import partial
 from microseq_tests.utility.merge_hits import merge_hits as merged_hits 
-from microseq_tests.utility.cutoff_sweeper import suggest_after_collapse as suggest 
-
+from microseq_tests.utility.cutoff_sweeper import suggest_after_collapse as suggest
+from microseq_tests.utility import filter_hits_cli 
+from microseq_tests.utility.id_normaliser import NORMALISERS  
 
 def main() -> None:
     cfg = load_config() 
@@ -91,7 +93,29 @@ def main() -> None:
     epilog="Tip: pipe the first line into `microseq filter-hits` to apply the pair"    ) 
     p_sweep.add_argument("table", help="hits_full.tsv from --relaxed run") 
     p_sweep.add_argument("target", type=int)
-    p_sweep.add_argument("--step", type=int, default=1, help="You can change the step count the default assume a grid step size in %% (1 -> 1 %% increments; default %(default)s") 
+    p_sweep.add_argument("--step", type=int, default=1, help="You can change the step count the default assume a grid step size in %% (1 -> 1 %% increments; default %(default)s")
+
+    # Filter hits applying thresholds below 
+    p_filt = sp.add_parser("filter-hits",
+                       help="Apply identity/qcov thresholds to sweeper TSV")
+    p_filt.add_argument("-i", "--input", required=True,
+                        help="hits_full_sweeper.tsv from relaxed BLAST")
+    p_filt.add_argument("--identity", type=int, required=True, metavar="PCT")
+    p_filt.add_argument("--qcov",     type=int, required=True, metavar="PCT")
+    p_filt.add_argument("-o", "--output",
+                        help="Filtered TSV (default: hits_ID_QCOV.tsv)")
+    p_filt.add_argument("--with-status", action="store_true",
+                        help="Also write hits_full_status.tsv with PASS/FAIL rows")
+    p_filt.add_argument("--dry-run", action="store_true",
+                        help="Show PASS count, write nothing")
+    p_filt.set_defaults(func=filter_hits_cli.main)
+    p_filt.add_argument("--unique", action="store_true", help="Also report unique sample_id count")
+    p_filt.add_argument("--group-col", default="sample_id", help="Column to collapse on when reporting --unique " "(default: %(default)s)")
+    p_filt.add_argument("--id-normaliser",
+                    choices=["none", "strip_suffix", "strip_suffix_simple", "auto"],
+                    default="none",
+                    help="Match postblast’s ID cleaner so --unique reports "
+                         "the final per-sample count (default: %(default)s)")
 
     # -- TSV Merge Sub --
     p_merge = sp.add_parser("merge-hits", help="Concatenate many BLAST TSV files into one large TSV")
@@ -116,7 +140,7 @@ def main() -> None:
     p_BIOM.add_argument("--json", action="store_true", help="Also emit a pretty-printed JSON BIOM alonside") 
     p_BIOM.add_argument("--post_blast_identity", type=float, default=97.0, help="minimum %% identity to keep when selecting the best hit (default: %(default)s) you also have the decision to modify to what number you please besides the default") 
     # sample - ID normaliser: none | strip_suffix | futuer custom:regex option 
-    p_BIOM.add_argument("--id-normaliser", choices=["none", "strip_suffix", "auto"], default="none", help=("How to clean up sample IDs before matching metadata " "(e.g. strip date/well suffix).")) 
+    p_BIOM.add_argument("--id-normaliser", choices=["none", "strip_suffix", "auto", "strip_suffix_simple"], default="none", help=("How to clean up sample IDs before matching metadata " "(e.g. strip date/well suffix).")) 
     # taxonomy column: auto-detect or explicit 
     p_BIOM.add_argument("--taxonomy-col", default="auto", help=("Which metadata column stores the full 7 rank taxonomy; " "'auto' = first column whose values contain at least 4 rank prefixes " "think here (d__, p__, c__, o__, f__, g__, s__).")) 
     p_BIOM.add_argument("--duplicate-policy", choices=["error", "keep-first", "merge"], default="error", help="How to handle duplicates SampleID rows after normalisation")
@@ -256,7 +280,25 @@ def main() -> None:
     # keep in mind this is used as post-collapse estimate 
     elif args.cmd == "suggest-cutoffs":
         for i,q,n, in suggest(args.table, meta_cols=["sample_id"], target=args.target, step=args.step): 
-            print(f"{i}% {q}% -> {n} pass") 
+            print(f"{i}% {q}% -> {n} pass")
+
+    elif args.cmd == "filter-hits":
+        if args.dry_run:
+            df   = pd.read_csv(args.input, sep="\t")
+            mask = (df.pident >= args.identity) & (df.qcovhsp >= args.qcov)
+
+            if args.unique:
+                ids = df.loc[mask, args.group_col].map(NORMALISERS[args.id_normaliser])
+                unique = ids.nunique()
+                print(f"{mask.sum()} PASS rows  "
+                      f"({unique} unique {args.group_col} "
+                      f"after {args.id_normaliser}) "
+                      "(dry-run, nothing written)")
+            else:
+                print(f"{mask.sum()} PASS rows (dry-run, nothing written)")
+        else:
+            filter_hits_cli.main(args)
+
 
     elif args.cmd == "postblast":
         out_biom = workdir / "biom" / args.output_biom 

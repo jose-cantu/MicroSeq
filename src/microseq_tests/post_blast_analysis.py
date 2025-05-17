@@ -13,7 +13,13 @@ from biom.util import biom_open
 from microseq_tests.utility.utils import load_config, setup_logging # for default DB paths here
 from microseq_tests.utility.io_utils import normalise_tsv
 from microseq_tests.utility.id_normaliser import NORMALISERS
-from microseq_tests.utility.metadata_tools import resolve_duplicates 
+from microseq_tests.utility.metadata_tools import resolve_duplicates
+try:
+    from microseq_tests.utility.add_taxonomy import embed_taxonomy_from_metadata
+except ImportError:
+    # Fallback: leave BIOM table unchanged
+    def embed_taxonomy_from_metadata(tbl, *_args, **_kw):
+        return tbl
 
 setup_logging() # initialize global logging by configure as root logger  
 logger = logging.getLogger(__name__) # Now this then set as the real logger by passing everything from the root logger which doesn't return anything on its own  
@@ -148,16 +154,25 @@ def run(blast_tsv: Path,
 
         # keep a RawID copy for provenance purposes 
         meta["RawID"] = meta["sample_id"] # full filename preserved can be used on ATIMA 
-        meta = resolve_duplicates(meta, policy=duplicate_policy)  
+        meta = resolve_duplicates(meta, policy=duplicate_policy, col="sample_id" if sample_col is None else sample_col)  
 
         # detect/rename sample_id column 
         col = _detect_sample_col(meta, set(blast["sample_id"].astype(str)), preferred=sample_col) 
         if col != "sample_id":
-            meta = meta.rename(columns={col: "sample_id"}) 
+             # if a messy sample_id column already exists, drop it first
+            if "sample_id" in meta.columns:
+                meta = meta.drop(columns=["sample_id"])
+            meta = meta.rename(columns={col: "sample_id"})
+            
 
         best = _choose_best_hit(blast, identity_th=identity_th)
         merged = best.merge(meta, on="sample_id", how="left") 
         
+        # remove accidental duplicate-label columns created by the merge
+        dup_cols = [c for c in merged.columns
+                    if c.startswith("sample_id.") or c.endswith(".1")]
+        if dup_cols:
+            merged = merged.drop(columns=dup_cols)
         # --- resolve taxonomy column ------------------------
         if taxonomy_col == "auto":
             def looks_like_tax(col: pd.Series) -> bool: 
@@ -202,7 +217,7 @@ def run(blast_tsv: Path,
         logger.info(f"Wrote {out_biom} (shape {biom_table.shape})") 
 
         if write_csv:
-            meta_out = out_biom.with_suffix("_metadata.csv")
+            meta_out = out_biom.with_name(out_biom.stem + "_metadata.csv")
             merged.to_csv(meta_out, index=False) # comma-separated 
             logger.info("ATIMA metadata -> %s", meta_out)
             biom_to_csv(out_biom) # i'll keep the prism mirror here for now go prism users 
