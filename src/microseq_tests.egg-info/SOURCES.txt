@@ -24,10 +24,15 @@ src/microseq_tests/trimming/fastq_to_fasta.py
 src/microseq_tests/trimming/quality_trim.py
 src/microseq_tests/utility/__init__.py
 src/microseq_tests/utility/add_taxonomy.py
+src/microseq_tests/utility/cutoff_sweeper.py
 src/microseq_tests/utility/fetch_dbs.py
+src/microseq_tests/utility/filter_hits_cli.py
+src/microseq_tests/utility/id_normaliser.py
 src/microseq_tests/utility/io_utils.py
 src/microseq_tests/utility/merge_hits.py
+src/microseq_tests/utility/metadata_tools.py
 src/microseq_tests/utility/progress.py
+src/microseq_tests/utility/taxonomy_utils.py
 src/microseq_tests/utility/utils.py
 tests/test_ab1_convert.py
 tests/test_cli_qol.py
