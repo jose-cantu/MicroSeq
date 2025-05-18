@@ -3,10 +3,11 @@ requires = ["setuptools>=63", "wheel"]
 build-backend = "setuptools.build_meta" 
 
 [project]
-name = "microseq_tests"
+name = "microseq"
 version = "0.1.0-alpha2"
 description= "MicroSeq sandbox package" 
 readme= "README.MD"
+license= { text = "MIT" } 
 requires-python = ">=3.9"
 dependencies = [
   "pyyaml>=6",
@@ -17,6 +18,8 @@ dependencies = [
 
 [tool.setuptools]
 package-dir = {"" = "src"}     # tells setuptools hey my code lives here in src/ 
+license-files = [ 
+   "LICENSE/*"] 
 
 [tools.setuptools.packages.find]
 where = ["src"]    # find all packages unders src/
@@ -25,4 +28,7 @@ where = ["src"]    # find all packages unders src/
 microseq = "microseq_tests.microseq:main"
 microseq-setup = "microseq_tests.utility.fetch_dbs:main"
 microseq-fix-tsv = "microseq_tests.utility.io_utils:cli"
-microseq-gui = "microseq_tests.gui.__main__:launch" 
+microseq-gui = "microseq_tests.gui.__main__:launch"
+
+
+
