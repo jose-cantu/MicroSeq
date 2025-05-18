@@ -27,6 +27,7 @@ __all__ = [
         "run_postblast",
         "run_ab1_to_fastq",
         "run_fastq_to_fasta",
+        "run_full_pipeline", 
         ] 
 
 PathLike = Union[str, Path]
@@ -43,6 +44,7 @@ def run_trim(input_path: PathLike,
     """
     work = Path(workdir)
     work.mkdir(parents=True, exist_ok=True)
+    (work / "qc").mkdir(parents=True, exist_ok=True) 
 
     if sanger:
         fastq_dir = work / "raw_fastq"
@@ -73,7 +75,7 @@ def run_blast_stage(fasta_in: PathLike,
                     max_target_seqs: int = 5,
                     threads: int = 1, on_progress=None) -> int:
     run_blast(fasta_in, db_key, out_tsv,
-              pct_id=identity, qcov=qcov,
+              search_id=identity, search_qcov=qcov,
               max_target_seqs=max_target_seqs,
               threads=threads,
               on_progress=on_progress)
@@ -108,6 +110,98 @@ def run_postblast(blast_hits: PathLike,
                   duplicate_policy=duplicate_policy,
                   **kwargs)
     return 0
+
+
+# # ────────────────────────────────────────────────── full workflow here =) 
+def run_full_pipeline(
+        infile: Path, 
+        db_key: str, 
+        out_dir: Path | None = None, 
+        *,
+        run_postblast: bool = False,
+        identity: int = 97,
+        qcov: int = 80,
+        max_target_seqs: int = 5,
+        threads: int = 1, 
+        metadata: Path | None = None, 
+        on_stage=None,
+        on_progress=None,
+        ) -> dict[str, Path]:
+    """
+End-to-end QC -> BLAST -> taxonomy (+ optional post-BLAST) helper.
+Returns a dict with the key output files.
+    """
+# ——— guard-rail callbacks ————————————————————————————
+    on_stage = on_stage or (lambda *_: None)
+    on_progress = on_progress or (lambda *_: None)
+
+    # ——— resolve output folder ————————————————————————————
+    if out_dir is None:
+        stem = Path(infile).with_suffix("").name
+        out_dir = Path(infile).parent / f"{stem}_microseq"
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    on_progress(0)
+
+    # -------- one-time path dict -------------- 
+    paths = {
+        "trimmed_fastq": out_dir / "trim.fastq",
+        "fasta": out_dir / "reads.fasta", 
+        "hits": out_dir / "hits.tsv",
+        "tax": out_dir / "hits_tax.tsv",
+        "biom": out_dir / "biom.json",
+        }
+    # progress math helpers yay ---------------------
+    n_stages = 4 + int(run_postblast) 
+    step = 100 // n_stages 
+    pct = 0
+
+    def subprog(offset):
+        return lambda p: on_progress(offset + p * step // 100) 
+    # stage 1 ------------ trim 
+
+    on_stage("Trim") 
+    run_trim(infile, out_dir, sanger=infile.suffix.lower()==".ab1")
+    pct += step 
+    on_progress(pct) 
+
+    # stage 2 fastq -> fasta ------- 
+    on_stage("Convert")
+    run_fastq_to_fasta(out_dir / "qc", paths["fasta"]) 
+    pct += step 
+    on_progress(pct) 
+
+    # stage 3 BLAST ---------------
+    on_stage("BLAST")
+    run_blast_stage(
+        paths["fasta"], db_key, paths["hits"],
+        identity=identity, qcov=qcov,
+        max_target_seqs=max_target_seqs, threads=threads,
+        on_progress=subprog(pct),
+        )
+    pct += step 
+    on_progress(pct) 
+
+    # stage 4 taxonomy join --------------------
+    from os import getenv 
+    tax_fp = (Path(getenv("MICROSEQ_DB_HOME", "~/.microseq_dbs"))
+              / db_key / "taxonomy.tsv").expanduser() 
+
+    on_stage("Taxonomy")
+    run_add_tax(paths["hits"], tax_fp, paths["tax"])
+    pct += step 
+    on_progress(pct) 
+
+    if run_postblast:
+        on_stage("Post-BLAST")
+        run_postblast(paths["tax"], metadata, paths["biom"])
+        pct += step 
+        on_progress(pct) 
+    
+    # finish and return! 
+    on_progress(100)
+    return paths 
+
 
 # ───────────────────────────────────────────────────────── AB1 → FASTQ
 def run_ab1_to_fastq(
