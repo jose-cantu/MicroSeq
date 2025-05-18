@@ -1,7 +1,10 @@
 # tests/test_pipeline.py 
 
-from pathlib import Path 
-import subprocess, pandas as pd, biom 
+from pathlib import Path
+import subprocess, pandas as pd
+import pytest
+
+biom = pytest.importorskip("biom")
 
 DEMO = Path(__file__).parent / "data" / "demo.fasta" 
 META = Path(__file__).parent / "data" / "meta.tsv" 

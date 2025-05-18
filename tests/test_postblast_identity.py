@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import biom
 import numpy as np          # for a dense BIOM matrix
 import pandas as pd
 import pytest
+
+biom = pytest.importorskip("biom")
 
 from microseq_tests.post_blast_analysis import run as postblast_run
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
@@ -92,9 +93,12 @@ def test_end_to_end_tail(identity, tmp_path):
     # --- postblast ----------------------------------------------------------
     biom_out = tmp_path / "out.biom"
     postblast_run(
-        hits_tax, meta, biom_out,
+        hits_tax,
+        meta,
+        biom_out,
         sample_col="sample_id",
         identity_th=identity,
+        taxonomy_col="taxonomy",
     )
 
     csv_out = biom_out.with_suffix(".csv")
