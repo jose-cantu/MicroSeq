@@ -19,3 +19,4 @@ config/config.yaml
 logs/
 tmp_smoke/
 *.log
+logs/

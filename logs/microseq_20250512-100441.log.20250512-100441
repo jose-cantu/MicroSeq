@@ -1,3 +1,0 @@
-2025-05-12 10:04:41,431  INFO     root:  Logging to /Users/josecantu/microseq_tests/logs/microseq_20250512-100441.log
-2025-05-12 10:04:41,800  INFO     microseq_tests.blast.run_blast:  RUN BLAST:blastn -task blastn -query tests/data/demo.fasta -db /Users/josecantu/.microseq_dbs/ncbi/16S_ribosomal_RNA -max_target_seqs 5 -perc_identity 97.0 -qcov_hsp_perc 80.0 -outfmt 6 qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle -out ncbi.hits.blasttmp -num_threads 1
-2025-05-12 10:04:44,341  INFO     microseq_tests.blast.run_blast:  BLAST finished OK -> ncbi.hits.tsv
