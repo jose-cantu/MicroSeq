@@ -15,6 +15,7 @@ from microseq_tests.utility.io_utils import normalise_tsv
 from microseq_tests.utility.id_normaliser import NORMALISERS
 from microseq_tests.utility.metadata_tools import resolve_duplicates
 from microseq_tests.utility.taxonomy_utils import parse_lineage
+
 try:
     from microseq_tests.utility.add_taxonomy import embed_taxonomy_from_metadata
 except ImportError:
@@ -257,8 +258,9 @@ def run(blast_tsv: Path,
         # attach taxonomy list so ATIMA shows ranks 
         biom_table = embed_taxonomy_from_metadata(
             biom_table,
-            merged, # merged has taxonomy_col present 
+            merged, # merged has taxonomy_col present
             col=taxonomy_col,
+            fmt=taxonomy_format,
             )
 
         with biom_open(str(out_biom), "w") as fh:

@@ -5,9 +5,11 @@ Embed full-length taxonomy strings from a metadata DataFrame intoa BIOM Table.
 
 from __future__ import annotations 
 from typing import Mapping, Dict, List, Union
+
 from biom import Table 
 import pandas as pd
 import re   
+
 
 def parse_lineage(
     line: str,
@@ -50,12 +52,14 @@ def parse_lineage(
     return parts
 
 
+
 def embed_taxonomy_from_metadata(
-    tbl,
-    df,
+    tbl: Table,
+    df: pd.DataFrame,
     *,
     col: str = "taxonomy",   # column in df that already holds the lineage strings
-):
+    fmt: str = "auto",
+) -> Table:
     """
     Embed a seven-rank taxonomy dict *and* the BIOM-spec 'taxonomy' list
     onto every observation in `tbl`.
@@ -64,7 +68,9 @@ def embed_taxonomy_from_metadata(
     pivot_table(index="taxonomy", …) earlier in the pipeline).
     """
     # Build lookup   lineage-string → {'Domain': 'Bacteria', …}
+
     lut = {row[col]: parse_lineage(row[col], as_dict=True) for _, row in df.iterrows()}
+
 
     def _obs_meta(obs_id):
         parsed = lut.get(obs_id, {})
