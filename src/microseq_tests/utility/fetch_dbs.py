@@ -44,18 +44,29 @@ args = ap.parse_args()
 REPO_ROOT   = Path(__file__).resolve().parents[3]          # microseq_tests/
 DEFAULT_LOG = REPO_ROOT / "logs"
 
-def ask(msg: str, default: str) -> Path:
-    if args.quiet:
+def ask_path(msg: str, default: str | Path) -> Path:
+    """
+    Prompt until the user gives a writable folder.
+    Pressing <Enter> accepts the default.
+    """
+    if args.quiet:                       # non-interactive install
         return Path(default).expanduser()
-    ans = input(f"{msg} [{default}] ").strip() or default
-    return Path(ans).expanduser()
+
+    while True:
+        ans = input(f"{msg} [{default}]: ").strip() or default
+        p   = Path(ans).expanduser()
+        try:
+            p.mkdir(parents=True, exist_ok=True)   # proves we can write there
+            return p
+        except OSError as e:
+            print(f"{e}; try again.")
 
 db_root = Path(
-    args.db_root or ask("Where should databases be stored?", "~/.microseq_dbs")
+    args.db_root or ask_path("Where should databases be stored?", "~/.microseq_dbs")
 ).resolve()
 
 log_dir = Path(
-        args.log_dir or ask("Where should logs be stored?", str(DEFAULT_LOG)) 
+        args.log_dir or ask_path("Where should logs be stored?", str(DEFAULT_LOG)) 
 ).resolve()
 
 db_root.mkdir(parents=True, exist_ok=True)
@@ -63,15 +74,25 @@ log_dir.mkdir(parents=True, exist_ok=True)
 
 
 # ------------------------- Pick logging mode (daily vs runid) ----------
+
 def choose_mode() -> str:
-    if args.mode:
-        return args.mode 
-    if args.quiet:
+    """
+    Ask whether logs should roll daily (local dev) or per-run (HPC).
+    Returns 'daily' or 'runid'.
+    """
+    if args.mode:          # --mode supplied on CLI
+        return args.mode
+    if args.quiet:         # non-interactive install
         return "daily"
-    ans = input("Will MicroSeq be run primarily locally on this laptop/PC (d) "
-                "or on an HPC meant for Slurm + Nextflow jobs (r)? [d] ").strip().lower() 
-    return "runid" if ans.startswith("r") else "daily" 
-log_mode = choose_mode () # daily or runid 
+
+    help_txt = "(l)ocal – one log file per day   |   (h)pc – one log per run-ID"
+    while True:
+        ans = input(f"Where will you run MicroSeq? {help_txt} [l]: ").lower() or 'l'
+        if ans.startswith('l'):
+            return 'daily'
+        if ans.startswith('h'):
+            return 'runid'
+        print("Please type L or H")
 
 # ───────────────────────── helpers ──────────────────────────────────────
 def log(msg: str) -> None:
