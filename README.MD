@@ -34,13 +34,14 @@ It automates everything from raw trace files (AB1) or FASTQ reads all the way to
 * **De‑novo assembly** using *CAP3* (`microseq assembly`).
 * **Taxonomic classification**
 
-  * BLAST+ search (`microseq blast`)
+  * BLAST+ search (**FASTA** or **FASTQ** input) (`microseq blast`)
   * Post‑BLAST taxonomy join (`microseq add_taxonomy`).
 * **Post‑processing**
 
   * Collapse hits, choose ID/Q‑cov cut‑offs, export BIOM / CSV tables (`microseq postblast`).
 * **Config‑driven defaults** for duplicate‑policy & ID‑normalisers (regex or built‑ins).
 * **Robust logging**  – daily‑rolling or run‑ID modes; logs can live anywhere you point `MICROSEQ_LOG_DIR`.
+* **TSV normalisation** (`microseq-fix-tsv`) – convert CSV or space‑delimited tables into proper TSV.
 * **Portable**  – pure‑Python (≥3.10) + external binaries already in Conda env (BLAST+, TaxonKit, CAP3).
 * **GUI preview** (`microseq-gui`) – drag‑and‑drop queue, live log pane, progress bar (landing in v1.0).
 
@@ -62,7 +63,7 @@ $ pip install -e .
 
 # 4  Download reference DBs & configure logging
 $ microseq-setup                 # interactive, 3–5 min first run
-#     └─ adds $MICROSEQ_DB_HOME, $MICROSEQ_LOG_DIR, $BLASTDB to ~/.bashrc
+#     └─ adds $MICROSEQ_DB_HOME, $MICROSEQ_LOG_DIR, $BLASTDB, $BLASTDB_LMDB=0 to ~/.bashrc
 
 # 5  Open a new shell or:
 $ source ~/.bashrc               # pick up the new exports
@@ -129,11 +130,16 @@ Re‑run anytime with different flags to move DBs or logs elsewhere.
 
 | Variable / Flag     | Purpose                                                           | Default                    | Example override                            |
 | ------------------- | ----------------------------------------------------------------- | -------------------------- | ------------------------------------------- |
-| `--workdir` (CLI)   | Per‑run scratch folder for intermediate files                     | `.`, beside input          | `--workdir /scratch/$USER/run42`            |
+| `--workdir` (CLI)   | Per‑run scratch folder for intermediate files                     | `default_workdir` from `config.yaml` (e.g. `~/microseq_runs`)          | `--workdir /scratch/$USER/run42`            |
 | `MICROSEQ_LOG_DIR`  | Where rotated log files are written                               | `<repo>/logs`              | `export MICROSEQ_LOG_DIR=/var/log/microseq` |
+| `MICROSEQ_LOG_FILE` | Override log file location entirely | — | `export MICROSEQ_LOG_FILE=/tmp/microseq.log` |
 | `MICROSEQ_LOG_MODE` | `daily` (one file per day) or `runid` (fresh file per invocation) | chosen in `microseq-setup` | `export MICROSEQ_LOG_MODE=runid`            |
 
 A symlink `logs/microseq_latest.log` always points at the active log file, so `tail ‑F logs/microseq_latest.log` just works.
+
+
+### Workdir basics
+When omitted, `--workdir` defaults to the `default_workdir` value in `config.yaml`. Each run creates `qc/`, `asm/` and `blast/` folders inside this directory. Use `--workdir PATH` to place intermediates elsewhere or `--workdir .` to write outputs next to your input files.
 
 ---
 
@@ -145,8 +151,8 @@ MicroSeq’s CLI is a single entry‑point (`microseq`) with **global flags** fo
 
 | Flag             | Default | Purpose                                                                                                                     |
 | ---------------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `--workdir PATH` | `data/` | Root folder for intermediate & derived files created by the current run. A fresh folder keeps each analysis self‑contained. |
-| `--threads N`    | `1`     | How many CPU threads to give the stage (BLAST, CAP3, Trimmomatic, etc.).                                                    |
+| `--workdir PATH` | `~/microseq_runs` | Root folder for intermediate & derived files created by the current run. A fresh folder keeps each analysis self‑contained. |
+| `--threads N`    | `1`     | How many CPU threads to give the stage (BLAST, CAP3, Trimmomatic, etc.). 2–4 threads work well on a typical laptop.                                                    |
 | `-v`, `-vv`      | off     | `-v` = info‑level logs, `-vv` = debug.                                                                                      |
 
 ---
@@ -168,6 +174,7 @@ Below is an index of every sub‑command with a one‑line summary.  Click the �
 | `add_taxonomy`    | Append 7‑rank lineage column to a BLAST hits table                      |
 | `postblast`       | Collapse hits per sample, join metadata, export BIOM/CSV/JSON           |
 | `microseq-setup`  | Download reference DBs and write env‑hook + config                      |
+| `microseq-fix-tsv` | Normalise CSV/space tables into TAB-separated format |
 
 ---
 
@@ -223,7 +230,7 @@ Below is an index of every sub‑command with a one‑line summary.  Click the �
 | `--dry-run`         |                | Show counts, write nothing.      |       |
 | `--unique`          |                | Also report unique sample count. |       |
 | `--group-col COL`   | `sample_id`    | Collapse key.                    |       |
-| `--id-normaliser`   | `strip_suffix` | Match sample IDs post‑cleaning.  |       |
+| `--id-normaliser`   | `strip_suffix` | Sample ID cleaning. Choices: `none`, `strip_suffix`, `auto`, `strip_suffix_simple`, `strip_suffix_legacy`, `config`. |
 
 | Flag                | Required | Example            |
 | ------------------- | -------- | ------------------ |
@@ -245,10 +252,11 @@ Below is an index of every sub‑command with a one‑line summary.  Click the �
 | `--json`                                      | —              | Converts HDF5 into `.json` BIOM.           |                               |
 | `--sample-col COL`                            | `SampleID`     | If metadata uses a different ID column.    |                               |
 | `--post_blast_identity PCT`                   | 97             | Tweak identity filter when multiple hits.  |                               |
-| `--id-normaliser`                             | `strip_suffix` | Clean Sample IDs before join.              |                               |
+| `--id-normaliser`                             | `strip_suffix` | Clean Sample IDs before join. Choices: `none`, `strip_suffix`, `auto`, `strip_suffix_simple`, `strip_suffix_legacy`, `config`.              |
 | `--taxonomy-col COL`                          | auto           | Pre‑existing taxonomy column in metadata.  |                               |
 | `--duplicate-policy {error,keep-first,merge}` | `error`        | Resolve duplicate IDs after normalisation. |                               |
 
+This step also writes `<output>_blast_provenance.csv`, `<output>_taxonomy_only.csv` and `<output>_metadata.csv` alongside the BIOM file.
 | Flag                        | Default           | Purpose                                 |
 | --------------------------- | ----------------- | --------------------------------------- |
 | `--db-root DIR`             | `~/.microseq_dbs` | Where to store BLAST DBs.               |
@@ -288,7 +296,7 @@ microseq postblast   -b run_01/blast/hits_tax.tsv -m metadata.tsv -o run_01.biom
 # sbatch or Nextflow will substitute $SLURM_TMPDIR and $SLURM_CPUS_ON_NODE
 microseq trim            -i reads.fastq.gz --sanger --workdir $SLURM_TMPDIR/qc \
                          --threads $SLURM_CPUS_ON_NODE
-microseq fastq-to-fasta  -i $SLURM_TMPDIR/qc -o reads.fasta
+microseq fastq-to-fasta  -i $SLURM_TMPDIR/qc -o reads.fasta   # optional, blast accepts FASTQ
 # relaxed search to generate sweeper table
 microseq blast           -i reads.fasta -d silva -o hits_full_sweeper.tsv \
                          --threads $SLURM_CPUS_ON_NODE --relaxed --export-sweeper \
@@ -333,6 +341,10 @@ CAP3 names every output file `<prefix>.cap.<suffix>` where `<prefix>` is the inp
 1. Copies `*.contigs` → `asm/contigs.fasta` for downstream BLAST. `*.singlets` remain in `workdir/asm/` should you wish to analyse them separately.
 2. Parses `*.info` to log assembly statistics (number of contigs, N50, max length).
 3. Leaves all original CAP3 files in `workdir/asm/` so you can inspect quality or visualise in external tools.
+## microseq-fix-tsv
+
+`microseq-fix-tsv` converts comma- or space-delimited tables into tab-separated files in-place. Use it to normalise spreadsheets before feeding them to other MicroSeq commands.
+
 
 ---
 
