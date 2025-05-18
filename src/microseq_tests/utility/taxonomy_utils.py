@@ -7,8 +7,7 @@ from __future__ import annotations
 from typing import Mapping, Dict 
 from biom import Table 
 import pandas as pd
-import re  
-from .taxonomy_utils import parse_lineage 
+import re   
 
 def parse_lineage(lineage: str) -> Dict[str, str]:
     """

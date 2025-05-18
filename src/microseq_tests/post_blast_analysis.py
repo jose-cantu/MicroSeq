@@ -14,6 +14,7 @@ from microseq_tests.utility.utils import load_config, setup_logging # for defaul
 from microseq_tests.utility.io_utils import normalise_tsv
 from microseq_tests.utility.id_normaliser import NORMALISERS
 from microseq_tests.utility.metadata_tools import resolve_duplicates
+from microseq_tests.utility.taxonomy_utils import parse_lineage 
 try:
     from microseq_tests.utility.add_taxonomy import embed_taxonomy_from_metadata
 except ImportError:
@@ -89,14 +90,20 @@ def _tax_depth(taxon: str | float) -> int:
 
 
 # --- chosing the best hit per sample ------------
-
-def _choose_best_hit(df: pd.DataFrame, *, identity_th: float) -> pd.DataFrame:
+def _choose_best_hit(
+        df: pd.DataFrame,
+        *,
+        identity_th: float,
+        taxonomy_col: str | None = None
+) -> pd.DataFrame:
     """
-    Best hit per sample with robustness:
-        keep only rows meeting species‑level identity (≥97 %)
-        then choose lowest e‑value, deepest taxonomy, highest bitscore
+    Best hit per sample:
+      keep only rows with pident ≥ identity_th
+      pick lowest e-value
+      if a taxonomy column is present, break ties by deepest lineage
+      finally break ties by highest bitscore
     """
-    # filter on identity threshold (qcov already filtered upstream)
+    # ── identity filter ───────────────────────────────────────────────
     if "pident" in df.columns:
         df["pident"] = pd.to_numeric(df["pident"], errors="coerce")
         df = df[df["pident"] >= identity_th].copy()
@@ -104,19 +111,22 @@ def _choose_best_hit(df: pd.DataFrame, *, identity_th: float) -> pd.DataFrame:
     if df.empty:
         raise ValueError("No BLAST hits survive identity threshold")
 
-    df.loc[:, "tax_depth"] = df["taxonomy"].map(_tax_depth)
-    df = df.sort_values(
-        ["sample_id", "evalue", "tax_depth", "bitscore"],
-        ascending=[True, True, False, False]
-    )
+    # ── optional taxonomy depth for tie-breaking ─────────────────────
+    if taxonomy_col and taxonomy_col in df.columns:
+        df["tax_depth"] = df[taxonomy_col].map(_tax_depth)
+        sort_keys  = ["sample_id", "evalue", "tax_depth", "bitscore"]
+        asc_flags  = [ True,       True,     False,       False     ]
+    else:
+        sort_keys  = ["sample_id", "evalue", "bitscore"]
+        asc_flags  = [ True,       True,     False       ]
+
+    # ── sort & collapse ───────────────────────────────────────────────
+    df = df.sort_values(sort_keys, ascending=asc_flags)
     return (
         df.groupby("sample_id", as_index=False)
           .first()
-          .drop(columns="tax_depth")
+          .drop(columns=[c for c in ("tax_depth",) if c in df.columns])
     )
-
-
-
 
 # ---CSV mirror for prism -----------------
 def biom_to_csv(biom_path: Path) -> Path: 
@@ -149,30 +159,58 @@ def run(blast_tsv: Path,
         
         # ---- id-normaliser config -> pull rule from YAML 
         if id_normaliser == "config":
-            cfg_norm = load_config().get("metadata", {}).get("sample_id_normaliser") 
+            cfg_norm = load_config().get("metadata", {}).get("sample_id_normaliser")
             if cfg_norm:
-                id_normaliser = cfg_norm 
+                logger.info("Using sample_id normaliser from config.yaml: %s", cfg_norm) 
+                id_normaliser = cfg_norm
+            else:
+                logger.warning("--id-normaliser config requested, but "
+                       "metadata.sample_id_normaliser not found in YAML; "
+                       "falling back to 'none'")
+        # ---------- detect/rename firest, normalise second here ........ 
+        # Figure out which metadata column actually contains the sample IDs
+        col = _detect_sample_col(meta, set(blast["sample_id"].astype(str)),
+                                 preferred=sample_col)
+        
+        # stach unmodified raw id name here before normalization 
+        meta["RawID"] = meta[col].astype(str) 
+
+        if col != "sample_id":
+            # if a messy sample_id column already exists, drop it first
+            if "sample_id" in meta.columns:
+                meta = meta.drop(columns=["sample_id"])
+            meta = meta.rename(columns={col: "sample_id"})
+
         # --- aplying chosen ID normaliser --------------
         norm = NORMALISERS[id_normaliser]
         meta["sample_id"] = meta["sample_id"].astype(str).map(norm) 
         blast["sample_id"] = blast["sample_id"].astype(str).map(norm) 
 
-        # keep a RawID copy for provenance purposes 
-        meta["RawID"] = meta["sample_id"] # full filename preserved can be used on ATIMA 
-        meta = resolve_duplicates(meta, policy=duplicate_policy, col="sample_id" if sample_col is None else sample_col)  
-
-        # detect/rename sample_id column 
-        col = _detect_sample_col(meta, set(blast["sample_id"].astype(str)), preferred=sample_col) 
-        if col != "sample_id":
-             # if a messy sample_id column already exists, drop it first
-            if "sample_id" in meta.columns:
-                meta = meta.drop(columns=["sample_id"])
-            meta = meta.rename(columns={col: "sample_id"})
+        meta = resolve_duplicates(meta, policy=duplicate_policy, col="sample_id") 
             
 
-        best = _choose_best_hit(blast, identity_th=identity_th)
-        merged = best.merge(meta, on="sample_id", how="left") 
-        
+        best = _choose_best_hit(blast, identity_th=identity_th, taxonomy_col=taxonomy_col)
+        merged = best.merge(meta, on="sample_id", how="left")
+        # after the merge ― immediately normalise the duplicate columns
+        dup_suffixes = (".x", ".y")
+
+        for base in ["taxonomy", "sseqid", "pident", "qlen",
+                     "qcovhsp", "length", "evalue", "bitscore", "stitle"]:
+            # find any versions of this base name, e.g. taxonomy_x / taxonomy_y
+            matches = [c for c in merged.columns if c.split(".", 1)[0] == base]
+            if matches:
+                # prefer the *first* (left-hand) copy, drop the rest
+                keep = matches[0]
+                merged = merged.rename(columns={keep: base}).drop(columns=matches[1:])
+
+        # also drop any extra SampleID copies created by the merge
+        merged = merged.loc[:, ~merged.columns.str.startswith(("sample_id.", "SampleID."))]
+
+        # created a separate blast file for providance 
+        prov_out = out_biom.with_name(out_biom.stem + "_blast_provenance.csv")
+        best.to_csv(prov_out, index=False)
+        logger.info("BLAST provenance → %s", prov_out)
+
         # remove accidental duplicate-label columns created by the merge
         dup_cols = [c for c in merged.columns
                     if c.startswith("sample_id.") or c.endswith(".1")]
@@ -194,7 +232,14 @@ def run(blast_tsv: Path,
 
             
 
-        print(blast.head(), blast.columns) 
+        print(blast.head(), blast.columns)
+        
+        # Ensure the column we’ll pivot on is called exactly 'taxonomy'
+        # (handles taxonomy_x / taxonomy_y after the merge)
+        if taxonomy_col != "taxonomy" and taxonomy_col in merged.columns:
+            merged = merged.rename(columns={taxonomy_col: "taxonomy"})
+            taxonomy_col = "taxonomy"
+
 
         # one count per sample (presence/absence) matrix  
         mat = (
@@ -235,7 +280,23 @@ def run(blast_tsv: Path,
 
 
         if write_csv:
-            meta_out = out_biom.with_name(out_biom.stem + "_metadata.csv")
-            merged.to_csv(meta_out, index=False) # comma-separated 
-            logger.info("ATIMA metadata -> %s", meta_out)
+            # rename first, so we’re always working with 'SampleID'
+            meta_out = out_biom.with_name(out_biom.stem + "_metadata.csv") 
+            meta_df = merged.rename(columns={"sample_id": "SampleID"})
+
+            # blast columns you never want to treat as metadata
+            blast_cols = ["sseqid", "pident", "qlen", "qcovhsp", "length",
+                          "evalue", "bitscore", "stitle", "taxonomy"]
+
+            # TRUE metadata = everything that is NOT a BLAST column and NOT SampleID
+            meta_cols = [c for c in meta_df.columns
+                         if c not in blast_cols and c != "SampleID"]
+
+            # Build the final ordered list once, then make it unique
+            ordered = ["SampleID"] + meta_cols 
+                
+
+            meta_df = meta_df.loc[:, ordered]
+            meta_df.to_csv(meta_out, index=False)
+            logger.info("ATIMA metadata → %s", meta_out)
             biom_to_csv(out_biom) # i'll keep the prism mirror here for now go prism users 
