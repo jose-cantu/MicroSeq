@@ -113,94 +113,93 @@ def run_postblast(blast_hits: PathLike,
 
 
 # # ────────────────────────────────────────────────── full workflow here =) 
+from pathlib import Path
+from microseq_tests.utility.utils import load_config, expand_db_path
+
 def run_full_pipeline(
-        infile: Path, 
-        db_key: str, 
-        out_dir: Path | None = None, 
-        *,
-        run_postblast: bool = False,
-        identity: int = 97,
-        qcov: int = 80,
-        max_target_seqs: int = 5,
-        threads: int = 1, 
-        metadata: Path | None = None, 
-        on_stage=None,
-        on_progress=None,
-        ) -> dict[str, Path]:
-    """
-End-to-end QC -> BLAST -> taxonomy (+ optional post-BLAST) helper.
-Returns a dict with the key output files.
-    """
-# ——— guard-rail callbacks ————————————————————————————
+    infile: Path,
+    db_key: str,
+    out_dir: Path | None = None,
+    *,
+    postblast: bool = False,
+    identity: int = 97,
+    qcov: int = 80,
+    max_target_seqs: int = 5,
+    threads: int = 1,
+    metadata: Path | None = None,
+    on_stage=None,
+    on_progress=None,
+) -> dict[str, Path]:
+    """Run trim → FASTA merge → BLAST → taxonomy (+ optional post‑BLAST)."""
+
     on_stage = on_stage or (lambda *_: None)
     on_progress = on_progress or (lambda *_: None)
 
-    # ——— resolve output folder ————————————————————————————
     if out_dir is None:
-        stem = Path(infile).with_suffix("").name
-        out_dir = Path(infile).parent / f"{stem}_microseq"
-    out_dir = Path(out_dir)
+        stem = infile.with_suffix("").name
+        out_dir = infile.parent / f"{stem}_microseq"
     out_dir.mkdir(parents=True, exist_ok=True)
     on_progress(0)
 
-    # -------- one-time path dict -------------- 
     paths = {
-        "trimmed_fastq": out_dir / "trim.fastq",
-        "fasta": out_dir / "reads.fasta", 
+        "trimmed_fastq": out_dir / "qc" / "trimmed.fastq",
+        "trimmed_fasta": out_dir / "qc" / "trimmed.fasta",
+        "fasta": out_dir / "reads.fasta",
         "hits": out_dir / "hits.tsv",
         "tax": out_dir / "hits_tax.tsv",
-        "biom": out_dir / "biom.json",
-        }
-    # progress math helpers yay ---------------------
-    n_stages = 4 + int(run_postblast) 
-    step = 100 // n_stages 
+        "biom": out_dir / "table.biom",
+    }
+
+    n_stages = 4 + int(postblast)
+    step = 100 // n_stages
     pct = 0
 
-    def subprog(offset):
-        return lambda p: on_progress(offset + p * step // 100) 
-    # stage 1 ------------ trim 
+    def subprog(off):
+        return lambda p: on_progress(off + p * step // 100)
 
-    on_stage("Trim") 
-    run_trim(infile, out_dir, sanger=infile.suffix.lower()==".ab1")
-    pct += step 
-    on_progress(pct) 
+    # 1 – Trim
+    on_stage("Trim")
+    run_trim(infile, out_dir, sanger=infile.suffix.lower() == ".ab1")
+    pct += step
+    on_progress(pct)
 
-    # stage 2 fastq -> fasta ------- 
+    # 2 – Merge FASTQs to FASTA
     on_stage("Convert")
-    run_fastq_to_fasta(out_dir / "qc", paths["fasta"]) 
-    pct += step 
-    on_progress(pct) 
+    run_fastq_to_fasta(out_dir / "qc", paths["fasta"])
+    pct += step
+    on_progress(pct)
 
-    # stage 3 BLAST ---------------
+    # 3 – BLAST
     on_stage("BLAST")
     run_blast_stage(
         paths["fasta"], db_key, paths["hits"],
         identity=identity, qcov=qcov,
         max_target_seqs=max_target_seqs, threads=threads,
         on_progress=subprog(pct),
-        )
-    pct += step 
-    on_progress(pct) 
+    )
+    pct += step
+    on_progress(pct)
 
-    # stage 4 taxonomy join --------------------
-    from os import getenv 
-    tax_fp = (Path(getenv("MICROSEQ_DB_HOME", "~/.microseq_dbs"))
-              / db_key / "taxonomy.tsv").expanduser() 
-
+    # 4 – Add taxonomy
+    cfg = load_config()
+    tax_template = cfg["databases"][db_key]["taxonomy"]
+    tax_fp = Path(expand_db_path(tax_template))
     on_stage("Taxonomy")
     run_add_tax(paths["hits"], tax_fp, paths["tax"])
-    pct += step 
-    on_progress(pct) 
+    pct += step
+    on_progress(pct)
 
-    if run_postblast:
+    # 5 – Optional post-BLAST
+    if postblast:
+        if metadata is None:
+            raise ValueError("metadata file required for postblast stage")
         on_stage("Post-BLAST")
         run_postblast(paths["tax"], metadata, paths["biom"])
-        pct += step 
-        on_progress(pct) 
-    
-    # finish and return! 
+        pct += step
+        on_progress(pct)
+
     on_progress(100)
-    return paths 
+    return paths
 
 
 # ───────────────────────────────────────────────────────── AB1 → FASTQ
