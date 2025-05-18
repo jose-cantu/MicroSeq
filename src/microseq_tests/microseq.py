@@ -141,9 +141,28 @@ def main() -> None:
     p_BIOM.add_argument("--post_blast_identity", type=float, default=97.0, help="minimum %% identity to keep when selecting the best hit (default: %(default)s) you also have the decision to modify to what number you please besides the default") 
     # sample - ID normaliser: none | strip_suffix | futuer custom:regex option 
     p_BIOM.add_argument("--id-normaliser", choices=["none", "strip_suffix", "auto", "strip_suffix_simple", "strip_suffix_legacy", "config"], default="none", help=("How to clean up sample IDs before matching metadata " "(e.g. strip date/well suffix).")) 
-    # taxonomy column: auto-detect or explicit 
-    p_BIOM.add_argument("--taxonomy-col", default="auto", help=("Which metadata column stores the full 7 rank taxonomy; " "'auto' = first column whose values contain at least 4 rank prefixes " "think here (d__, p__, c__, o__, f__, g__, s__).")) 
-    p_BIOM.add_argument("--duplicate-policy", choices=["error", "keep-first", "merge"], default="error", help="How to handle duplicates SampleID rows after normalisation") 
+    # taxonomy column: auto-detect or explicit
+    p_BIOM.add_argument(
+        "--taxonomy-col",
+        default="auto",
+        help=(
+            "Which metadata column stores the full 7 rank taxonomy; "
+            "'auto' = first column whose values contain at least 4 rank prefixes "
+            "(d__, p__, c__, o__, f__, g__, s__)."
+        ),
+    )
+    p_BIOM.add_argument(
+        "--taxonomy-format",
+        choices=["auto", "gg2", "silva", "ncbi"],
+        default="auto",
+        help="Lineage layout for taxonomy column",
+    )
+    p_BIOM.add_argument(
+        "--duplicate-policy",
+        choices=["error", "keep-first", "merge"],
+        default="error",
+        help="How to handle duplicates SampleID rows after normalisation",
+    )
     
     # parse out arguments 
     args = ap.parse_args()
@@ -312,7 +331,8 @@ def main() -> None:
                 sample_col=args.sample_col,
                 identity_th=args.post_blast_identity,
                 duplicate_policy=args.duplicate_policy,
-                taxonomy_col=args.taxonomy_col, 
+                taxonomy_col=args.taxonomy_col,
+                taxonomy_format=args.taxonomy_format,
                 )
         print(f" ✓ BIOM : {out_biom}")
         print(f" ✓ CSV  : {out_biom.with_suffix('.csv')}") 
