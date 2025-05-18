@@ -1,9 +1,6 @@
 from __future__ import annotations 
 import sys, inspect
-print("DEBUG python:", sys.executable)
 import microseq_tests, importlib.util
-print("DEBUG pkg:", inspect.getfile(microseq_tests))
-print("DEBUG spec:", importlib.util.find_spec("microseq_tests.utility"))
 import os, logging, pathlib, pytest 
 from microseq_tests.utility.utils import load_config, setup_logging
 

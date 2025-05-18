@@ -23,7 +23,7 @@ def test_cli_passes_identity(monkeypatch, tmp_path):
     # -- minimal synthetic inputs -------------------------------------------
     blast_tsv = tmp_path / "hits.tsv"
     blast_tsv.write_text(
-        "#sample_id\tsseqid\tpident\tevalue\tbitscore\ttaxonomy\n"
+        "qseqid\tsseqid\tpident\tevalue\tbitscore\ttaxonomy\n"
         "S1\tGG2_0001\t99.0\t1e-10\t200\tk__Bacteria; p__Proteobacteria\n"
     )
     meta_tsv = tmp_path / "meta.tsv"
@@ -70,7 +70,7 @@ def test_end_to_end_tail(identity, tmp_path):
     # --- synthetic BLAST & taxonomy tables ---------------------------------
     hits = tmp_path / "hits.tsv"
     hits.write_text(
-        "#sample_id\tsseqid\tpident\tevalue\tbitscore\n"
+        "qseqid\tsseqid\tpident\tevalue\tbitscore\n"
         "S1\tGG2_0001\t99.0\t1e-10\t200\n"
         "S1\tGG2_0002\t94.0\t1e-9\t180\n"
     )

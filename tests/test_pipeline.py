@@ -27,11 +27,16 @@ def test_postblast_pipeline(tmp_path):
          ]) 
 
     # add taxnonomy step 
-    run(["microseq", "add_taxonomy",
-         "--hits", str(blast),
-         "--taxonomy", str(TAX_PATH),  
-         "--out", str(tax),
-         ])
+    run([
+        "microseq",
+        "add_taxonomy",
+        "--hits",
+        str(blast),
+        "-d",
+        "gg2",
+        "--out",
+        str(tax),
+    ])
 
     run(["microseq", "postblast",
          "-b", tax,

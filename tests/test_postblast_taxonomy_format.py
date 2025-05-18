@@ -17,7 +17,9 @@ from microseq_tests.post_blast_analysis import run as postblast_run
 def _make_hits(path: Path, lineage: str) -> None:
     """Write a minimal BLAST TSV with a taxonomy column."""
     path.write_text(
+
         "#sample_id\tsseqid\tpident\tevalue\tbitscore\ttaxonomy\n"
+
         f"S1\tseq1\t99.0\t1e-10\t200\t{lineage}\n"
     )
 
