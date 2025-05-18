@@ -85,7 +85,7 @@ def choose_mode() -> str:
     if args.quiet:         # non-interactive install
         return "daily"
 
-    help_txt = "(l)ocal – one log file per day   |   (h)pc – one log per run-ID"
+    help_txt = "(l)ocal – one log file per day (hint type l)   |   (h)pc – one log per run-ID hint type (h)"
     while True:
         ans = input(f"Where will you run MicroSeq? {help_txt} [l]: ").lower() or 'l'
         if ans.startswith('l'):
@@ -93,6 +93,8 @@ def choose_mode() -> str:
         if ans.startswith('h'):
             return 'runid'
         print("Please type L or H")
+
+log_mode = choose_mode()         
 
 # ───────────────────────── helpers ──────────────────────────────────────
 def log(msg: str) -> None:
