@@ -105,6 +105,8 @@ conda activate MicroSeq
 ### 2 Install MicroSeq (editable vs. frozen)
 
 * **Editable (dev) install** – `pip install -e .` (recommended while the API is still evolving).
+* **Frozen install** – `pip install .` (locks dependencies to the current version).
+* **Upgrade to a newer patch or feature** – `git pull && pip install -e .` (omit `-e` if you use the frozen install).
 
 ### 3 Download reference databases
 
@@ -271,6 +273,7 @@ This step also writes `<output>_blast_provenance.csv`, `<output>_taxonomy_only.c
 | Task                                                                                    | Typical command                                                                                                           |
 | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | **First‑time setup on a fresh laptop**                                                  | `git clone … && conda env create … && conda activate MicroSeq && pip install -e . && microseq-setup --quiet --mode daily` |
+| **Update to the latest patch or new feature**          | `git pull && pip install -e .` |
 | **Convert ABI traces + QC + assemble + classify**                                       | See AB1 trace workflow in Examples.                                                                                       |
 | **Optimise BLAST cut‑offs for 96‑well plate**   **Keep in mind, these are estimates!**  | `microseq blast --relaxed --export-sweeper … → microseq suggest-cutoffs … 530 → microseq filter-hits`                     |
 | **Batch merge hits from three runs**                                                    | `microseq merge-hits -i run*/blast/hits.tsv -o merged.tsv`                                                                |
