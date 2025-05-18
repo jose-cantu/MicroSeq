@@ -1,9 +1,9 @@
 default_workdir: ~/microseq_runs
 logging:
-  mode: daily # keep the pattern you like daily or runid 
-  backup_count: 0 # keep every file forever for reproducibility 
-  max_mb: 0 # 0 = no size-based rotation rollover 
   dir: /home/jason/MicroSeq/logs
+  mode: daily # keep the pattern you like daily or runid
+  backup_count: 0 # keep every file forever for reproducibility
+  max_mb: 0 # 0 = no size-based rotation rollover
 tools:
   trimmomatic: trimmomatic
   blastn: blastn
