@@ -14,7 +14,8 @@ from microseq_tests.utility.utils import load_config, setup_logging # for defaul
 from microseq_tests.utility.io_utils import normalise_tsv
 from microseq_tests.utility.id_normaliser import NORMALISERS
 from microseq_tests.utility.metadata_tools import resolve_duplicates
-from microseq_tests.utility.taxonomy_utils import embed_taxonomy_from_metadata
+from microseq_tests.utility.taxonomy_utils import parse_lineage
+
 try:
     from microseq_tests.utility.add_taxonomy import embed_taxonomy_from_metadata
 except ImportError:
@@ -86,21 +87,6 @@ def _tax_depth(taxon: str | float) -> int:
         return 0 # NaN or non-string means depth of 0.
     parts = [seg.split("__", 1)[-1] for seg in taxon.split(";")] # strip prefix if present 
     return sum(bool(p.strip()) for p in parts)
-
-
-def parse_lineage(line: str, fmt: str = "auto") -> list[str]:
-    """Return the canonical 7 ranks from a lineage string."""
-    if not isinstance(line, str):
-        line = ""
-
-    if fmt in {"auto", "gg2", "silva"}:
-        parts = [p.split("__", 1)[-1] for p in line.rstrip(";").split(";")]
-    else:  # ncbi or unknown -> assume no prefixes
-        parts = [p.strip() for p in line.rstrip(";").split(";")]
-
-    parts = [p.split(" strain", 1)[0] if "strain" in p else p or "Unclassified"
-             for p in parts]
-    return (parts + ["Unclassified"] * 7)[:7]
 
 
 
@@ -248,8 +234,6 @@ def run(blast_tsv: Path,
 
             
 
-        print(blast.head(), blast.columns)
-        
         # Ensure the column we’ll pivot on is called exactly 'taxonomy'
         # (handles taxonomy_x / taxonomy_y after the merge)
         if taxonomy_col != "taxonomy" and taxonomy_col in merged.columns:
