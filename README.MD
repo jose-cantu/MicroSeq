@@ -302,18 +302,16 @@ microseq filter-hits -i hits_full_sweeper.tsv --identity 97 --qcov 70 \
 microseq add_taxonomy -i hits.tsv -d silva -o hits_tax.tsv --fill-species
 microseq postblast    -b hits_tax.tsv -m meta.tsv -o results.biom --json \
                       --duplicate-policy merge --id-normaliser strip_suffix
-`
+```
 
 ## QC & Assembly tools explained
 
 ### Trimmomatic vs. BioPython Sanger pipeline
 
-MicroSeq can quality‑trim reads two different ways, chosen automatically (or forced with flags):
-
-| Mode              | Trigger                                                                        | Toolchain                                                   | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ----------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **General FASTQ** | input is `.fastq` and `--no-sanger` (default)                                  | **Trimmomatic SE** with `SLIDINGWINDOW:5:20` + `MINLEN:200` | `workdir/qc/trimmed.fasta`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **Sanger traces** | input is one or more `.ab1` chromatograms **or** any FASTQ run with `--sanger` | **BioPython + MicroSeq** pipeline                           | 1. **AB1 → FASTQ** (`ab1_to_fastq.py`) → one FASTQ per trace  2. **Dynamic sliding‑window trim** (5 bp window, Q ≥ 20) for each read  3. Per‑read Phred, length & per‑file averages → `*_avg_qual.txt`  4. File passes if avg Q ≥ 20 → `passed_qc_fastq/`; otherwise to `failed_qc_fastq/` with stats  5. Combined TSV summarises file‑level metrics  6. **All passed FASTQs are merged into ************************************************************************`workdir/qc/trimmed.fasta`************************************************************************ for downstream assembly & BLAST.** |
+| Mode              | Trigger                                                                     | Toolchain                                               | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------- | --------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **General FASTQ** | input is `.fastq` and `--no-sanger` *(default)*                             | **Trimmomatic SE** (`SLIDINGWINDOW:5:20`, `MINLEN:200`) | Reads whose 5‑bp window drops below Q20 or end < 200 bp are discarded; survivors go to `workdir/qc/trimmed.fastq`.                                                                                                                                                                                                                                                                                                                                                    |
+| **Sanger traces** | one or more `.ab1` chromatograms **or** any FASTQ processed with `--sanger` | **BioPython + MicroSeq**                                | 1. **AB1 → FASTQ** (`ab1_to_fastq.py`) – one FASTQ per trace.<br>2. **Dynamic sliding‑window trim** (5 bp window, Q ≥ 20) per read.<br>3. Per‑read Phred, length & per‑file averages → `*_avg_qual.txt`.<br>4. File passes if avg Q ≥ 20 → `passed_qc_fastq/`; otherwise goes to `failed_qc_fastq/` with its stats.<br>5. Combined TSV summarises file‑level metrics.<br>6. **Passed FASTQs merged** into `workdir/qc/trimmed.fasta` for downstream assembly & BLAST. |
 
 *Why two paths?* AB1 chromatograms carry single‑end Sanger qualities that behave differently from generic FASTQ scores; the lightweight BioPython route avoids over‑trimming while still filtering low‑quality tails.
 
@@ -340,8 +338,8 @@ CAP3 names every output file `<prefix>.cap.<suffix>` where `<prefix>` is the inp
 
 ## Advanced topics
 
-- **Custom databases** – point `microseq blast -d /path/my_db` and supply a matching taxonomy TSV to `microseq add_taxonomy`.
-- **Nextflow/Snakemake integration** – set `MICROSEQ_LOG_MODE=runid` + per‑process `--workdir` to avoid clashes.
+* **Custom databases** – point `microseq blast -d /path/my_db` and supply a matching taxonomy TSV to `microseq add_taxonomy`.
+* **Nextflow/Snakemake integration** – set `MICROSEQ_LOG_MODE=runid` + per‑process `--workdir` to avoid clashes.
 
 ---
 
@@ -351,9 +349,15 @@ Bug reports & feature requests are welcome! Please open an issue first to discus
 
 ## License & Citation
 
-*Code* is released under the MIT License (see `LICENSES/MIT.txt`).\
+*Code* is released under the MIT License (see `LICENSES/MIT.txt`).
 The GUI bundles PySide6 / Qt 6, licensed under LGPL v3 (see `LICENSES/Qt_LGPLv3.txt`).
 
 If you use MicroSeq in a publication, please cite me! =) 
 
+> ---
+
+\\
+
+```
+```
 
