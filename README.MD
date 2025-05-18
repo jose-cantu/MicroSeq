@@ -356,8 +356,4 @@ If you use MicroSeq in a publication, please cite me! =) 
 
 > ---
 
-\\
-
-```
-```
 
