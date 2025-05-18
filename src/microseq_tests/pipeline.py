@@ -97,12 +97,14 @@ def run_postblast(blast_hits: PathLike,
                   *, # forces everything after passed by name, prevent position mistakes 
                   id_normaliser: str = "none",
                   taxonomy_col: str = "auto",
+                  taxonomy_format: str = "auto",
                   duplicate_policy: str = "error",
-                  **kwargs) -> int: 
+                  **kwargs) -> int:
     postblast_run(blast_hits, metadata, out_biom,
                   write_csv=True, sample_col=sample_col, 
                   identity_th = identity_th, id_normaliser=id_normaliser,
                   taxonomy_col=taxonomy_col,
+                  taxonomy_format=taxonomy_format,
                   duplicate_policy=duplicate_policy,
                   **kwargs)
     return 0

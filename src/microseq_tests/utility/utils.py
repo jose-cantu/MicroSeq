@@ -100,6 +100,19 @@ def setup_logging(log_dir: str | Path = LOG_ROOT, *, mode: str = "auto", level: 
         rotate_bytes = int(max_bytes) # bytes as is 
     elif rotate_mb is not None: 
         rotate_bytes = int(rotate_mb * 1024 * 1024)
+
+    # ----- pull defaults from config.yaml -----------------
+    cfg = load_config()
+    cfg_log = cfg.get("logging", {})
+    if mode == "auto":
+        mode = cfg_log.get("mode", "daily")
+    if rotate_mb is None and max_bytes is None:
+        max_mb_cfg = cfg_log.get("max_mb", 0)
+        if max_mb_cfg:
+            max_bytes = max_mb_cfg * 1024 * 1024
+    if backup_count == 3:                     # unchanged from default
+        backup_count = cfg_log.get("backup_count", 3)
+    
     # --- decide rotation mode --------------------------
     mode = (mode if mode != "auto" 
             else os.getenv("MICROSEQ_LOG_MODE", "daily")).lower()
