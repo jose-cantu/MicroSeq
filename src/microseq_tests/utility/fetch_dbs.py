@@ -32,7 +32,7 @@ ap.add_argument("--db-root", metavar="PATH",
                      "(default: ~/.microseq_dbs)")
 ap.add_argument("--log-dir", metavar="PATH",
                 help="Folder for MicroSeq run logs "
-                     "(default: microseq_tests/logs)")
+                     "(default: MicroSeq/logs)")
 ap.add_argument("--mode", choices=["auto", "daily", "runid"],
                 help="Logging mode to pre-configure "
                 "(default: ask interactively)") 
@@ -284,5 +284,4 @@ export MICROSEQ_LOG_MODE="{log_mode}"
     print("\nDone! Open a new shell (or `source ~/.bashrc`) and test it using the smoke test I have setup in github install:")
 
 if __name__ == "__main__":
-    main()
-
+    main() 

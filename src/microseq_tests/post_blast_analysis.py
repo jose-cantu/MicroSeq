@@ -15,6 +15,12 @@ from microseq_tests.utility.io_utils import normalise_tsv
 from microseq_tests.utility.id_normaliser import NORMALISERS
 from microseq_tests.utility.metadata_tools import resolve_duplicates
 from microseq_tests.utility.taxonomy_utils import embed_taxonomy_from_metadata
+try:
+    from microseq_tests.utility.add_taxonomy import embed_taxonomy_from_metadata
+except ImportError:
+    # Fallback: leave BIOM table unchanged
+    def embed_taxonomy_from_metadata(tbl, *_args, **_kw):
+        return tbl
 
 setup_logging() # initialize global logging by configure as root logger  
 logger = logging.getLogger(__name__) # Now this then set as the real logger by passing everything from the root logger which doesn't return anything on its own  

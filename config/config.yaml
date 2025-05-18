@@ -1,6 +1,9 @@
 default_workdir: ~/microseq_runs
 logging:
-  dir: /home/jason/microseq_tests/logs
+  mode: daily # keep the pattern you like daily or runid 
+  backup_count: 0 # keep every file forever for reproducibility 
+  max_mb: 0 # 0 = no size-based rotation rollover 
+  dir: /home/jason/MicroSeq/logs
 tools:
   trimmomatic: trimmomatic
   blastn: blastn
@@ -15,6 +18,5 @@ databases:
   ncbi:
     blastdb: ${MICROSEQ_DB_HOME}/ncbi/16S_ribosomal_RNA
     taxonomy: ${MICROSEQ_DB_HOME}/ncbi/taxonomy.tsv
-
 metadata:
-  sample_id_normaliser: strip_suffix_legacy 
+  sample_id_normaliser: strip_suffix_legacy
