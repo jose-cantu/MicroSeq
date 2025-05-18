@@ -1,119 +1,359 @@
-# MicroSeq - Microbial Sequence Analysis Tool 
+# MicroSeq
 
-MicroSeq is currently in the prototype stage, it is a streamlined bioinformatics tool designed for efficient microbial sequence analysis. 
-Currently, it focuses on on core functionalities such as sequence trimming, de nove assembly, and taxonomic classification 
-uing BLAST searches against the Greengenes2 and SILVA databases. Full Version 1.0 once release will be both a CLI and GUI interface. Version 2.0 will then be wrapped in RUST for performance critical portions that will be tested rigoursely for seamless integration. 
+**MicroSeq** is an end‑to‑end microbial sequence‑analysis toolkit that scales from a single laptop to a multi‑node HPC cluster.
+It automates everything from raw trace files (AB1) or FASTQ reads all the way to BIOM/CSV tables that are ready for downstream statistics or visualisation.
 
+*Current status – May 2025*: CLI workflow is feature‑complete and battle‑tested internally; the PySide6 GUI will land in v1.0. Rust speed‑ups for alignment and I/O are planned for v2.0.
 
+---
 
-### Quick Install Guide Meant for First Time Usage Only 
-# NOTE: THIS IS IN PROTOTYPE PHASE SO USE AT OWN RISK - WILL NOT BE COMPLETE UNTIL Realistically a month from now. SO FUNCTIONALITY WILL CHANGE. 
+## Table of Contents
 
-```bash 
-# 1 Clone the repo:
-git clone https://github.com/jose-cantu/microseq_tests.git 
-cd microseq_tests 
+1. [Features](#features)
+2. [Quick start (TL;DR)](#quick-start-tldr)
+3. [Prerequisites](#prerequisites)
+4. [Detailed installation](#detailed-installation)
+5. [Logging & run locations](#logging--run-locations)
+6. [Command reference](#command-reference)
+7. [End‑to‑end examples](#end-to-end-examples)
+8. [QC & Assembly tools explained](#qc--assembly-tools-explained)
+9. [CAP3 (microseq assembly)](#cap3-microseq-assembly)
+10. [Advanced topics](#advanced-topics)
+11. [Contributing / Support](#contributing--support)
+12. [License & Citation](#license--citation)
 
-# 2 Create the Conda env located in env yaml 
-conda env create -f config/environment.yml 
-conda activate MicroSeq 
+---
 
-# 3 Install & download databases 
-pip install -e .  # This sets the current version of MicroSeq
+## Features
 
-## Chossing a logging mode 
-| Mode | When to choose | Activate |
-|------|----------------|----------|
-| daily (one file per day, rolls at midnight *or* 50 MB) | Laptop, interactive CLI sessions | default<br>`export MICROSEQ_LOG_MODE=daily` |
-| runid (fresh file each run, old file renamed with timestamp) | HPC jobs, Nextflow/Snakemake pipelines | `export MICROSEQ_LOG_MODE=runid`<br>or pass `--mode runid` to `microseq-setup` |
+* **One‑liner installer** (`microseq‑setup`) – downloads & indexes **Greengenes 2**, **SILVA 138.1**, and **NCBI 16S** databases; writes a ready‑to‑go `config.yaml` and shell exports.
+* **Quality‑control & trimming**
 
-`microseq-setup` will ask “laptop (d) or HPC (r)?”; pick `r` to pre-set to HPC for example 
-`MICROSEQ_LOG_MODE=runid` system-wide.
+  * AB1 → FASTQ (`microseq ab1-to-fastq`)
+  * FASTQ QC (Phred, length, adapters) with Trimmomatic / BioPython (`microseq trim`).
+* **De‑novo assembly** using *CAP3* (`microseq assembly`).
+* **Taxonomic classification**
 
-Tip on logging - `tail -F logs/microseq_latest.log` always follows the active file even after a midnight roll-over or per-run rename. I set a symlink to follow the active log file. 
+  * BLAST+ search (`microseq blast`)
+  * Post‑BLAST taxonomy join (`microseq add_taxonomy`).
+* **Post‑processing**
 
-microseq-setup    # prompts for DB + log locations 
-## - add --quiet to skip prompts and it will set it up via defaults 
-## - add --db-root /path/dbs to override default ~/.microseq_dbs 
-## - add --log-dir /path/logs to override default microseq_tests/logs 
+  * Collapse hits, choose ID/Q‑cov cut‑offs, export BIOM / CSV tables (`microseq postblast`).
+* **Config‑driven defaults** for duplicate‑policy & ID‑normalisers (regex or built‑ins).
+* **Robust logging**  – daily‑rolling or run‑ID modes; logs can live anywhere you point `MICROSEQ_LOG_DIR`.
+* **Portable**  – pure‑Python (≥3.10) + external binaries already in Conda env (BLAST+, TaxonKit, CAP3).
+* **GUI preview** (`microseq-gui`) – drag‑and‑drop queue, live log pane, progress bar (landing in v1.0).
 
-source ~/.bashrc  # reloads new exports (or you can open a new shell next time?) 
+---
 
-# Sanity check you can run to make sure databses work with blasting  
-
-printf ">demo\nACGT\n" > tiny.fasta
-for d in gg2 silva ncbi; do
-  microseq blast -i tiny.fasta -d $d -o /tmp/$d.tsv \
-                 --identity 50 --qcov 10 \
-      && echo "[✓] $d OK"
-done
-rm tiny.fasta /tmp/*.tsv
-```
-
-Executable from your $PATH you can use from MicroSeq (they come from 'pyproject.toml`)
-
-`microseq` - main multisub-command CLI 
-
-`microseq-gui` - launches the GUI thats underdevelopment 
-
-`microseq-setup` - one-off helper that downloads reference database 
-Note: `microseq-setup` does 4 jobs here::
-First it downloads and indexes GG2, SILVA, and NCBI16S into $MICROSEQ_DB_HOME (default is ~/.microseq_dbs)
-2nd it creates the log folder if path is specified (default is microseq_tests/logs) otherwise. 
-3rd it appends the needed export block I made to ~/.bashrc or ~/.zshrc or inside the MicroSeq conda env `$CONDA_PREFIX/etc/conda/activate.d/microseq.sh`.
-This guarantess that `conda activate MicroSeq` picks up and sets the vars made. 
-Finally 4th it writes config/config.yaml so the libary code can fall back on the same path if exports are missing. 
-`source ~/.bashrc` is only required in the very first interactive shell so you inherit the exports I made without logging out. The next login or new terminal they are already present and ready to go. The `--quiet` flag is used if you want to run the whole thing non-interactively. 
-
-
-`microseq-fix-tsv` - utlitity that normalises BLAST tables so they can be parsed through post blast sub command =)
-
-`microseq-setup` will ask “laptop (d) or HPC (r)?”; pick `r` to pre-set to default  
-`MICROSEQ_LOG_MODE=runid` system-wide.
-
-## Key features
-
-* **QC-trim pipeline**  
-  * AB1 → FASTQ, FASTQ → FASTA, Trimmomatic & BioPython quality filtering  
-* **De-novo assembly** (CAP3)  
-* **BLAST search** against Greengenes 2, SILVA, or NCBI 16S  
-* **Taxonomy join** + BIOM / CSV export for easy downstream stats  
-* **PySide6 GUI** with file queue, live log pane and progress bar  
-* **Single-command installers** (`microseq-setup`, `microseq blast …`) 
-
-
-## Core CLI commands
-
-| Command | Typical use | Minimal example |
-|---------|-------------|-----------------|
-| `microseq trim` | Full QC (AB1 or FASTQ) | `microseq trim -i traces.ab1 --sanger --workdir run1` |
-| `microseq ab1-to-fastq` | Only convert ABI → FASTQ | `microseq ab1-to-fastq -i traces_ab1 -o fastq_out` |
-| `microseq fastq-to-fasta` | Merge FASTQ → FASTA | `microseq fastq-to-fasta -i fastq_out -o merged.fasta` |
-| `microseq assembly` | CAP3 assembly | `microseq assembly -i merged.fasta -o asm/` |
-| `microseq blast` | BLAST search | `microseq blast -i merged.fasta -d gg2 -o hits.tsv` |
-| `microseq add_taxonomy` | Greengenes2 tax join | `microseq add_taxonomy -i hits.tsv -t gg2_tax.tsv -o hits_tax.tsv` |
-| `microseq postblast` | BIOM + CSV export | `microseq postblast -b hits_tax.tsv -m meta.tsv -o run1.biom` |
-| `microseq-gui` | Launch GUI | `microseq-gui` |
-
-
-## GUI at a glance
-
-*Pick files or a whole folder, tweak identity / q-cov / threads, then watch the
-log update live. Output `*.hits.tsv` appear beside each input file.*
-
-## End-to-end example (AB1 traces)
+## Quick start (TL;DR) 
 
 ```bash
-conda activate MicroSeq
-microseq trim       -i raw_ab1/     --sanger  --workdir run1           # QC
-microseq assembly   -i run1/qc/trimmed.fasta  -o run1/asm              # CAP3
-microseq blast      -i run1/asm/contigs.fasta \
-                    -d gg2 -o run1/blast/hits.tsv                      # BLAST
-microseq add_taxonomy \
-        -i run1/blast/hits.tsv  -t gg2_tax.tsv \
-        -o run1/blast/hits_tax.tsv                                     # taxonomy
-microseq postblast  -b run1/blast/hits_tax.tsv \
-                    -m meta.tsv  -o run1.biom                          # BIOM+CSV
-``` 
+# 1  Clone & enter repo
+$ git clone https://github.com/jose-cantu/MicroSeq.git
+$ cd MicroSeq
 
-MicroSeq's GUI uses PySide6 / Qt 6, licensed under the LGPL v3. See LICENSES/Qt_LGPLv3.txt for details. 
+# 2  Create & activate Conda environment
+$ conda env create -f config/environment.yml
+$ conda activate MicroSeq
+
+# 3  Editable install (good while developing)
+$ pip install -e .
+
+# 4  Download reference DBs & configure logging
+$ microseq-setup                 # interactive, 3–5 min first run
+#     └─ adds $MICROSEQ_DB_HOME, $MICROSEQ_LOG_DIR, $BLASTDB to ~/.bashrc
+
+# 5  Open a new shell or:
+$ source ~/.bashrc               # pick up the new exports
+
+# 6  Smoke test (tiny demo FASTA)
+$ printf ">demo\nACGT\n" > tiny.fasta
+  for d in gg2 silva ncbi; do
+  microseq blast -i tiny.fasta -d $d -o /tmp/$d.tsv \
+                 --identity 50 --qcov 10 \
+      && echo "[✓] $d OK"  
+  done 
+  rm tiny.fasta /tmp/*.tsv
+```
+
+> **Need the tools first?**  • [git ≥ 2.30](https://git-scm.com/)  • [Miniconda / Mamba](https://docs.conda.io/en/latest/miniconda.html)  • [Python ≥ 3.10](https://www.python.org/downloads/) – install those in any order, then follow the steps above.
+
+---
+
+## Prerequisites
+
+| Tool                   | Why MicroSeq needs it                                   | Install guide                                                                                                                  |
+| ---------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| git                    | Clone the repo, pull updates                            | [https://git-scm.com/book/en/v2/Getting-Started-Installing-Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git) |
+| Conda / Mamba          | Manages the `MicroSeq` env incl. BLAST+, CAP3, TaxonKit | [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html)                               |
+| Python 3.10 – 3.13     | Runs the CLI & GUI                                      | [https://www.python.org/downloads/](https://www.python.org/downloads/)                                                         |
+| BLAST+, TaxonKit, CAP3 | Auto‑installed into the Conda env – no action needed    | –                                                                                                                              |
+
+---
+
+## Detailed installation
+
+### 1 Create the Conda environment
+
+```bash
+conda env create -f config/environment.yml  # or: mamba env create …
+conda activate MicroSeq
+```
+
+### 2 Install MicroSeq (editable vs. frozen)
+
+* **Editable (dev) install** – `pip install -e .` (recommended while the API is still evolving).
+
+### 3 Download reference databases
+
+Run once per machine (or whenever DB versions change):
+
+```bash
+microseq-setup                # interactive prompts
+# flags: --quiet  •  --db-root /path/to/dbs  •  --log-dir /path/to/logs  •  --mode daily|runid
+```
+
+What it does:
+
+1. Downloads & indexes GG2, SILVA, NCBI 16S into `$MICROSEQ_DB_HOME` (default `~/.microseq_dbs`).
+2. Creates the log folder.
+3. Appends export block to `~/.bashrc` **and** `etc/conda/activate.d/microseq.sh` inside the env.
+4. Writes or patches `config/config.yaml` so library calls inherit the same paths.
+
+Re‑run anytime with different flags to move DBs or logs elsewhere.
+
+---
+
+## Logging & run locations
+
+| Variable / Flag     | Purpose                                                           | Default                    | Example override                            |
+| ------------------- | ----------------------------------------------------------------- | -------------------------- | ------------------------------------------- |
+| `--workdir` (CLI)   | Per‑run scratch folder for intermediate files                     | `.`, beside input          | `--workdir /scratch/$USER/run42`            |
+| `MICROSEQ_LOG_DIR`  | Where rotated log files are written                               | `<repo>/logs`              | `export MICROSEQ_LOG_DIR=/var/log/microseq` |
+| `MICROSEQ_LOG_MODE` | `daily` (one file per day) or `runid` (fresh file per invocation) | chosen in `microseq-setup` | `export MICROSEQ_LOG_MODE=runid`            |
+
+A symlink `logs/microseq_latest.log` always points at the active log file, so `tail ‑F logs/microseq_latest.log` just works.
+
+---
+
+## Command reference
+
+MicroSeq’s CLI is a single entry‑point (`microseq`) with **global flags** followed by a sub‑command.  Every sub‑command has its own options; run `microseq <cmd> -h` for authoritative help.
+
+### Global flags (apply to *all* sub‑commands)
+
+| Flag             | Default | Purpose                                                                                                                     |
+| ---------------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `--workdir PATH` | `data/` | Root folder for intermediate & derived files created by the current run. A fresh folder keeps each analysis self‑contained. |
+| `--threads N`    | `1`     | How many CPU threads to give the stage (BLAST, CAP3, Trimmomatic, etc.).                                                    |
+| `-v`, `-vv`      | off     | `-v` = info‑level logs, `-vv` = debug.                                                                                      |
+
+---
+
+### Sub‑commands & flags
+
+Below is an index of every sub‑command with a one‑line summary.  Click the ▶ arrows to reveal full flag tables and use‑case notes.
+
+| Sub‑command       | One‑sentence purpose                                                    |
+| ----------------- | ----------------------------------------------------------------------- |
+| `trim`            | QC‑trim FASTQ or AB1 traces into high‑quality reads                     |
+| `ab1-to-fastq`    | Convert chromatograms (.ab1) directly to FASTQ                          |
+| `fastq-to-fasta`  | Merge one or many FASTQ files into a single FASTA                       |
+| `assembly`        | De‑novo assembly of trimmed reads with CAP3                             |
+| `blast`           | Search reads/contigs against Greengenes 2, SILVA, or NCBI 16S           |
+| `suggest-cutoffs` | Scan sweeper table to find ID/Q‑cov pairs that yield desired PASS count |
+| `filter-hits`     | Apply chosen ID/Q‑cov to sweeper TSV and report summary                 |
+| `merge-hits`      | Concatenate multiple BLAST TSVs into one master file                    |
+| `add_taxonomy`    | Append 7‑rank lineage column to a BLAST hits table                      |
+| `postblast`       | Collapse hits per sample, join metadata, export BIOM/CSV/JSON           |
+| `microseq-setup`  | Download reference DBs and write env‑hook + config                      |
+
+---
+
+| Flag                     | Required | Example                       | When to use                                                                |
+| ------------------------ | -------- | ----------------------------- | -------------------------------------------------------------------------- |
+| `-i / --input PATH`      | ✓        | `reads.fastq` or `traces.ab1` | Input file or folder.                                                      |
+| `-o / --output PATH`     |          | `qc/trimmed.fastq`            | Override auto‑named file in `workdir/qc/`.                                 |
+| `--sanger / --no-sanger` |          | `--sanger`                    | Use BioPython’s Sanger‑specific trim as a preference.                      |
+| `--link-raw`             |          |                               | Symlink AB1 traces into `workdir/raw_ab1` instead of copying (saves disk). |
+
+| Flag                    | Required | Example                                  |
+| ----------------------- | -------- | ---------------------------------------- |
+| `-i / --input_dir DIR`  | ✓        | `raw_traces/`                            |
+| `-o / --output_dir DIR` | ✓        | `fastq/`                                 |
+| `--overwrite`           |          | Re‑convert even if FASTQs already exist. |
+
+| Flag                       | Required | Example            |
+| -------------------------- | -------- | ------------------ |
+| `-i / --input_dir DIR`     | ✓        | `qc/`              |
+| `-o / --output_fasta PATH` | ✓        | `qc/trimmed.fasta` |
+
+| Flag                 | Required | Example            |
+| -------------------- | -------- | ------------------ |
+| `-i / --input FASTA` | ✓        | `qc/trimmed.fasta` |
+| `-o / --output DIR`  | ✓        | `asm/`             |
+
+| Flag                                          | Default | Example                                                                      | Scenario                           |
+| --------------------------------------------- | ------- | ---------------------------------------------------------------------------- | ---------------------------------- |
+| `-i / --input FASTA`                          | ✓       | `asm/contigs.fasta`                                                          | Query sequences.                   |
+| `-d / --db {gg2,silva,ncbi}`                  | ✓       | `--db gg2`                                                                   | Choose reference DB.               |
+| `-o / --output TSV`                           | ✓       | `hits.tsv`                                                                   | Where results go.                  |
+| `--identity PCT`                              | 97      | `--identity 99`                                                              | Stricter species‑level hits.       |
+| `--qcov PCT`                                  | 80      | 70                                                                           | Lower if you have short amplicons. |
+| `--max_target_seqs N`                         | 5       | 1                                                                            | Keep only top hit.                 |
+| `--relaxed` + `--relaxed-id / --relaxed-qcov` | —       | First coarse pass before cut‑off optimisation (use with `--export-sweeper`). |                                    |
+| `--export-sweeper`                            | —       | Produce `hits_full_sweeper.tsv` for `suggest-cutoffs`.                       |                                    |
+| `--clean-titles`                              | —       | Strip extra fields from SILVA/NCBI `stitle`.                                 |                                    |
+| `--log-missing FILE`                          | —       | Save IDs with no hits for troubleshooting.                                   |                                    |
+
+| Arg / Flag | Example                 | Scenario                                  |
+| ---------- | ----------------------- | ----------------------------------------- |
+| `table`    | `hits_full_sweeper.tsv` | Output of a relaxed BLAST.                |
+| `target`   | `530`                   | Aim for 530 PASS rows after collapse.     |
+| `--step`   | `2`                     | Scan in 2 % increments (faster, coarser). |
+
+| Flag                | Required       | Example                          | Notes |
+| ------------------- | -------------- | -------------------------------- | ----- |
+| `-i / --input TSV`  | ✓              | `hits_full_sweeper.tsv`          |       |
+| `--identity PCT`    | ✓              | 97                               |       |
+| `--qcov PCT`        | ✓              | 80                               |       |
+| `-o / --output TSV` |                | auto‑named                       |       |
+| `--with-status`     |                | Write PASS/FAIL column.          |       |
+| `--dry-run`         |                | Show counts, write nothing.      |       |
+| `--unique`          |                | Also report unique sample count. |       |
+| `--group-col COL`   | `sample_id`    | Collapse key.                    |       |
+| `--id-normaliser`   | `strip_suffix` | Match sample IDs post‑cleaning.  |       |
+
+| Flag                | Required | Example            |
+| ------------------- | -------- | ------------------ |
+| `-i / --input TSV…` | ✓        | `blast/*/hits.tsv` |
+| `-o / --output TSV` | ✓        | `all_hits.tsv`     |
+
+| Flag                         | Required | Example                                    |
+| ---------------------------- | -------- | ------------------------------------------ |
+| `-i / --hits TSV`            | ✓        | `hits.tsv`                                 |
+| `-d / --db {gg2,silva,ncbi}` | ✓        | `--db silva`                               |
+| `-o / --output TSV`          | ✓        | `hits_tax.tsv`                             |
+| `--fill-species`             |          | For SILVA genus‑level lines with ≥97 % ID. |
+
+| Flag                                          | Required       | Example                                    | Purpose                       |
+| --------------------------------------------- | -------------- | ------------------------------------------ | ----------------------------- |
+| `-b / --blast_file TSV`                       | ✓              | `hits_tax.tsv`                             | Input table (needs taxonomy). |
+| `-m / --metadata TSV`                         | ✓              | `samples_meta.tsv`                         | Sample metadata.              |
+| `-o / --output_biom BIOM`                     | ✓              | `results.biom`                             | Output; CSV auto‑written.     |
+| `--json`                                      | —              | Converts HDF5 into `.json` BIOM.           |                               |
+| `--sample-col COL`                            | `SampleID`     | If metadata uses a different ID column.    |                               |
+| `--post_blast_identity PCT`                   | 97             | Tweak identity filter when multiple hits.  |                               |
+| `--id-normaliser`                             | `strip_suffix` | Clean Sample IDs before join.              |                               |
+| `--taxonomy-col COL`                          | auto           | Pre‑existing taxonomy column in metadata.  |                               |
+| `--duplicate-policy {error,keep-first,merge}` | `error`        | Resolve duplicate IDs after normalisation. |                               |
+
+| Flag                        | Default           | Purpose                                 |
+| --------------------------- | ----------------- | --------------------------------------- |
+| `--db-root DIR`             | `~/.microseq_dbs` | Where to store BLAST DBs.               |
+| `--log-dir DIR`             | `<repo>/logs`     | Central log folder.                     |
+| `--mode {auto,daily,runid}` | ask               | Choose log‑rotation scheme.             |
+| `--quiet`                   | —                 | Non‑interactive install (use defaults). |
+
+---
+
+## Usage Scenarios at a Glance
+
+| Task                                                                                    | Typical command                                                                                                           |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **First‑time setup on a fresh laptop**                                                  | `git clone … && conda env create … && conda activate MicroSeq && pip install -e . && microseq-setup --quiet --mode daily` |
+| **Convert ABI traces + QC + assemble + classify**                                       | See AB1 trace workflow in Examples.                                                                                       |
+| **Optimise BLAST cut‑offs for 96‑well plate**   **Keep in mind, these are estimates!**  | `microseq blast --relaxed --export-sweeper … → microseq suggest-cutoffs … 530 → microseq filter-hits`                     |
+| **Batch merge hits from three runs**                                                    | `microseq merge-hits -i run*/blast/hits.tsv -o merged.tsv`                                                                |
+| **HPC Slurm job**                                                                       | Pre‑export `MICROSEQ_LOG_DIR=$SCRATCH/logs` & use `--workdir $SLURM_TMPDIR` in each step.                                 |
+
+---
+
+## End‑to‑end examples
+
+### AB1 trace workflow
+
+```bash
+microseq trim        -i raw_ab1/ --sanger --workdir run_01
+microseq assembly    -i run_01/qc/trimmed.fasta -o run_01/asm
+microseq blast       -i run_01/asm/contigs.fasta -d gg2 -o run_01/blast/hits.tsv
+microseq add_taxonomy -i run_01/blast/hits.tsv -d gg2 -o run_01/blast/hits_tax.tsv
+microseq postblast   -b run_01/blast/hits_tax.tsv -m metadata.tsv -o run_01.biom
+```
+
+### FASTQ‑only (Sanger), SILVA DB, HPC style
+
+```bash
+# sbatch or Nextflow will substitute $SLURM_TMPDIR and $SLURM_CPUS_ON_NODE
+microseq trim            -i reads.fastq.gz --sanger --workdir $SLURM_TMPDIR/qc \
+                         --threads $SLURM_CPUS_ON_NODE
+microseq fastq-to-fasta  -i $SLURM_TMPDIR/qc -o reads.fasta
+# relaxed search to generate sweeper table
+microseq blast           -i reads.fasta -d silva -o hits_full_sweeper.tsv \
+                         --threads $SLURM_CPUS_ON_NODE --relaxed --export-sweeper \
+                         --relaxed-id 80 --relaxed-qcov 0
+# find cut-offs that keep ~530 samples after collapse
+microseq suggest-cutoffs hits_full_sweeper.tsv 530 --step 2 > cutoff.txt
+# apply the chosen thresholds (here 97/70)
+microseq filter-hits -i hits_full_sweeper.tsv --identity 97 --qcov 70 \
+                     -o hits.tsv --with-status --unique
+# join taxonomy, collapse, export BIOM/CSV/JSON
+microseq add_taxonomy -i hits.tsv -d silva -o hits_tax.tsv --fill-species
+microseq postblast    -b hits_tax.tsv -m meta.tsv -o results.biom --json \
+                      --duplicate-policy merge --id-normaliser strip_suffix
+`
+
+## QC & Assembly tools explained
+
+### Trimmomatic vs. BioPython Sanger pipeline
+
+MicroSeq can quality‑trim reads two different ways, chosen automatically (or forced with flags):
+
+| Mode              | Trigger                                                                        | Toolchain                                                   | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **General FASTQ** | input is `.fastq` and `--no-sanger` (default)                                  | **Trimmomatic SE** with `SLIDINGWINDOW:5:20` + `MINLEN:200` | `workdir/qc/trimmed.fasta`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **Sanger traces** | input is one or more `.ab1` chromatograms **or** any FASTQ run with `--sanger` | **BioPython + MicroSeq** pipeline                           | 1. **AB1 → FASTQ** (`ab1_to_fastq.py`) → one FASTQ per trace  2. **Dynamic sliding‑window trim** (5 bp window, Q ≥ 20) for each read  3. Per‑read Phred, length & per‑file averages → `*_avg_qual.txt`  4. File passes if avg Q ≥ 20 → `passed_qc_fastq/`; otherwise to `failed_qc_fastq/` with stats  5. Combined TSV summarises file‑level metrics  6. **All passed FASTQs are merged into ************************************************************************`workdir/qc/trimmed.fasta`************************************************************************ for downstream assembly & BLAST.** |
+
+*Why two paths?* AB1 chromatograms carry single‑end Sanger qualities that behave differently from generic FASTQ scores; the lightweight BioPython route avoids over‑trimming while still filtering low‑quality tails.
+
+## CAP3 (microseq assembly) 
+
+CAP3 names every output file `<prefix>.cap.<suffix>` where `<prefix>` is the input FASTA without extension.  The key artefacts are:
+
+| Suffix             | File example               | Purpose                                                                                                                                |
+| ------------------ | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `contigs`          | `sample.cap.contigs`       | **FASTA** of all contigs built from ≥2 reads.                                                                                          |
+| `contigs.qual`     | `sample.cap.contigs.qual`  | **QUAL** file – Phred scores per base in each contig (same order as above FASTA).                                                      |
+| `singlets`         | `sample.cap.singlets`      | Reads that did **not** assemble with any other (singletons), in FASTA.                                                                 |
+| `singlets.qual`    | `sample.cap.singlets.qual` | Phred scores for the singlets.                                                                                                         |
+| `info`             | `sample.cap.info`          | Assembly log: contig IDs, lengths, coverage, clipped read coordinates, N50 summary.                                                    |
+| `ace` *(optional)* | `sample.cap.ace`           | ACE format view of the assembly; generated when MicroSeq calls CAP3 with `-a`. Importable into Consed/GAP5/Tablet for visual curation. |
+
+**How MicroSeq uses them**
+
+1. Copies `*.contigs` → `asm/contigs.fasta` for downstream BLAST. `*.singlets` remain in `workdir/asm/` should you wish to analyse them separately.
+2. Parses `*.info` to log assembly statistics (number of contigs, N50, max length).
+3. Leaves all original CAP3 files in `workdir/asm/` so you can inspect quality or visualise in external tools.
+
+---
+
+## Advanced topics
+
+- **Custom databases** – point `microseq blast -d /path/my_db` and supply a matching taxonomy TSV to `microseq add_taxonomy`.
+- **Nextflow/Snakemake integration** – set `MICROSEQ_LOG_MODE=runid` + per‑process `--workdir` to avoid clashes.
+
+---
+
+## Contributing / Support
+
+Bug reports & feature requests are welcome! Please open an issue first to discuss major changes.
+
+## License & Citation
+
+*Code* is released under the MIT License (see `LICENSES/MIT.txt`).\
+The GUI bundles PySide6 / Qt 6, licensed under LGPL v3 (see `LICENSES/Qt_LGPLv3.txt`).
+
+If you use MicroSeq in a publication, please cite me! =) 
+
+
