@@ -4,32 +4,50 @@ Embed full-length taxonomy strings from a metadata DataFrame intoa BIOM Table.
 """
 
 from __future__ import annotations 
-from typing import Mapping, Dict 
+from typing import Mapping, Dict, List, Union
 from biom import Table 
 import pandas as pd
 import re   
 
-def parse_lineage(lineage: str) -> Dict[str, str]:
+def parse_lineage(
+    line: str,
+    fmt: str = "auto",
+    *,
+    as_dict: bool = False,
+) -> Union[List[str], Dict[str, str]]:
+    """Return the canonical seven taxonomic ranks from ``line``.
+
+    Parameters
+    ----------
+    line
+        The raw lineage string to parse.
+    fmt
+        Expected format of the lineage. ``"auto"``/``"gg2"``/``"silva"`` will
+        strip ``d__`` style prefixes; anything else is treated as already
+        prefix-free.
+    as_dict
+        If ``True`` return a mapping of rank name to value, otherwise return a
+        list of rank values in order.
     """
-    Parse a semicolon-delimited lineage like
-        d__Bacteria; p__Firmicutes; c__Bacilli; …
-    into the seven canonical ranks.  Missing ranks → ''.
-    """
-    lineage = lineage.strip()
-    rank_specs = [
-        ("Domain",  r"d__"),
-        ("Phylum",  r"p__"),
-        ("Class",   r"c__"),
-        ("Order",   r"o__"),
-        ("Family",  r"f__"),
-        ("Genus",   r"g__"),
-        ("Species", r"s__"),
+
+    if not isinstance(line, str):
+        line = ""
+
+    if fmt in {"auto", "gg2", "silva"}:
+        parts = [p.split("__", 1)[-1] for p in line.rstrip(";").split(";")]
+    else:  # ncbi or unknown -> assume no prefixes
+        parts = [p.strip() for p in line.rstrip(";").split(";")]
+
+    parts = [
+        p.split(" strain", 1)[0] if "strain" in p else p or "Unclassified"
+        for p in parts
     ]
-    out: Dict[str, str] = {}
-    for col, prefix in rank_specs:
-        m = re.search(re.escape(prefix) + r"([^;]+)", lineage)
-        out[col] = m.group(1).strip() if m and m.group(1).strip() else ""
-    return out
+    parts = (parts + ["Unclassified"] * 7)[:7]
+
+    ranks = ["Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"]
+    if as_dict:
+        return dict(zip(ranks, parts))
+    return parts
 
 
 def embed_taxonomy_from_metadata(
@@ -46,7 +64,7 @@ def embed_taxonomy_from_metadata(
     pivot_table(index="taxonomy", …) earlier in the pipeline).
     """
     # Build lookup   lineage-string → {'Domain': 'Bacteria', …}
-    lut = {row[col]: parse_lineage(row[col]) for _, row in df.iterrows()}
+    lut = {row[col]: parse_lineage(row[col], as_dict=True) for _, row in df.iterrows()}
 
     def _obs_meta(obs_id):
         parsed = lut.get(obs_id, {})
