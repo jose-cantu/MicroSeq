@@ -292,7 +292,8 @@ export MICROSEQ_LOG_MODE="{log_mode}"
     cfg_path = REPO_ROOT / "config" / "config.yaml"
     cfg_path.parent.mkdir(exist_ok=True)
     cfg = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
-    cfg["logging"] = {"dir": str(log_dir)}
+    cfg.setdefault("logging", {})
+    cfg["logging"]["dir"] = str(log_dir)
     cfg["databases"] = {
         "gg2":   {"blastdb": "${MICROSEQ_DB_HOME}/gg2/greengenes2_db",
             "taxonomy": "${MICROSEQ_DB_HOME}/gg2/taxonomy.tsv"},
