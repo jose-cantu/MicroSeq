@@ -84,6 +84,11 @@ class MainWindow(QMainWindow):
         browse_btn.setToolTip("Select FASTA/FASTQ/AB1 file(s) or a folder")
         browse_btn.clicked.connect(self._choose_infile)
 
+        # BLAST hits TSV picker
+        self.hits_lbl = QLabel("Hits: —")
+        hits_btn = QPushButton("Browse hits…")
+        hits_btn.clicked.connect(self._choose_hits)
+
         # label place holder and browse button wired to file picker 
         self.id_spin = QSpinBox()
         self.id_spin.setRange(50, 100) # for simplicity I set spinbox ID % 50-100 threshold 
@@ -122,8 +127,10 @@ class MainWindow(QMainWindow):
         # here you click to run QC or full pipeline 
         self.qc_btn = QPushButton("Run QC")
         self.full_btn = QPushButton("Full pipeline")
+        self.postblast_btn = QPushButton("Post-BLAST")
         self.qc_btn.clicked.connect(self._launch_qc)
-        self.full_btn.clicked.connect(self._launch_full) 
+        self.full_btn.clicked.connect(self._launch_full)
+        self.postblast_btn.clicked.connect(self._launch_postblast)
         
 
         # creating a checkbox here for post blast 
@@ -139,7 +146,9 @@ class MainWindow(QMainWindow):
         # ---- Layout here will update UX -------------------------
         top = QHBoxLayout()
         top.addWidget(self.fasta_lbl)
-        top.addWidget(browse_btn) 
+        top.addWidget(browse_btn)
+        top.addWidget(self.hits_lbl)
+        top.addWidget(hits_btn)
 
         # horizontal row for file picker 
         mid = QHBoxLayout()
@@ -170,6 +179,7 @@ class MainWindow(QMainWindow):
 
         mid.addWidget(self.qc_btn)
         mid.addWidget(self.full_btn)
+        mid.addWidget(self.postblast_btn)
         mid.addWidget(self.biom_chk)
 
         mid.addWidget(self.meta_btn) 
@@ -190,7 +200,8 @@ class MainWindow(QMainWindow):
 
         # state and logging connection 
         self._infile: Optional[Path] = None
-        self.meta_path: Optional[Path] = None 
+        self.hits_path: Optional[Path] = None
+        self.meta_path: Optional[Path] = None
         setup_logging(level=logging.INFO) # file + console stderr 
         logging.getLogger().handlers.append(_QtHandler(self.log_box)) # appended to log_box 
     
@@ -235,6 +246,18 @@ class MainWindow(QMainWindow):
             # clean any previous metadata selection
             self.meta_path = None
             self.statusBar().clearMessage()
+
+    # ------- choosing BLAST hits file --------------
+    def _choose_hits(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select BLAST hits",
+            str(Path.home()),
+            "Hits TSV (*.tsv);;All files (*)",
+        )
+        if path:
+            self.hits_path = Path(path)
+            self.hits_lbl.setText(f"Hits: {self.hits_path.name}")
      
     # ------- chosing metadata file -------------- 
     def _choose_metadata(self):
@@ -262,6 +285,7 @@ class MainWindow(QMainWindow):
         hits_path = self._infile.with_suffix(".hits.tsv")
 
         self.run_btn.setEnabled(False)
+        self.postblast_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.log_box.append(f"\n▶ BLAST {self._infile.name} -> {hits_path.name}")
 
@@ -307,7 +331,7 @@ class MainWindow(QMainWindow):
     def _launch(self, fn, *args, **kw):
         """Start `fn` inside a Worker+QThread and wire its signals to the GUI."""
         self.progress.setValue(0)
-        for b in (self.qc_btn, self.full_btn, self.run_btn):
+        for b in (self.qc_btn, self.full_btn, self.run_btn, self.postblast_btn):
             b.setEnabled(False)
         self.cancel_btn.setEnabled(True)
 
@@ -367,6 +391,42 @@ class MainWindow(QMainWindow):
             metadata=self.meta_path,         # None or Path run the Post-BLAST stage too
     )
 
+    # ------ Run stand-alone Post-BLAST ---------------------------------
+    def _launch_postblast(self):
+        if not self.hits_path:
+            QMessageBox.warning(self, "No hits", "Choose a BLAST hits file first.")
+            return
+        if not self.meta_path:
+            QMessageBox.warning(self, "No metadata", "Choose a metadata file first.")
+            return
+
+        self.progress.setValue(0)
+        out_biom = self.hits_path.with_suffix(".biom")
+
+        self.postblast_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
+        self.log_box.append(
+            f"\n▶ Post-BLAST {self.hits_path.name} -> {out_biom.name}"
+        )
+
+        worker = Worker(
+            run_postblast,
+            self.hits_path,
+            self.meta_path,
+            out_biom,
+        )
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        worker.log.connect(self.log_box.append)
+        thread.started.connect(worker.run)
+        worker.finished.connect(lambda r: setattr(self, "_last_result", r))
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(self._done)
+
+        self._worker = worker
+        self._thread = thread
+        thread.start()
+
 
     def _cancel_run(self):
         """Request interruption of the running worker thread."""
@@ -422,7 +482,7 @@ class MainWindow(QMainWindow):
             )
 
         # re‑enable buttons -----------------------------------------
-        for b in (self.qc_btn, self.full_btn, self.run_btn):
+        for b in (self.qc_btn, self.full_btn, self.run_btn, self.postblast_btn):
             b.setEnabled(True)
         self.cancel_btn.setEnabled(False)
 
