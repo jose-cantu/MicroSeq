@@ -79,9 +79,10 @@ class MainWindow(QMainWindow):
         self.resize(800, 520) # size of app considering also log space here 
 
         # widgets --------------------------------------------------------
-        self.fasta_lbl = QLabel("FASTA / AB1: —")
+        self.fasta_lbl = QLabel("Input: —")
         browse_btn = QPushButton("Browse..")
-        browse_btn.clicked.connect(self._choose_infile) 
+        browse_btn.setToolTip("Select a FASTA/FASTQ/AB1 file or a folder")
+        browse_btn.clicked.connect(self._choose_infile)
 
         # label place holder and browse button wired to file picker 
         self.id_spin = QSpinBox()
@@ -191,18 +192,33 @@ class MainWindow(QMainWindow):
     
     # ---- file picker --------------------------
     def _choose_infile(self):
-# returns path string and intial dir = home filters removes other file types
+        """Let the user pick an input file *or* a directory."""
+        # first offer regular file selection
         path, _ = QFileDialog.getOpenFileName(
-                self, "Select FASTA/FASTQ/AB1", 
-                str(Path.home()), "Seq files (*.fasta *.fastq *.ab1)"
-                )
-        # stores path; updates label for user feedback 
+            self,
+            "Select FASTA/FASTQ/AB1",
+            str(Path.home()),
+            "Seq files (*.fasta *.fastq *.ab1)"
+        )
+        # if no file was chosen, fall back to directory mode
+        if not path:
+            path = QFileDialog.getExistingDirectory(
+                self,
+                "Select input folder",
+                str(Path.home()),
+            )
+
         if path:
             self._infile = Path(path)
-            self.fasta_lbl.setText(f"FASTA / AB1: {self._infile.name}")
-            # clean any previous metadata selection 
-            self.meta_path = None 
-            self.statusBar().clearMessage() 
+            label = (
+                f"Input folder: {self._infile.name}"
+                if self._infile.is_dir()
+                else f"FASTA / AB1: {self._infile.name}"
+            )
+            self.fasta_lbl.setText(label)
+            # clean any previous metadata selection
+            self.meta_path = None
+            self.statusBar().clearMessage()
      
     # ------- chosing metadata file -------------- 
     def _choose_metadata(self):
