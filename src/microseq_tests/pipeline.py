@@ -154,7 +154,12 @@ def run_full_pipeline(
     on_stage=None,
     on_progress=None,
 ) -> dict[str, Path]:
-    """Run trim → FASTA merge → BLAST → taxonomy (+ optional post‑BLAST)."""
+    """Run trim → FASTA merge → BLAST → taxonomy (+ optional post‑BLAST).
+
+    *infile* may be FASTA, FASTQ, a single ``.ab1`` trace, or a directory of
+    ``.ab1`` files.  Sanger mode is triggered automatically when the input path
+    ends with ``.ab1``.
+    """
 
     on_stage = on_stage or (lambda *_: None)
     on_progress = on_progress or (lambda *_: None)
