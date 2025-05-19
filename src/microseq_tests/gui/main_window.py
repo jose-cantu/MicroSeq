@@ -3,7 +3,8 @@
 from __future__ import annotations 
 import logging
 L = logging.getLogger(__name__)
-import os 
+import os
+import inspect 
 os.environ.setdefault("QT_QPA_PLATFORM", "xcb")   # force X11 backend
 
 import sys, logging, traceback, subprocess, shlex  
@@ -45,12 +46,21 @@ class Worker(QObject):
 
     @Slot() # design to warn if any errors occur 
     def run(self):
+        # Drop any duplicate that might have been supplied on mistake
+        self._kwargs.pop("on_stage", None) 
+        self._kwargs.pop("on_progress", None) # guard
+
+        params = inspect.signature(self._fn).parameters 
+        if "on_stage"    in params:
+            self._kwargs["on_stage"]    = self.status.emit
+        if "on_progress" in params:
+            self._kwargs["on_progress"] = self.progress.emit
+
+
         try:
             self.log.emit(f"{self._fn.__name__} started")
             result = self._fn(
                 *self._args,
-                on_stage=self.status.emit,
-                on_progress=self.progress.emit,
                 **self._kwargs,
             )
             self.log.emit(f"{self._fn.__name__} finished")
@@ -233,10 +243,9 @@ class MainWindow(QMainWindow):
                 max_target_seqs=self.hits_spin.value(),
                 threads=self.threads_spin.value(),
                 # prgress bar -> Worker.progress -> GUI thread 
-                on_progress=None, # placeholder 
                 )
         # now wire the real callback 
-        worker._kwargs["on_progress"] = worker.progress.emit 
+        worker._kwargs["on_progress"] = worker.progress.emit
         # injecting wrapper + args into Worker; moves into new thread 
         thread = QThread(self) # autodeleted with window 
         worker.moveToThread(thread) 
