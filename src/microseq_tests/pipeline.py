@@ -39,8 +39,11 @@ L = logging.getLogger(__name__)
 
 # ───────────────────────────────────────────────────────── trimming
 def run_trim(input_path: PathLike, workdir: PathLike, sanger: bool = False) -> int:
-    """
-    QC-trim FASTQ or convert+trim an AB1 folder.
+    """Trim reads and convert if needed.
+
+    When ``sanger=True`` the *input_path* must point to an ``.ab1`` file or
+    directory.  Those traces are converted to FASTQ before trimming.
+    With ``sanger=False`` the function expects standard FASTQ input.
 
     Returns 0 on success.
     """

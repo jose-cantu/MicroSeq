@@ -192,10 +192,12 @@ class MainWindow(QMainWindow):
     
     # ---- file picker --------------------------
     def _choose_infile(self):
+
         """Select FASTA/FASTQ/AB1 file(s) or an AB1 folder.
 
         If multiple files are chosen, only the first is used by the pipeline.
         """
+
 
         paths, _ = QFileDialog.getOpenFileNames(
             self,
@@ -214,7 +216,9 @@ class MainWindow(QMainWindow):
             if dir_path:
                 self._infile = Path(dir_path)
         else:
+
             # pipeline currently handles a single input path
+
             self._infile = Path(paths[0])
 
         if self._infile:
