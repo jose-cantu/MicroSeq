@@ -34,15 +34,15 @@ def normalise_tsv(path: str | Path) -> Path:
             text = "\n".join(lines) 
 
     L.info("[fix-tsv] converting spaces / commas to TABS in %s", p.name)
-    fixed = re.sub(r"( {2,}|,)", "\t", text) # 2+ spaces or comma gets turned into TAB format. 
+    fixed = re.sub(r"( {2,}|,)", "\t", text) # 2+ spaces or comma gets turned into TAB format.
 
     tmp = p.with_suffix(".tsv.tmp")
     tmp.write_text(fixed)
-    shutil.move(tmp, p) # atomatic replacement here 
+    shutil.move(tmp, p) # atomic replacement here
     return p 
 
 def cli():
     import sys 
     for f in sys.argv[1:]:
         normalise_tsv(f)
-    print("fils is normalised now and ready to run in MicroSeq", *sys.argv[1:]) 
+    print("files are normalised now and ready to run in MicroSeq", *sys.argv[1:])
