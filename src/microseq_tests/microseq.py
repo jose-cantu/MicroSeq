@@ -196,6 +196,7 @@ def main() -> None:
             sanger=args.sanger,
             summary_tsv=args.combined_tsv,
             link_raw=args.link_raw,
+
         )
         fasta = workdir / "qc" / "trimmed.fasta"
         print("FASTA ready:", fasta)

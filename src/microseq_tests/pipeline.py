@@ -53,6 +53,7 @@ def run_trim(
     *,
     summary_tsv: PathLike | None = None,
     link_raw: bool = False,
+
 ) -> int:
     """Trim reads and convert if needed.
 
@@ -62,6 +63,7 @@ def run_trim(
     When *summary_tsv* is given, write one-line stats per file to that path.
     Set *link_raw* to ``True`` to symlink AB1 traces into ``raw_ab1`` instead of
     copying them.
+
 
     Returns 0 on success.
     """
@@ -87,6 +89,7 @@ def run_trim(
                 dst.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ab1_source, dst / ab1_source.name)
         ab1_to_fastq(dst, fastq_dir)
+
         biopy_trim(fastq_dir, work / "qc", combined_tsv=summary_tsv)
         trim_dir = work / "passed_qc_fastq"
     else:
