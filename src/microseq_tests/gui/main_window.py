@@ -169,7 +169,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root) 
 
         # state and logging connection 
-        self._infile: Optional[Path] = None 
+        self._infile: Optional[Path] = None
+        self.meta_path: Optional[Path] = None 
         setup_logging(level=logging.INFO) # file + console stderr 
         logging.getLogger().handlers.append(_QtHandler(self.log_box)) # appended to log_box 
     
@@ -289,7 +290,8 @@ class MainWindow(QMainWindow):
             run_full_pipeline,
             self._infile,
             self.db_box.currentText(),
-            postblast=True,           # run the Post-BLAST stage too
+            postblast=self.biom_chk.isChecked(), # source of truth  
+            metadata=getattr(self, "meta_path", None),         # run the Post-BLAST stage too
         )
 
 
