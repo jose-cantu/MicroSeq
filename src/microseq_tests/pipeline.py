@@ -24,6 +24,7 @@ from microseq_tests.trimming.biopy_trim import trim_folder as biopy_trim
 from microseq_tests.trimming.fastq_to_fasta import (
     fastq_folder_to_fasta as fastq_to_fasta,
 )
+from Bio import SeqIO
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
@@ -45,12 +46,19 @@ L = logging.getLogger(__name__)
 
 
 # ───────────────────────────────────────────────────────── trimming
-def run_trim(input_path: PathLike, workdir: PathLike, sanger: bool = False) -> int:
+def run_trim(
+    input_path: PathLike,
+    workdir: PathLike,
+    sanger: bool = False,
+    *,
+    summary_tsv: PathLike | None = None,
+) -> int:
     """Trim reads and convert if needed.
 
     When ``sanger=True`` the *input_path* must point to an ``.ab1`` file or
     directory.  Those traces are converted to FASTQ before trimming.
     With ``sanger=False`` the function expects standard FASTQ input.
+    When *summary_tsv* is given, write one-line stats per file to that path.
 
     Returns 0 on success.
     """
@@ -67,12 +75,30 @@ def run_trim(input_path: PathLike, workdir: PathLike, sanger: bool = False) -> i
             shutil.copy(ab1_source, raw_ab1 / ab1_source.name)
             ab1_source = raw_ab1
         ab1_to_fastq(ab1_source, fastq_dir)
-        biopy_trim(fastq_dir, work / "qc")
+        biopy_trim(fastq_dir, work / "qc", combined_tsv=summary_tsv)
         trim_dir = work / "passed_qc_fastq"
     else:
         out_fq = work / "qc" / "trimmed.fastq"
         quality_trim(input_path, out_fq)
         trim_dir = work / "qc"
+        if summary_tsv:
+            reads = bases = qsum = 0
+            for rec in SeqIO.parse(out_fq, "fastq"):
+                ph = rec.letter_annotations["phred_quality"]
+                reads += 1
+                bases += len(rec)
+                qsum += sum(ph)
+            avg_q = qsum / bases if bases else 0
+            avg_len = bases / reads if reads else 0
+            summary_fp = Path(summary_tsv)
+            summary_fp.parent.mkdir(parents=True, exist_ok=True)
+            write_header = not summary_fp.exists()
+            with open(summary_fp, "a") as comb:
+                if write_header:
+                    comb.write("file\treads\tavg_len\tavg_q\n")
+                comb.write(
+                    f"{Path(input_path).name}\t{reads}\t{avg_len:.1f}\t{avg_q:.2f}\n"
+                )
 
     fastq_to_fasta(trim_dir, work / "qc" / "trimmed.fasta")
     L.info("Trim finished → %s", work / "qc" / "trimmed.fasta")
@@ -167,6 +193,7 @@ def run_full_pipeline(
     max_target_seqs: int = 5,
     threads: int = 4,
     metadata: Path | None = None,
+    summary_tsv: Path | None = None,
     on_stage=None,
     on_progress=None,
 ) -> dict[str, Path]:
@@ -174,7 +201,8 @@ def run_full_pipeline(
 
     *infile* may be FASTA, FASTQ, a single ``.ab1`` trace, or a directory of
     ``.ab1`` files.  Sanger mode is triggered automatically when *infile* is a
-    directory or ends with ``.ab1``.
+    directory or ends with ``.ab1``.  When *summary_tsv* is ``None`` the summary
+    is written to ``qc/trim_summary.tsv`` inside *out_dir*.
     """
 
     on_stage = on_stage or (lambda *_: None)
@@ -191,6 +219,9 @@ def run_full_pipeline(
 
     is_fasta = infile.suffix.lower() in {".fasta", ".fa", ".fna", ".fas"}
 
+    if summary_tsv is None and not is_fasta:
+        summary_tsv = out_dir / "qc" / "trim_summary.tsv"
+
     paths = {
         "trimmed_fastq": None if is_fasta else out_dir / "qc" / "trimmed.fastq",
         "trimmed_fasta": infile if is_fasta else out_dir / "qc" / "trimmed.fasta",
@@ -198,6 +229,7 @@ def run_full_pipeline(
         "hits": out_dir / "hits.tsv",
         "tax": out_dir / "hits_tax.tsv",
         "biom": out_dir / "table.biom",
+        "trim_summary": summary_tsv if not is_fasta else None,
     }
 
     n_stages = (2 if is_fasta else 4) + int(postblast)
@@ -212,7 +244,7 @@ def run_full_pipeline(
         on_stage("Trim")
 
         sanger = infile.is_dir() or infile.suffix.lower() == ".ab1"
-        run_trim(infile, out_dir, sanger=sanger)
+        run_trim(infile, out_dir, sanger=sanger, summary_tsv=summary_tsv)
 
         pct += step
         on_progress(pct)
