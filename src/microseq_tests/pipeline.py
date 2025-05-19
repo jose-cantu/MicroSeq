@@ -52,6 +52,8 @@ def run_trim(
     sanger: bool = False,
     *,
     summary_tsv: PathLike | None = None,
+    link_raw: bool = False,
+
 ) -> int:
     """Trim reads and convert if needed.
 
@@ -59,6 +61,9 @@ def run_trim(
     directory.  Those traces are converted to FASTQ before trimming.
     With ``sanger=False`` the function expects standard FASTQ input.
     When *summary_tsv* is given, write one-line stats per file to that path.
+    Set *link_raw* to ``True`` to symlink AB1 traces into ``raw_ab1`` instead of
+    copying them.
+
 
     Returns 0 on success.
     """
@@ -69,12 +74,22 @@ def run_trim(
     if sanger:
         fastq_dir = work / "raw_fastq"
         ab1_source = Path(input_path)
-        if ab1_source.is_file():
-            raw_ab1 = work / "raw_ab1"
-            raw_ab1.mkdir(parents=True, exist_ok=True)
-            shutil.copy(ab1_source, raw_ab1 / ab1_source.name)
-            ab1_source = raw_ab1
-        ab1_to_fastq(ab1_source, fastq_dir)
+        dst = work / "raw_ab1"
+        if dst.exists():
+            if dst.is_symlink() or dst.is_file():
+                dst.unlink()
+            else:
+                shutil.rmtree(dst)
+        if link_raw:
+            dst.symlink_to(ab1_source.resolve(), target_is_directory=ab1_source.is_dir())
+        else:
+            if ab1_source.is_dir():
+                shutil.copytree(ab1_source, dst, dirs_exist_ok=True)
+            else:
+                dst.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ab1_source, dst / ab1_source.name)
+        ab1_to_fastq(dst, fastq_dir)
+
         biopy_trim(fastq_dir, work / "qc", combined_tsv=summary_tsv)
         trim_dir = work / "passed_qc_fastq"
     else:
