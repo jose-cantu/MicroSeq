@@ -25,12 +25,15 @@ def ab1_folder_to_fastq(
         overwrite: bool = False,
         ) -> List[Path]:
     """
-    Convert every *.ab1 input_dir to FASTQ and write them to output_dir. 
+    Convert every ``*.ab1`` file in ``input_dir`` to FASTQ and write them to
+    ``output_dir``.  ``input_dir`` is scanned recursively, so any
+    sub‑directories containing traces are also processed.
 
     Paramteres 
     
-    input_dir : str | Path 
-        Folder containing AB1 chromatograms. 
+    input_dir : str | Path
+        Folder containing ``.ab1`` chromatograms.  Sub‑directories are
+        searched recursively.
     output_dir : str | Path 
         Where FASTQ files will be written (created if missing). 
     overwrite : bool, default False 
@@ -47,7 +50,7 @@ def ab1_folder_to_fastq(
 
     out_files: list[Path] = [] 
 
-    for ab1 in sorted(input_dir.glob("*ab1")):
+    for ab1 in sorted(input_dir.rglob("*.ab1")):
         out_fq = output_dir / f"{ab1.stem}.fastq"
         if out_fq.exists() and not overwrite:
             out_files.append(out_fq)
