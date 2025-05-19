@@ -173,8 +173,8 @@ def run_full_pipeline(
     """Run trim → FASTA merge → BLAST → taxonomy (+ optional post‑BLAST).
 
     *infile* may be FASTA, FASTQ, a single ``.ab1`` trace, or a directory of
-    ``.ab1`` files.  Sanger mode is triggered automatically when the input path
-    ends with ``.ab1``.
+    ``.ab1`` files.  Sanger mode is triggered automatically when *infile* is a
+    directory or ends with ``.ab1``.
     """
 
     on_stage = on_stage or (lambda *_: None)
@@ -210,9 +210,10 @@ def run_full_pipeline(
     if not is_fasta:
         # 1 – Trim
         on_stage("Trim")
-        run_trim(infile, out_dir, sanger=infile.suffix.lower() == ".ab1")
-        if thr and thr.isInterruptionRequested():
-            raise RuntimeError("Cancelled")
+
+        sanger = infile.is_dir() or infile.suffix.lower() == ".ab1"
+        run_trim(infile, out_dir, sanger=sanger)
+
         pct += step
         on_progress(pct)
 
