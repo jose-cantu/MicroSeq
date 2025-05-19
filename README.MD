@@ -157,7 +157,7 @@ MicroSeq’s CLI is a single entry‑point (`microseq`) with **global flags** fo
 | Flag             | Default | Purpose                                                                                                                     |
 | ---------------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `--workdir PATH` | `~/microseq_runs` | Root folder for intermediate & derived files created by the current run. A fresh folder keeps each analysis self‑contained. |
-| `--threads N`    | `1`     | How many CPU threads to give the stage (BLAST, CAP3, Trimmomatic, etc.). 2–4 threads work well on a typical laptop.                                                    |
+| `--threads N`    | `4`     | How many CPU threads to give the stage (BLAST, CAP3, Trimmomatic, etc.). 2–4 threads work well on a typical laptop.                                                    |
 | `-v`, `-vv`      | off     | `-v` = info‑level logs, `-vv` = debug.                                                                                      |
 
 ---
