@@ -189,7 +189,7 @@ def fetch_silva() -> None:
         dl(gz_url, tax_gz) 
 
         log("-> extracting SILVA taxonomy")
-        import gzip, csv 
+        import csv 
         with gzip.open(tax_gz, "rt") as fin, silva_tax.open("w") as fout: 
             w = csv.writer(fout, delimiter="\t", lineterminator="\n")
             w.writerow(["sseqid", "taxonomy"]) 
