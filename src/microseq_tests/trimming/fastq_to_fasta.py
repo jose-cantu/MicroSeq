@@ -13,9 +13,9 @@ def fastq_folder_to_fasta(input_dir: str | Path,
     """
     input_dir = Path(input_dir)
     out_fa = Path(out_fa)
-    records: Iterable = []
+    records: list = []
     for fq in sorted(input_dir.rglob("*.fastq")):
-        records = list(records) + list(SeqIO.parse(fq, "fastq"))
+        records.extend(SeqIO.parse(fq, "fastq"))
     out_fa.parent.mkdir(parents=True, exist_ok=True)
     SeqIO.write(records, out_fa, "fasta") 
     return out_fa 

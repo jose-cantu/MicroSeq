@@ -43,10 +43,11 @@ It automates everything from raw trace files (AB1) or FASTQ reads all the way to
 * **Robust logging**  – daily‑rolling or run‑ID modes; logs can live anywhere you point `MICROSEQ_LOG_DIR`.
 * **TSV normalisation** (`microseq-fix-tsv`) – convert CSV or space‑delimited tables into proper TSV.
 * **Portable**  – pure‑Python (≥3.10) + external binaries already in Conda env (BLAST+, TaxonKit, CAP3).
-* **GUI preview** (`microseq-gui`) – drag‑and‑drop queue, live log pane, progress bar.
-  The window now provides **Run QC** and **Full pipeline** buttons to execute the
-  entire workflow (trim → BLAST → taxonomy → optional BIOM generation) with a
-  single click.
+* **GUI preview** (`microseq-gui`) – drag‑and‑drop queue, live log pane, progress
+  bar with ETA.  Running QC or the full pipeline now writes
+  `qc/trim_summary.tsv` automatically. The window provides **Run QC** and
+  **Full pipeline** buttons to execute the entire workflow (trim → BLAST →
+  taxonomy → optional BIOM generation) with a single click.
 
 ---
 

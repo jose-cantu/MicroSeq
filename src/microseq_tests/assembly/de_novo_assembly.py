@@ -15,8 +15,7 @@ import logging
 L = logging.getLogger(__name__)
 
 from pathlib import Path
-import subprocess 
-import logging 
+import subprocess
 from microseq_tests.utility.utils import load_config, setup_logging 
 
 PathLike = str | Path 

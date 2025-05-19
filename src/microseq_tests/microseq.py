@@ -7,9 +7,9 @@ from microseq_tests.utility.merge_hits import merge_hits
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
 from microseq_tests.pipeline import (
-        run_ab1_to_fastq, run_fastq_to_fasta,) 
+        run_trim,
+        run_ab1_to_fastq, run_fastq_to_fasta,)
 from microseq_tests.utility.utils import setup_logging, load_config 
-from microseq_tests.trimming.quality_trim import quality_trim 
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly 
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.post_blast_analysis import run as postblast_run 
@@ -44,7 +44,8 @@ def main() -> None:
     p_trim.add_argument("--sanger", dest="sanger", action="store_true", help="Use BioPython trim for abi files Input is the AB1 folder -> convert + trim; autodetected if omitted") 
     p_trim.add_argument("--no-sanger", dest="sanger", action="store_false", help="Force FASTQ mode") 
     p_trim.set_defaults(sanger=None) # default = auto-detect in this case 
-    p_trim.add_argument("--link-raw", action="store_true", help="Symlink AB1 traces into workdir instead of copying") 
+    p_trim.add_argument("--link-raw", action="store_true", help="Symlink AB1 traces into workdir instead of copying")
+    p_trim.add_argument("--combined-tsv", metavar="TSV", help="Write trim summary TSV")
     
     # ── AB1 → FASTQ -------------------------------------------------------
     p_ab1 = sp.add_parser("ab1-to-fastq",
@@ -185,62 +186,19 @@ def main() -> None:
    # use workdir in every brnach 
     if args.cmd == "trim":
         inp = pathlib.Path(args.input)
+    
         if args.sanger is None:
             args.sanger = (inp.suffix.lower() == ".ab1") or any(inp.glob("*.ab1"))
-        
-        if args.sanger:
-            # -- preparing raw_ab1 folder copy or symlink --- prefernece for symlink here for me --- 
-            dst = workdir / "raw_ab1"
 
-            # Here you clean up leftovers from a previous run so the command is idempotent assuming you use the same directory... (rare scenario) 
-
-            if dst.exists():
-                if dst.is_symlink() or dst.is_file():
-                    dst.unlink()     # removes stale symlink or stray file 
-                else:
-                    shutil.rmtree(dst)  # removes old directory tree 
-
-            if args.link_raw:
-                # symlink handles file vs directory 
-                dst.symlink_to(inp.resolve(), target_is_directory=inp.is_dir())
-            else: 
-                # physical copy now 
-                if inp.is_dir():
-                    # copy folder into raw_ab1/ 
-                    shutil.copytree(inp, dst, dirs_exist_ok=True)
-                else: 
-                    # single AB1 file 
-                    dst.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(inp, dst / inp.name)
-            
-            # --- convert AB1 to FASTQ --------------- 
-            raw_fastq_dir = workdir / "raw_fastq"
-            ab1_folder_to_fastq(dst, raw_fastq_dir)
-
-            # --- BioPython QC trim writes to passed_qc_fastq/ ------- 
-            trim_out = workdir / "passed_qc_fastq"
-            biopy_trim.trim_folder(
-                    input_dir=raw_fastq_dir,
-                    output_dir=workdir / "qc",
-                    threads=args.threads,
-                    )
-
-            # ---- FASTQ converted to FASTA --------------------
-            fasta = fastq_folder_to_fasta(
-                    trim_out,       # here FASTQs are kept 
-                    workdir / "qc" / "trimmed.fasta" 
-                    )
-        else:
-            # --- Trimmomatic QC for regular FASTQ ---------------
-            out_fq = workdir / "qc" / "trimmed.fastq" 
-            quality_trim(args.input, out_fq, threads=args.threads)
-
-            fasta = fastq_folder_to_fasta(
-                    workdir / "qc", # contains the trimmed.fastq 
-                    workdir / "qc" / "trimmed.fasta" 
-                    )
+        run_trim(
+            inp,
+            workdir,
+            sanger=args.sanger,
+            summary_tsv=args.combined_tsv,
+            link_raw=args.link_raw,
+        )
+        fasta = workdir / "qc" / "trimmed.fasta"
         print("FASTA ready:", fasta)
-    
 
 
     elif args.cmd == "ab1-to-fastq":
