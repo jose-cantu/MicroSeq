@@ -7,4 +7,4 @@ pipeline = _imp('.pipeline', __name__) # noqa: F401
 __all__ = ['pipeline']
 
 sys.modules["microseq"] = importlib.import_module(__name__) 
-__version__ = "0.1.0-alpha2" # bump in version will update 
+__version__ = "1.0" # bump in version will update 
