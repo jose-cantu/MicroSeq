@@ -192,7 +192,12 @@ def run_full_pipeline(
 
         # 2 – Merge FASTQs to FASTA
         on_stage("Convert")
-        run_fastq_to_fasta(out_dir / "qc", paths["fasta"])
+        fastq_dir = out_dir / "qc"
+        if not any(fastq_dir.glob("*.fastq")):
+            alt = out_dir / "passed_qc_fastq"
+            if alt.exists() and any(alt.glob("*.fastq")):
+                fastq_dir = alt
+        run_fastq_to_fasta(fastq_dir, paths["fasta"])
         pct += step
         on_progress(pct)
 
