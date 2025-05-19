@@ -75,7 +75,7 @@ class Worker(QObject):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("MicroSeq GUI α") # title for it 
+        self.setWindowTitle("MicroSeq GUI v1.0") # title for it 
         self.resize(800, 520) # size of app considering also log space here 
 
         # widgets --------------------------------------------------------
@@ -85,8 +85,10 @@ class MainWindow(QMainWindow):
         browse_btn.clicked.connect(self._choose_infile)
 
         # BLAST hits TSV picker
-        self.hits_lbl = QLabel("Hits: —")
-        hits_btn = QPushButton("Browse hits…")
+        self.hits_lbl = QLabel("Hits / post-BLAST TSV:")
+        hits_btn = QPushButton("Select hits_tax.tsv for post-BLAST")
+        browse_btn.setToolTip("Pick an existing BLAST-result table hits.tsv or hits_tax.tsv to run Post-BLAST and/or make a BIOM table.") 
+
         hits_btn.clicked.connect(self._choose_hits)
 
         # label place holder and browse button wired to file picker 
