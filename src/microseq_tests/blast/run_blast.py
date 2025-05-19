@@ -1,6 +1,13 @@
 # -- src/micrseq_tests/blast/run_blast.py ---------------
 from __future__ import annotations 
-import logging, os, subprocess, shutil, re, functools, threading, time  
+import logging, os, subprocess, shutil, re, functools, threading, time
+try:
+    from PySide6.QtCore import QThread
+except Exception:  # allow running without Qt
+    class QThread:
+        @staticmethod
+        def currentThread():
+            return None
 from pathlib import Path 
 from typing import Optional, Callable 
 from Bio import SeqIO 
@@ -36,7 +43,7 @@ def _progress_tail(tmp_path: Path, total: int, callback):
 
 # db_key is the shorthand string for "gg2" or "silva" best keep it str here for future reference 
 def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
-              search_id: float = 97.0, search_qcov: float = 80.0, report_id: float = 97.0, report_qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, on_progress: Optional[Callable[[int], None]] = None, log_missing: PathLike | None = None, clean_titles: bool = False, export_sweeper: bool = False, id_normaliser: str = "strip_suffix" ) -> None: 
+              search_id: float = 97.0, search_qcov: float = 80.0, report_id: float = 97.0, report_qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, on_progress: Optional[Callable[[int], None]] = None, log_missing: PathLike | None = None, clean_titles: bool = False, export_sweeper: bool = False, id_normaliser: str = "strip_suffix" ) -> None:
     """
     Run blastn against one of the configured 16 S databases.
     You will also emit a percentage progress bar I have set to make it look more a      ppealing. =) 
@@ -52,6 +59,10 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
     log_missing 
         if given, appends isolate-ID to this file when resulting TSV contains ≤ 1 line header only -> zero hits ≥ pct_id / qcov).
     """
+    thr = QThread.currentThread()
+    if thr and thr.isInterruptionRequested():
+        raise RuntimeError("Cancelled")
+
     cfg = load_config()
     # look up DB path in config.yaml 
     try: 
@@ -132,11 +143,15 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
         args=(tmp_out, total, on_progress),
         daemon=True
         )
-    tailer.start() 
+    tailer.start()
+
+    thr = QThread.currentThread()
+    if thr and thr.isInterruptionRequested():
+        raise RuntimeError("Cancelled")
 
     try:
         proc = subprocess.Popen(
-            cmd, 
+            cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -147,9 +162,13 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
         done, next_log = 0, 5 # log every 5% incrementally ......
 
         for ln in proc.stdout:
-            if ln and not ln.startswith("#"): # data row, not BLAST banner 
-                done += 1                         # one query finished 
-                pct = int(done / total * 100) 
+            if thr and thr.isInterruptionRequested():
+                proc.terminate()
+                proc.wait()
+                raise RuntimeError("Cancelled")
+            if ln and not ln.startswith("#"): # data row, not BLAST banner
+                done += 1                         # one query finished
+                pct = int(done / total * 100)
 
                 if on_progress:                   # GUI / tqdm callback 
                     on_progress(min(pct, 99))    # keep 100% for the end 
@@ -158,7 +177,10 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
                     L.info("Progress %d %%", pct)
                     next_log += 5
 
-        rc = proc.wait() 
+        rc = proc.wait()
+        if thr and thr.isInterruptionRequested():
+            proc.terminate()
+            raise RuntimeError("Cancelled")
 
         if rc:
             raise RuntimeError(f"blastn exited with code {rc}") 
@@ -197,6 +219,8 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
         shutil.move(tmp_out, out_tsv) 
 
     L.info("BLAST finished OK -> %s", out_tsv)
+    if thr and thr.isInterruptionRequested():
+        raise RuntimeError("Cancelled")
 
     # after BLAST call finishes this here will help in cleaning 
     if clean_titles:
