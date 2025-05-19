@@ -13,7 +13,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, QObject, QThread, Signal, Slot, QMetaObject, Q_ARG
 from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
-        QHBoxLayout, QPushButton, QLabel, QTextEdit, QSpinBox, QMessageBox, QComboBox, QProgressBar   
+        QHBoxLayout, QPushButton, QLabel, QTextEdit, QSpinBox, QMessageBox, QComboBox, QProgressBar, QCheckBox   
         )
 
 # ==== MicroSeq wrappers ---------- 
@@ -110,6 +110,11 @@ class MainWindow(QMainWindow):
         self.full_btn = QPushButton("Full pipeline")
         self.qc_btn.clicked.connect(self._launch_qc)
         self.full_btn.clicked.connect(self._launch_full) 
+        
+
+        # creating a checkbox here for post blast 
+        self.biom_chk = QCheckBox("Make BIOM")
+        self.biom_chk.setChecked(False) 
 
         # lets you scroll log output and nowarp keeps long commadn lines intact 
         self.log_box = QTextEdit(readOnly=True, lineWrapMode=QTextEdit.NoWrap)
@@ -147,7 +152,8 @@ class MainWindow(QMainWindow):
         mid.addWidget(self.progress)
 
         mid.addWidget(self.qc_btn)
-        mid.addWidget(self.full_btn) 
+        mid.addWidget(self.full_btn)
+        mid.addWidget(self.biom_chk) 
         
         mid.addStretch()  # pushes Run button to the far right here  
         mid.addWidget(self.run_btn) 
@@ -270,7 +276,8 @@ class MainWindow(QMainWindow):
             run_full_pipeline,
             self._infile,
             self.db_box.currentText(),
-            postblast=False,          # Trim → Convert → BLAST → Tax
+            postblast=self.biom_chk.isChecked(),
+            metadata=None,        # Trim → Convert → BLAST → Tax
         )
     
     # ------ Run full pipeline with Post-Blast as well ------------- 
@@ -299,6 +306,7 @@ class MainWindow(QMainWindow):
         elif isinstance(result, Exception):           # Worker caught an error
             rc  = 1
             out = Path()
+            QMessageBox.warning(self, "Run failed", str(result)) 
         else:                                         # int from BLAST‑only path
             rc  = int(result)
             out = Path()
