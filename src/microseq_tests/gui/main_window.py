@@ -54,9 +54,9 @@ class Worker(QObject):
                 **self._kwargs,
             )
             self.log.emit(f"{self._fn.__name__} finished")
-        except Exception:
+        except Exception as e:
             self.log.emit(traceback.format_exc())
-            result = Exception("pipeline failed")
+            result = e
         self.finished.emit(result)   # dict | int | Exception
                  
 
@@ -114,7 +114,10 @@ class MainWindow(QMainWindow):
 
         # creating a checkbox here for post blast 
         self.biom_chk = QCheckBox("Make BIOM")
-        self.biom_chk.setChecked(False) 
+        self.biom_chk.setChecked(False)
+
+        self.meta_btn = QPushButton("Browse metadata...")
+        self.meta_btn.clicked.connect(self._choose_metadata) 
 
         # lets you scroll log output and nowarp keeps long commadn lines intact 
         self.log_box = QTextEdit(readOnly=True, lineWrapMode=QTextEdit.NoWrap)
@@ -153,7 +156,9 @@ class MainWindow(QMainWindow):
 
         mid.addWidget(self.qc_btn)
         mid.addWidget(self.full_btn)
-        mid.addWidget(self.biom_chk) 
+        mid.addWidget(self.biom_chk)
+
+        mid.addWidget(self.meta_btn) 
         
         mid.addStretch()  # pushes Run button to the far right here  
         mid.addWidget(self.run_btn) 
@@ -184,7 +189,23 @@ class MainWindow(QMainWindow):
         # stores path; updates label for user feedback 
         if path:
             self._infile = Path(path)
-            self.fasta_lbl.setText(f"FASTA / AB1: {self._infile.name}") 
+            self.fasta_lbl.setText(f"FASTA / AB1: {self._infile.name}")
+            # clean any previous metadata selection 
+            self.meta_path = None 
+            self.statusBar().clearMessage() 
+     
+    # ------- chosing metadata file -------------- 
+    def _choose_metadata(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select sample metadata",
+            str(Path.home()),
+            "Metadata files (*.csv *.tsv *.txt *.xlsx);;All files (*)"
+        )
+        if path:
+            self.meta_path = Path(path)
+            self.statusBar().showMessage(f"Metadata: {self.meta_path.name}")
+    
     
     # ---- Blast Stage Demo ------------------------------
     # guarding against accidental click 
@@ -286,13 +307,22 @@ class MainWindow(QMainWindow):
         if not self._infile:
             QMessageBox.warning(self, "No input", "Choose a file first.")
             return
+        # if user asked for BIOM but hasn't chosen metadata, abort early 
+        if self.biom_chk.isChecked() and not self.meta_path:
+            QMessageBox.warning(
+                self, "No metadata",
+                "A metadata file is required to build the BIOM table.\n"
+                "Click ‘Browse metadata…’ first or un-tick ‘Make BIOM’."
+            )
+            return
+        # launch the pipeline here 
         self._launch(
             run_full_pipeline,
             self._infile,
             self.db_box.currentText(),
-            postblast=self.biom_chk.isChecked(), # source of truth  
-            metadata=getattr(self, "meta_path", None),         # run the Post-BLAST stage too
-        )
+            postblast=self.biom_chk.isChecked(), # source of truth decide via checkbox  
+            metadata=self.meta_path,         # None or Path run the Post-BLAST stage too
+    )
 
 
     # Called when the background QThread has fully finished.
@@ -308,7 +338,17 @@ class MainWindow(QMainWindow):
         elif isinstance(result, Exception):           # Worker caught an error
             rc  = 1
             out = Path()
-            QMessageBox.warning(self, "Run failed", str(result)) 
+            # friendlier message for the "no hits" situation 
+            if "no blast hits" in str(result).lower():
+                QMessageBox.information(
+                    self, "Nothing to summarise",
+                    ("BLAST finished, but no hits met the filters.\n"
+                     "You can:\n"
+                     " lower Identity / Q-cov, or\n"
+                     "run again without the BIOM option.")
+                )
+            else:
+                QMessageBox.warning(self, "Run failed", str(result)) 
         else:                                         # int from BLAST‑only path
             rc  = int(result)
             out = Path()
@@ -349,7 +389,7 @@ class MainWindow(QMainWindow):
             self._worker.finished.connect(lambda _: self.close())
             self._thread.requestInterruption()    # politely signal
             event.ignore()                        # keep window open
-            self.log_box.append("⚠ Waiting for BLAST thread to finish…")
+            self.log_box.append("Waiting for BLAST thread to finish…")
         else:
             event.accept()
 
