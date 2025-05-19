@@ -87,7 +87,9 @@ class MainWindow(QMainWindow):
         # BLAST hits TSV picker
         self.hits_lbl = QLabel("Hits / post-BLAST TSV:")
         hits_btn = QPushButton("Select hits_tax.tsv for post-BLAST")
-        browse_btn.setToolTip("Pick an existing BLAST-result table hits.tsv or hits_tax.tsv to run Post-BLAST and/or make a BIOM table.") 
+        hits_btn.setToolTip(
+            "Pick an existing BLAST-result table hits.tsv or hits_tax.tsv to run Post-BLAST and/or make a BIOM table."
+        )
 
         hits_btn.clicked.connect(self._choose_hits)
 
@@ -205,8 +207,10 @@ class MainWindow(QMainWindow):
         self.hits_path: Optional[Path] = None
         self.meta_path: Optional[Path] = None
         self._current_stage: str = ""
-        setup_logging(level=logging.INFO) # file + console stderr
-        logging.getLogger().handlers.append(_QtHandler(self.log_box)) # appended to log_box
+        setup_logging(level=logging.INFO)  # file + console stderr
+        root_logger = logging.getLogger()
+        self._qt_handler = _QtHandler(self.log_box)
+        root_logger.addHandler(self._qt_handler)
     
     # ---- file picker --------------------------
     def _choose_infile(self):
@@ -535,6 +539,10 @@ class MainWindow(QMainWindow):
             self.log_box.append("Waiting for BLAST thread to finish…")
         else:
             event.accept()
+            root = logging.getLogger()
+            if getattr(self, "_qt_handler", None) in root.handlers:
+                root.removeHandler(self._qt_handler)
+                self._qt_handler = None
 
 
 # Custom QT Logging Handler --------------------------------
