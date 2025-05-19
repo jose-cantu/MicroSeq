@@ -141,33 +141,36 @@ def run_full_pipeline(
     out_dir.mkdir(parents=True, exist_ok=True)
     on_progress(0)
 
+    is_fasta = infile.suffix.lower() in {".fasta", ".fa", ".fna", ".fas"}
+
     paths = {
-        "trimmed_fastq": out_dir / "qc" / "trimmed.fastq",
-        "trimmed_fasta": out_dir / "qc" / "trimmed.fasta",
-        "fasta": out_dir / "reads.fasta",
+        "trimmed_fastq": None if is_fasta else out_dir / "qc" / "trimmed.fastq",
+        "trimmed_fasta": infile if is_fasta else out_dir / "qc" / "trimmed.fasta",
+        "fasta": infile if is_fasta else out_dir / "reads.fasta",
         "hits": out_dir / "hits.tsv",
         "tax": out_dir / "hits_tax.tsv",
         "biom": out_dir / "table.biom",
     }
 
-    n_stages = 4 + int(postblast)
+    n_stages = (2 if is_fasta else 4) + int(postblast)
     step = 100 // n_stages
     pct = 0
 
     def subprog(off):
         return lambda p: on_progress(off + p * step // 100)
 
-    # 1 – Trim
-    on_stage("Trim")
-    run_trim(infile, out_dir, sanger=infile.suffix.lower() == ".ab1")
-    pct += step
-    on_progress(pct)
+    if not is_fasta:
+        # 1 – Trim
+        on_stage("Trim")
+        run_trim(infile, out_dir, sanger=infile.suffix.lower() == ".ab1")
+        pct += step
+        on_progress(pct)
 
-    # 2 – Merge FASTQs to FASTA
-    on_stage("Convert")
-    run_fastq_to_fasta(out_dir / "qc", paths["fasta"])
-    pct += step
-    on_progress(pct)
+        # 2 – Merge FASTQs to FASTA
+        on_stage("Convert")
+        run_fastq_to_fasta(out_dir / "qc", paths["fasta"])
+        pct += step
+        on_progress(pct)
 
     # 3 – BLAST
     on_stage("BLAST")
