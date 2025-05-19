@@ -81,7 +81,7 @@ class MainWindow(QMainWindow):
         # widgets --------------------------------------------------------
         self.fasta_lbl = QLabel("Input: —")
         browse_btn = QPushButton("Browse..")
-        browse_btn.setToolTip("Select a FASTA/FASTQ/AB1 file or a folder")
+        browse_btn.setToolTip("Select FASTA/FASTQ/AB1 file(s) or a folder")
         browse_btn.clicked.connect(self._choose_infile)
 
         # label place holder and browse button wired to file picker 
@@ -192,24 +192,29 @@ class MainWindow(QMainWindow):
     
     # ---- file picker --------------------------
     def _choose_infile(self):
-        """Let the user pick an input file *or* a directory."""
-        # first offer regular file selection
-        path, _ = QFileDialog.getOpenFileName(
+        """Let the user pick one or more files, or a directory of AB1 traces."""
+
+        paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "Select FASTA/FASTQ/AB1",
+            "Select FASTA/FASTQ/AB1 file(s)",
             str(Path.home()),
             "Seq files (*.fasta *.fastq *.ab1)"
         )
-        # if no file was chosen, fall back to directory mode
-        if not path:
-            path = QFileDialog.getExistingDirectory(
+
+        # User cancelled – offer directory chooser instead
+        if not paths:
+            dir_path = QFileDialog.getExistingDirectory(
                 self,
                 "Select input folder",
                 str(Path.home()),
             )
+            if dir_path:
+                self._infile = Path(dir_path)
+        else:
+            # only the first file is used by the pipeline
+            self._infile = Path(paths[0])
 
-        if path:
-            self._infile = Path(path)
+        if self._infile:
             label = (
                 f"Input folder: {self._infile.name}"
                 if self._infile.is_dir()
@@ -237,7 +242,7 @@ class MainWindow(QMainWindow):
     # guarding against accidental click 
     def _launch_blast(self):
         if not self._infile:
-            QMessageBox.warning(self, "No input", "Choose a file first.")
+            QMessageBox.warning(self, "No input", "Choose a file or folder first.")
             return
 
         self.progress.setValue(0)  # resets progress bar during each run 
@@ -317,7 +322,7 @@ class MainWindow(QMainWindow):
     # -------- Trim -> Convert -> BLAST -> Taxonomy ---------------
     def _launch_qc(self):
         if not self._infile:
-            QMessageBox.warning(self, "No input", "Choose a file first.")
+            QMessageBox.warning(self, "No input", "Choose a file or folder first.")
             return
         self._launch(
             run_full_pipeline,
@@ -330,7 +335,7 @@ class MainWindow(QMainWindow):
     # ------ Run full pipeline with Post-Blast as well ------------- 
     def _launch_full(self):
         if not self._infile:
-            QMessageBox.warning(self, "No input", "Choose a file first.")
+            QMessageBox.warning(self, "No input", "Choose a file or folder first.")
             return
         # if user asked for BIOM but hasn't chosen metadata, abort early 
         if self.biom_chk.isChecked() and not self.meta_path:
