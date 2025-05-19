@@ -115,6 +115,9 @@ class MainWindow(QMainWindow):
         # here you just run blast ....
         self.run_btn = QPushButton("Run Blast")
         self.run_btn.clicked.connect(self._launch_blast)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self._cancel_run)
 
         # here you click to run QC or full pipeline 
         self.qc_btn = QPushButton("Run QC")
@@ -171,8 +174,9 @@ class MainWindow(QMainWindow):
 
         mid.addWidget(self.meta_btn) 
         
-        mid.addStretch()  # pushes Run button to the far right here  
-        mid.addWidget(self.run_btn) 
+        mid.addStretch()  # pushes Run button to the far right here
+        mid.addWidget(self.cancel_btn)
+        mid.addWidget(self.run_btn)
 
         # vertical stack picker row, settings row, then logpane expands 
         outer = QVBoxLayout()
@@ -258,6 +262,7 @@ class MainWindow(QMainWindow):
         hits_path = self._infile.with_suffix(".hits.tsv")
 
         self.run_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
         self.log_box.append(f"\n▶ BLAST {self._infile.name} -> {hits_path.name}")
 
         # worker and thread wiring -------------------
@@ -304,6 +309,7 @@ class MainWindow(QMainWindow):
         self.progress.setValue(0)
         for b in (self.qc_btn, self.full_btn, self.run_btn):
             b.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
 
         worker = Worker(fn, *args, **kw)
         thread = QThread(self)
@@ -357,9 +363,17 @@ class MainWindow(QMainWindow):
             run_full_pipeline,
             self._infile,
             self.db_box.currentText(),
-            postblast=self.biom_chk.isChecked(), # source of truth decide via checkbox  
+            postblast=self.biom_chk.isChecked(), # source of truth decide via checkbox
             metadata=self.meta_path,         # None or Path run the Post-BLAST stage too
     )
+
+
+    def _cancel_run(self):
+        """Request interruption of the running worker thread."""
+        if getattr(self, "_thread", None) and self._thread.isRunning():
+            self._thread.requestInterruption()
+            self.cancel_btn.setEnabled(False)
+            self.log_box.append("Cancelling…")
 
 
     # Called when the background QThread has fully finished.
@@ -372,6 +386,9 @@ class MainWindow(QMainWindow):
         if isinstance(result, dict):                  # full‑pipeline success
             rc  = 0
             out = result.get("tax", Path())           # pick any key to show
+        elif isinstance(result, RuntimeError) and str(result) == "Cancelled":
+            rc  = None
+            out = Path()
         elif isinstance(result, Exception):           # Worker caught an error
             rc  = 1
             out = Path()
@@ -391,7 +408,10 @@ class MainWindow(QMainWindow):
             out = Path()
 
         # log + optional dialog -------------------------------------
-        msg = "Success" if rc == 0 else f"Failed (exit {rc})"
+        if rc is None:
+            msg = "Cancelled"
+        else:
+            msg = "Success" if rc == 0 else f"Failed (exit {rc})"
         self.log_box.append(f"● {msg}\n")
 
         if rc == 0 and out:
@@ -404,6 +424,7 @@ class MainWindow(QMainWindow):
         # re‑enable buttons -----------------------------------------
         for b in (self.qc_btn, self.full_btn, self.run_btn):
             b.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
 
         # safe Qt clean‑up ------------------------------------------
         if self._worker:
