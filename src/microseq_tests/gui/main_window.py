@@ -30,7 +30,7 @@ from microseq_tests.utility.utils import setup_logging, load_config
 # Worker class ---------------- 
 class Worker(QObject):
     """Background runner living in its own QThread.""" 
-    finished = Signal(int) # exit-code 0 = success 
+    finished = Signal(object) # exit-code 0 = success 
     log = Signal(str) # text lines for log 
     progress = Signal(int)
     status = Signal(str) # emits TRIM, BLASt etc... 
@@ -46,18 +46,19 @@ class Worker(QObject):
     @Slot() # design to warn if any errors occur 
     def run(self):
         try:
-            # announce start in the log pane 
             self.log.emit(f"{self._fn.__name__} started")
-
-
-            rc = self._fn(*self._args, on_stage=self.status.emit, on_progress=self.progress.emit, **self._kwargs) # adjusted to one source of truth here so progress bar is queued to run_blast actual run 
-
-            self.log.emit(f"{self._fn.__name__} finished rc={rc}") 
-
+            result = self._fn(
+                *self._args,
+                on_stage=self.status.emit,
+                on_progress=self.progress.emit,
+                **self._kwargs,
+            )
+            self.log.emit(f"{self._fn.__name__} finished")
         except Exception:
             self.log.emit(traceback.format_exc())
-            rc = 1 
-        self.finished.emit(rc) 
+            result = Exception("pipeline failed")
+        self.finished.emit(result)   # dict | int | Exception
+                 
 
 
 # ---- Main Window Constructor 
@@ -217,8 +218,11 @@ class MainWindow(QMainWindow):
         worker.log.connect(self.log_box.append)
         worker.progress.connect(self.progress.setValue) 
         thread.started.connect(worker.run)
-        worker.finished.connect(lambda rc: self._done(rc, hits_path))
-        worker.finished.connect(thread.quit)
+        # remember results (int0 so _done can inspect it 
+        worker.finished.connect(lambda r: setattr(self, "_last_result", r)) 
+
+        worker.finished.connect(thread.quit) 
+        thread.finished.connect(self._done) 
 
         # keep references so closeEvent can see them 
         self._worker = worker 
@@ -242,9 +246,14 @@ class MainWindow(QMainWindow):
 
         worker.progress.connect(self.progress.setValue)
         worker.status.connect(self.statusBar().showMessage)
-        worker.log.connect(self.log_box.append)
-        worker.finished.connect(lambda rc: self._done(rc, Path()))
-        worker.finished.connect(thread.quit)
+        worker.log.connect(self.log_box.append) 
+        # remember the result object 
+        def _remember(r):
+            self._last_result = r 
+        worker.finished.connect(_remember) 
+
+        worker.finished.connect(thread.quit) # ask thread to exit 
+        thread.finished.connect(self._done) # run _done when thread is gone 
 
         self._worker = worker
         self._thread = thread
@@ -277,33 +286,49 @@ class MainWindow(QMainWindow):
         )
 
 
-    # Callback -------------------------
-    def _done(self, rc: int, out: Path):
-        # appends outcome indicator to log 
+    # Called when the background QThread has fully finished.
+    # Read self._last_result (set in _launch / _launch_blast),
+    # decide whether the run was a success, update the GUI, and
+    # clean up Worker + QThread objects.
+    def _done(self):
+        # interpret the saved result --------------------------------
+        result = getattr(self, "_last_result", 1)     # default = error
+        if isinstance(result, dict):                  # full‑pipeline success
+            rc  = 0
+            out = result.get("tax", Path())           # pick any key to show
+        elif isinstance(result, Exception):           # Worker caught an error
+            rc  = 1
+            out = Path()
+        else:                                         # int from BLAST‑only path
+            rc  = int(result)
+            out = Path()
+
+        # log + optional dialog -------------------------------------
         msg = "Success" if rc == 0 else f"Failed (exit {rc})"
-        self.log_box.append(f"● {msg}\n") 
-        # dialog only on success; always re-enable run button 
-        if rc == 0:
-            QMessageBox.information(self, "Pipeline finished",
-                                    f"Last output file:\n{out}" 
-                                    if out else "Pipeline completed")
+        self.log_box.append(f"● {msg}\n")
 
-        # wait until worker thread has fully stopped 
-        if self._thread:
-            self._thread.wait() # -- block a few ms 
+        if rc == 0 and out:
+            QMessageBox.information(
+                self,
+                "Pipeline finished",
+                f"Last output file:\n{out}"
+            )
 
-        # re-enable all action buttons now that the job is done 
+        # re‑enable buttons -----------------------------------------
         for b in (self.qc_btn, self.full_btn, self.run_btn):
             b.setEnabled(True)
 
-        # let Qt delete the C++ wrappers after pending events are processed
+        # safe Qt clean‑up ------------------------------------------
         if self._worker:
             self._worker.deleteLater()
         if self._thread:
             self._thread.deleteLater()
-
         self._worker = None
-        self._thread = None 
+        self._thread = None
+
+
+
+    
     # closeEvent ----------------------------
     def closeEvent(self, event):
         """
