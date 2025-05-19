@@ -21,7 +21,7 @@ package-dir = {"" = "src"}     # tells setuptools hey my code lives here in src/
 license-files = [ 
    "LICENSE/*"] 
 
-[tools.setuptools.packages.find]
+[tool.setuptools.packages.find]
 where = ["src"]    # find all packages unders src/
 
 [project.scripts]

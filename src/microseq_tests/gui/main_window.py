@@ -3,6 +3,8 @@
 from __future__ import annotations 
 import logging
 L = logging.getLogger(__name__)
+import os 
+os.environ.setdefault("QT_QPA_PLATFORM", "xcb")   # force X11 backend
 
 import sys, logging, traceback, subprocess, shlex  
 from pathlib import Path 
@@ -21,6 +23,7 @@ from microseq_tests.pipeline import (
         run_assembly,
         run_add_tax,
         run_postblast,
+        run_full_pipeline, 
         )
 from microseq_tests.utility.utils import setup_logging, load_config 
 
@@ -29,7 +32,8 @@ class Worker(QObject):
     """Background runner living in its own QThread.""" 
     finished = Signal(int) # exit-code 0 = success 
     log = Signal(str) # text lines for log 
-    progress = Signal(int) 
+    progress = Signal(int)
+    status = Signal(str) # emits TRIM, BLASt etc... 
 
     # Which stage here to run and its kwargs are injected at construction 
     def __init__(self, fn, *args, **kwargs):
@@ -42,10 +46,13 @@ class Worker(QObject):
     @Slot() # design to warn if any errors occur 
     def run(self):
         try:
-            # --------- live banner so GUI shows immediate activity -- 
-            L.info("▶ Starting BLAST…")
-            rc = self._fn(*self._args, **self._kwargs) # adjusted to one source of truth here so progress bar is queued to run_blast actual run 
-            L.info("✔ BLAST finished with rc=%s", rc)
+            # announce start in the log pane 
+            self.log.emit(f"{self._fn.__name__} started")
+
+
+            rc = self._fn(*self._args, on_stage=self.status.emit, on_progress=self.progress.emit, **self._kwargs) # adjusted to one source of truth here so progress bar is queued to run_blast actual run 
+
+            self.log.emit(f"{self._fn.__name__} finished rc={rc}") 
 
         except Exception:
             self.log.emit(traceback.format_exc())
@@ -97,6 +104,12 @@ class MainWindow(QMainWindow):
         self.run_btn = QPushButton("Run Blast")
         self.run_btn.clicked.connect(self._launch_blast)
 
+        # here you click to run QC or full pipeline 
+        self.qc_btn = QPushButton("Run QC")
+        self.full_btn = QPushButton("Full pipeline")
+        self.qc_btn.clicked.connect(self._launch_qc)
+        self.full_btn.clicked.connect(self._launch_full) 
+
         # lets you scroll log output and nowarp keeps long commadn lines intact 
         self.log_box = QTextEdit(readOnly=True, lineWrapMode=QTextEdit.NoWrap)
 
@@ -130,7 +143,10 @@ class MainWindow(QMainWindow):
         mid.addWidget(QLabel("Threads"))
         mid.addWidget(self.threads_spin) 
 
-        mid.addWidget(self.progress) 
+        mid.addWidget(self.progress)
+
+        mid.addWidget(self.qc_btn)
+        mid.addWidget(self.full_btn) 
         
         mid.addStretch()  # pushes Run button to the far right here  
         mid.addWidget(self.run_btn) 
@@ -155,7 +171,7 @@ class MainWindow(QMainWindow):
 # returns path string and intial dir = home filters removes other file types
         path, _ = QFileDialog.getOpenFileName(
                 self, "Select FASTA/FASTQ/AB1", 
-                str(Path.home()), "Seq files (*.fasta *.fa *.ab1)"
+                str(Path.home()), "Seq files (*.fasta *.fastq *.ab1)"
                 )
         # stores path; updates label for user feedback 
         if path:
@@ -212,6 +228,54 @@ class MainWindow(QMainWindow):
         self.id_spin.value(), self.qcov_spin.value(),
         self.hits_spin.value(), self.threads_spin.value(), flush=True)
         thread.start() 
+    
+    # ---------- generic launcher for QC / full pipeline -------------------
+    def _launch(self, fn, *args, **kw):
+        """Start `fn` inside a Worker+QThread and wire its signals to the GUI."""
+        self.progress.setValue(0)
+        for b in (self.qc_btn, self.full_btn, self.run_btn):
+            b.setEnabled(False)
+
+        worker = Worker(fn, *args, **kw)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+
+        worker.progress.connect(self.progress.setValue)
+        worker.status.connect(self.statusBar().showMessage)
+        worker.log.connect(self.log_box.append)
+        worker.finished.connect(lambda rc: self._done(rc, Path()))
+        worker.finished.connect(thread.quit)
+
+        self._worker = worker
+        self._thread = thread
+        thread.started.connect(worker.run)
+        thread.start()
+    
+
+    # -------- Trim -> Convert -> BLAST -> Taxonomy ---------------
+    def _launch_qc(self):
+        if not self._infile:
+            QMessageBox.warning(self, "No input", "Choose a file first.")
+            return
+        self._launch(
+            run_full_pipeline,
+            self._infile,
+            self.db_box.currentText(),
+            postblast=False,          # Trim → Convert → BLAST → Tax
+        )
+    
+    # ------ Run full pipeline with Post-Blast as well ------------- 
+    def _launch_full(self):
+        if not self._infile:
+            QMessageBox.warning(self, "No input", "Choose a file first.")
+            return
+        self._launch(
+            run_full_pipeline,
+            self._infile,
+            self.db_box.currentText(),
+            postblast=True,           # run the Post-BLAST stage too
+        )
+
 
     # Callback -------------------------
     def _done(self, rc: int, out: Path):
@@ -220,9 +284,24 @@ class MainWindow(QMainWindow):
         self.log_box.append(f"● {msg}\n") 
         # dialog only on success; always re-enable run button 
         if rc == 0:
-            QMessageBox.information(self, "BLAST finished",
-                                    f"Hits table written:\n{out}")
-        self.run_btn.setEnabled(True)
+            QMessageBox.information(self, "Pipeline finished",
+                                    f"Last output file:\n{out}" 
+                                    if out else "Pipeline completed")
+
+        # wait until worker thread has fully stopped 
+        if self._thread:
+            self._thread.wait() # -- block a few ms 
+
+        # re-enable all action buttons now that the job is done 
+        for b in (self.qc_btn, self.full_btn, self.run_btn):
+            b.setEnabled(True)
+
+        # let Qt delete the C++ wrappers after pending events are processed
+        if self._worker:
+            self._worker.deleteLater()
+        if self._thread:
+            self._thread.deleteLater()
+
         self._worker = None
         self._thread = None 
     # closeEvent ----------------------------
