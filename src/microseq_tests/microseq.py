@@ -49,8 +49,10 @@ def main() -> None:
     # ── AB1 → FASTQ -------------------------------------------------------
     p_ab1 = sp.add_parser("ab1-to-fastq",
                           help="Convert ABI chromatograms to FASTQ")
-    p_ab1.add_argument("-i", "--input_dir",  required=True, metavar="DIR",
-                       help="Folder containing *.ab1 files")
+    p_ab1.add_argument(
+        "-i", "--input_dir", required=True, metavar="DIR",
+        help="Folder containing *.ab1 files; sub-directories are scanned recursively",
+    )
     p_ab1.add_argument("-o", "--output_dir", required=True, metavar="DIR",
                        help="Folder to write *.fastq files")
     p_ab1.add_argument("--overwrite", action="store_true",
@@ -59,8 +61,10 @@ def main() -> None:
     # ── FASTQ → FASTA -----------------------------------------------------
     p_fq = sp.add_parser("fastq-to-fasta",
                          help="Merge all FASTQ in a folder into one FASTA")
-    p_fq.add_argument("-i", "--input_dir",    required=True, metavar="DIR",
-                      help="Folder with *.fastq / *.fq")
+    p_fq.add_argument(
+        "-i", "--input_dir", required=True, metavar="DIR",
+        help="Folder with *.fastq / *.fq; scanned recursively",
+    )
     p_fq.add_argument("-o", "--output_fasta", required=True, metavar="FASTA",
                       help="Output FASTA file path") 
     

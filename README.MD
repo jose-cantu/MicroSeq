@@ -192,13 +192,13 @@ Below is an index of every sub‑command with a one‑line summary.  Click the �
 
 | Flag                    | Required | Example                                  |
 | ----------------------- | -------- | ---------------------------------------- |
-| `-i / --input_dir DIR`  | ✓        | `raw_traces/`                            |
+| `-i / --input_dir DIR`  | ✓        | `raw_traces/` (recurses)                            |
 | `-o / --output_dir DIR` | ✓        | `fastq/`                                 |
 | `--overwrite`           |          | Re‑convert even if FASTQs already exist. |
 
 | Flag                       | Required | Example            |
 | -------------------------- | -------- | ------------------ |
-| `-i / --input_dir DIR`     | ✓        | `qc/`              |
+| `-i / --input_dir DIR`     | ✓        | `qc/` (recurses)   |
 | `-o / --output_fasta PATH` | ✓        | `qc/trimmed.fasta` |
 
 | Flag                 | Required | Example            |
