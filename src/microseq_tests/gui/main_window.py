@@ -115,6 +115,9 @@ class MainWindow(QMainWindow):
         # here you just run blast ....
         self.run_btn = QPushButton("Run Blast")
         self.run_btn.clicked.connect(self._launch_blast)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self._cancel_run)
 
         # here you click to run QC or full pipeline 
         self.qc_btn = QPushButton("Run QC")
@@ -171,8 +174,9 @@ class MainWindow(QMainWindow):
 
         mid.addWidget(self.meta_btn) 
         
-        mid.addStretch()  # pushes Run button to the far right here  
-        mid.addWidget(self.run_btn) 
+        mid.addStretch()  # pushes Run button to the far right here
+        mid.addWidget(self.cancel_btn)
+        mid.addWidget(self.run_btn)
 
         # vertical stack picker row, settings row, then logpane expands 
         outer = QVBoxLayout()
@@ -192,16 +196,20 @@ class MainWindow(QMainWindow):
     
     # ---- file picker --------------------------
     def _choose_infile(self):
+
         """Select FASTA/FASTQ/AB1 file(s) or a folder of traces."""
+
 
         paths, _ = QFileDialog.getOpenFileNames(
             self,
             "Select FASTA/FASTQ/AB1 file(s)",
             str(Path.home()),
+
             "Seq files (*.fasta *.fastq *.ab1);;All files (*)",
         )
 
         # If the user cancelled, offer a directory chooser instead
+
         if not paths:
             dir_path = QFileDialog.getExistingDirectory(
                 self,
@@ -211,14 +219,16 @@ class MainWindow(QMainWindow):
             if dir_path:
                 self._infile = Path(dir_path)
         else:
+
             # multi-file selection is allowed but only the first file is used
             self._infile = Path(paths[0])
+
 
         if self._infile:
             label = (
                 f"Input folder: {self._infile.name}"
                 if self._infile.is_dir()
-                else f"FASTA / AB1: {self._infile.name}"
+                else f"Input file: {self._infile.name}"
             )
             self.fasta_lbl.setText(label)
             # clean any previous metadata selection
@@ -251,6 +261,7 @@ class MainWindow(QMainWindow):
         hits_path = self._infile.with_suffix(".hits.tsv")
 
         self.run_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
         self.log_box.append(f"\n▶ BLAST {self._infile.name} -> {hits_path.name}")
 
         # worker and thread wiring -------------------
@@ -297,6 +308,7 @@ class MainWindow(QMainWindow):
         self.progress.setValue(0)
         for b in (self.qc_btn, self.full_btn, self.run_btn):
             b.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
 
         worker = Worker(fn, *args, **kw)
         thread = QThread(self)
@@ -350,9 +362,17 @@ class MainWindow(QMainWindow):
             run_full_pipeline,
             self._infile,
             self.db_box.currentText(),
-            postblast=self.biom_chk.isChecked(), # source of truth decide via checkbox  
+            postblast=self.biom_chk.isChecked(), # source of truth decide via checkbox
             metadata=self.meta_path,         # None or Path run the Post-BLAST stage too
     )
+
+
+    def _cancel_run(self):
+        """Request interruption of the running worker thread."""
+        if getattr(self, "_thread", None) and self._thread.isRunning():
+            self._thread.requestInterruption()
+            self.cancel_btn.setEnabled(False)
+            self.log_box.append("Cancelling…")
 
 
     # Called when the background QThread has fully finished.
@@ -365,6 +385,9 @@ class MainWindow(QMainWindow):
         if isinstance(result, dict):                  # full‑pipeline success
             rc  = 0
             out = result.get("tax", Path())           # pick any key to show
+        elif isinstance(result, RuntimeError) and str(result) == "Cancelled":
+            rc  = None
+            out = Path()
         elif isinstance(result, Exception):           # Worker caught an error
             rc  = 1
             out = Path()
@@ -384,7 +407,10 @@ class MainWindow(QMainWindow):
             out = Path()
 
         # log + optional dialog -------------------------------------
-        msg = "Success" if rc == 0 else f"Failed (exit {rc})"
+        if rc is None:
+            msg = "Cancelled"
+        else:
+            msg = "Success" if rc == 0 else f"Failed (exit {rc})"
         self.log_box.append(f"● {msg}\n")
 
         if rc == 0 and out:
@@ -397,6 +423,7 @@ class MainWindow(QMainWindow):
         # re‑enable buttons -----------------------------------------
         for b in (self.qc_btn, self.full_btn, self.run_btn):
             b.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
 
         # safe Qt clean‑up ------------------------------------------
         if self._worker:

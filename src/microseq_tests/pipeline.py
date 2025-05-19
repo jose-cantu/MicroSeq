@@ -8,6 +8,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Union, Sequence
 import logging
+try:
+    from PySide6.QtCore import QThread
+except Exception:  # allow use without PySide
+    class QThread:
+        @staticmethod
+        def currentThread():
+            return None
 import shutil
 
 # pull the existing implementation functions
@@ -39,8 +46,11 @@ L = logging.getLogger(__name__)
 
 # ───────────────────────────────────────────────────────── trimming
 def run_trim(input_path: PathLike, workdir: PathLike, sanger: bool = False) -> int:
-    """
-    QC-trim FASTQ or convert+trim an AB1 folder.
+    """Trim reads and convert if needed.
+
+    When ``sanger=True`` the *input_path* must point to an ``.ab1`` file or
+    directory.  Those traces are converted to FASTQ before trimming.
+    With ``sanger=False`` the function expects standard FASTQ input.
 
     Returns 0 on success.
     """
@@ -86,6 +96,10 @@ def run_blast_stage(
     threads: int = 1,
     on_progress=None,
 ) -> int:
+    thr = QThread.currentThread()
+    if thr and thr.isInterruptionRequested():
+        raise RuntimeError("Cancelled")
+
     run_blast(
         fasta_in,
         db_key,
@@ -96,6 +110,8 @@ def run_blast_stage(
         threads=threads,
         on_progress=on_progress,
     )
+    if thr and thr.isInterruptionRequested():
+        raise RuntimeError("Cancelled")
     return 0
 
 
@@ -163,6 +179,9 @@ def run_full_pipeline(
 
     on_stage = on_stage or (lambda *_: None)
     on_progress = on_progress or (lambda *_: None)
+    thr = QThread.currentThread()
+    if thr and thr.isInterruptionRequested():
+        raise RuntimeError("Cancelled")
 
     if out_dir is None:
         stem = infile.with_suffix("").name
@@ -191,8 +210,10 @@ def run_full_pipeline(
     if not is_fasta:
         # 1 – Trim
         on_stage("Trim")
+
         sanger = infile.is_dir() or infile.suffix.lower() == ".ab1"
         run_trim(infile, out_dir, sanger=sanger)
+
         pct += step
         on_progress(pct)
 
@@ -204,6 +225,8 @@ def run_full_pipeline(
             if alt.exists() and any(alt.glob("*.fastq")):
                 fastq_dir = alt
         run_fastq_to_fasta(fastq_dir, paths["fasta"])
+        if thr and thr.isInterruptionRequested():
+            raise RuntimeError("Cancelled")
         pct += step
         on_progress(pct)
 
@@ -219,6 +242,8 @@ def run_full_pipeline(
         threads=threads,
         on_progress=subprog(pct),
     )
+    if thr and thr.isInterruptionRequested():
+        raise RuntimeError("Cancelled")
     pct += step
     on_progress(pct)
 
@@ -228,6 +253,8 @@ def run_full_pipeline(
     tax_fp = Path(expand_db_path(tax_template))
     on_stage("Taxonomy")
     run_add_tax(paths["hits"], tax_fp, paths["tax"])
+    if thr and thr.isInterruptionRequested():
+        raise RuntimeError("Cancelled")
     pct += step
     on_progress(pct)
 
@@ -237,6 +264,8 @@ def run_full_pipeline(
             raise ValueError("metadata file required for postblast stage")
         on_stage("Post-BLAST")
         run_postblast(paths["tax"], metadata, paths["biom"])
+        if thr and thr.isInterruptionRequested():
+            raise RuntimeError("Cancelled")
         pct += step
         on_progress(pct)
 
