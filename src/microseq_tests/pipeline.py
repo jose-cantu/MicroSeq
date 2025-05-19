@@ -165,7 +165,7 @@ def run_full_pipeline(
     identity: int = 97,
     qcov: int = 80,
     max_target_seqs: int = 5,
-    threads: int = 1,
+    threads: int = 4,
     metadata: Path | None = None,
     on_stage=None,
     on_progress=None,

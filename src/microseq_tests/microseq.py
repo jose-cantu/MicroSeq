@@ -32,7 +32,7 @@ def main() -> None:
     # adding global flags here ......
     ap.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}", help="Show me the current Version of MicroSeq and exit") 
     ap.add_argument("--workdir", default=cfg.get("default_workdir","data"), help="Root folder for intermediate outputs (default: ./data) note: Yaml is placed as a 2ndary place for a shared repo project which can you modify and change without using workdir flag otherwise use --workdir to point where you want to set up your individual project")
-    ap.add_argument("--threads", type=int, default=1, 
+    ap.add_argument("--threads", type=int, default=4,
                     help="CPU threads for parallel stages")
     ap.add_argument("-v", "--verbose", action="count", default=0, help="-v: info, -vv: use for debugging") 
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -84,7 +84,7 @@ def main() -> None:
     p_blast.add_argument("--max_target_seqs", type=int, default=5, help="How many DB hits to retain per query (passed to BLAST")
     p_blast.add_argument("--log-missing", metavar="PATH", help="Append sample IDs that yield zero hits to this file for review.")
     p_blast.add_argument("--clean-titles", action="store_true", help="Strip the accession & extra fields from stitle," "leaves a tidy Genus-Species handy label {use for SILVA & NCBI DB not necessary for GG2}")
-    p_blast.add_argument("--threads", type=int, default=1, help="CPU threads to pass to blastn (-num_threads)")
+    p_blast.add_argument("--threads", type=int, default=4, help="CPU threads to pass to blastn (-num_threads)")
     p_blast.add_argument("--relaxed", action="store_true", help="Run BLAST at loose cutoffs then report at " "--identity/--qcov") 
     p_blast.add_argument("--relaxed-id", type=float, default=80.0, help="Search percent-identity when --relaxed (default 80)") 
     p_blast.add_argument("--relaxed-qcov", type=float, default=0.0, help="Search qcov_hsp_perc when --relaxed (default 0)")

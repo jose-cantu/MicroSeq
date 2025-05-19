@@ -7,7 +7,7 @@ import os
 import inspect 
 os.environ.setdefault("QT_QPA_PLATFORM", "xcb")   # force X11 backend
 
-import sys, logging, traceback, subprocess, shlex  
+import sys, logging, traceback, subprocess, shlex, time
 from pathlib import Path 
 from typing import Optional 
 
@@ -97,7 +97,7 @@ class MainWindow(QMainWindow):
 
         self.threads_spin = QSpinBox()
         self.threads_spin.setRange(1, 32)
-        self.threads_spin.setValue(1)
+        self.threads_spin.setValue(4)
         self.threads_spin.setSuffix(" CPU")
 
         # ----- alignment coverage (% of query aligned) 
@@ -202,8 +202,9 @@ class MainWindow(QMainWindow):
         self._infile: Optional[Path] = None
         self.hits_path: Optional[Path] = None
         self.meta_path: Optional[Path] = None
-        setup_logging(level=logging.INFO) # file + console stderr 
-        logging.getLogger().handlers.append(_QtHandler(self.log_box)) # appended to log_box 
+        self._current_stage: str = ""
+        setup_logging(level=logging.INFO) # file + console stderr
+        logging.getLogger().handlers.append(_QtHandler(self.log_box)) # appended to log_box
     
     # ---- file picker --------------------------
     def _choose_infile(self):
@@ -292,16 +293,24 @@ class MainWindow(QMainWindow):
         worker = Worker(
                 run_blast_stage,
                 self._infile,
-                self.db_box.currentText(),  # default DB key selection 
+                self.db_box.currentText(),  # default DB key selection
                 hits_path,
                 identity=self.id_spin.value(),
                 qcov=self.qcov_spin.value(),
                 max_target_seqs=self.hits_spin.value(),
                 threads=self.threads_spin.value(),
-                # prgress bar -> Worker.progress -> GUI thread 
                 )
-        # now wire the real callback 
-        worker._kwargs["on_progress"] = worker.progress.emit
+        t0 = time.time()
+
+        def _progress_with_eta(pct: int) -> None:
+            self.progress.setValue(pct)
+            if pct:
+                eta = (time.time() - t0) * (100 - pct) / pct
+                self.statusBar().showMessage(
+                    f"BLAST {pct}% – ETA {int(eta//60)} m {int(eta%60)} s"
+                )
+
+        worker.progress.connect(_progress_with_eta)
         # injecting wrapper + args into Worker; moves into new thread 
         thread = QThread(self) # autodeleted with window 
         worker.moveToThread(thread) 
@@ -309,7 +318,6 @@ class MainWindow(QMainWindow):
         # wire signal between log streaming, completion and thread shutdown
 
         worker.log.connect(self.log_box.append)
-        worker.progress.connect(self.progress.setValue) 
         thread.started.connect(worker.run)
         # remember results (int0 so _done can inspect it 
         worker.finished.connect(lambda r: setattr(self, "_last_result", r)) 
@@ -338,9 +346,23 @@ class MainWindow(QMainWindow):
         thread = QThread(self)
         worker.moveToThread(thread)
 
-        worker.progress.connect(self.progress.setValue)
-        worker.status.connect(self.statusBar().showMessage)
-        worker.log.connect(self.log_box.append) 
+        t0 = time.time()
+
+        def _stage(msg: str) -> None:
+            self._current_stage = msg
+            self.statusBar().showMessage(msg)
+
+        def _progress_with_eta(pct: int) -> None:
+            self.progress.setValue(pct)
+            if pct:
+                eta = (time.time() - t0) * (100 - pct) / pct
+                self.statusBar().showMessage(
+                    f"{self._current_stage} {pct}% – ETA {int(eta//60)} m {int(eta%60)} s"
+                )
+
+        worker.progress.connect(_progress_with_eta)
+        worker.status.connect(_stage)
+        worker.log.connect(self.log_box.append)
         # remember the result object 
         def _remember(r):
             self._last_result = r 
@@ -364,6 +386,7 @@ class MainWindow(QMainWindow):
             run_full_pipeline,
             self._infile,
             self.db_box.currentText(),
+            threads=self.threads_spin.value(),
             postblast=self.biom_chk.isChecked(),
             metadata=None,        # Trim → Convert → BLAST → Tax
         )
@@ -386,6 +409,7 @@ class MainWindow(QMainWindow):
             run_full_pipeline,
             self._infile,
             self.db_box.currentText(),
+            threads=self.threads_spin.value(),
             postblast=self.biom_chk.isChecked(), # source of truth decide via checkbox
             metadata=self.meta_path,         # None or Path run the Post-BLAST stage too
     )
