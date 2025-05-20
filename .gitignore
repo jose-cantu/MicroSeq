@@ -20,3 +20,7 @@ logs/
 tmp_smoke/
 *.log
 logs/
+
+# build artefacts
+*.egg-info/
+
