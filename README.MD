@@ -3,7 +3,7 @@
 **MicroSeq** is an end‑to‑end microbial sequence‑analysis toolkit that scales from a single laptop to a multi‑node HPC cluster.
 It automates everything from raw trace files (AB1) or FASTQ reads all the way to BIOM/CSV tables that are ready for downstream statistics or visualisation.
 
-*Current status – May 2025*: CLI workflow is feature‑complete and battle‑tested internally; the PySide6 GUI will land in v1.0. Rust speed‑ups  for alignment and I/O are planned for v2.0. Note the GUI is nowhere near done I plan on removing and adding things to it need to go back to the whiteboard and rethink some things. 
+*Current status – May 2025*: CLI workflow is feature‑complete and battle‑tested internally; the PySide6 GUI will land in v1.0. Rust speed‑ups  for alignment and I/O are planned for v2.0. Note that the GUI is nowhere near done. I plan on removing and adding things to it. I need to go back to the whiteboard and rethink some things. The roadmap is below. 
 
 ---
 
@@ -359,6 +359,19 @@ CAP3 names every output file `<prefix>.cap.<suffix>` where `<prefix>` is the inp
 
 * **Custom databases** – point `microseq blast -d /path/my_db` and supply a matching taxonomy TSV to `microseq add_taxonomy`.
 * **Nextflow/Snakemake integration** – set `MICROSEQ_LOG_MODE=runid` + per‑process `--workdir` to avoid clashes.
+
+---
+
+## Road-Map
+
+All work lives in a public GitHub board project, and I will be actively working on the priorities listed, starting with P0. 
+
+[View the board »](https://github.com/users/jose-cantu/projects/2/views/2)
+
+### Current priorities
+- P0 – Refresh README and create CHANGELOG
+- P1 – `--blast-task` flag (default `megablast`)
+- P1 – GUI “Speed ↔ Sensitivity” toggle
 
 ---
 
