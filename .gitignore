@@ -1,5 +1,7 @@
 __pycache__/
 *.pyc
+*.py[cod]
+*.pyo
 .DS_Store
 test.log
 # Large reference DBs (created by fetch_dbs.py)
@@ -23,4 +25,9 @@ logs/
 
 # build artefacts
 *.egg-info/
+build/
+dist/
+
+# Pytest cache
+.pytest_cache/
 
