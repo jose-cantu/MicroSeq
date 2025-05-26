@@ -33,9 +33,6 @@ ap.add_argument("--db-root", metavar="PATH",
 ap.add_argument("--log-dir", metavar="PATH",
                 help="Folder for MicroSeq run logs "
                      "(default: MicroSeq/logs)")
-ap.add_argument("--mode", choices=["auto", "daily", "runid"],
-                help="Logging mode to pre-configure "
-                "(default: ask interactively)") 
 ap.add_argument("--quiet", action="store_true",
                 help="Skip interactive prompts")
 args = ap.parse_args()
@@ -72,29 +69,26 @@ log_dir = Path(
 db_root.mkdir(parents=True, exist_ok=True)
 log_dir.mkdir(parents=True, exist_ok=True)
 
-
-# ------------------------- Pick logging mode (daily vs runid) ----------
-
-def choose_mode() -> str:
+def ask_pipeline_usage() -> bool:
     """
-    Ask whether logs should roll daily (local dev) or per-run (HPC).
-    Returns 'daily' or 'runid'.
+    Returns True if the user says they will call MicroSeq from a workflow
+    manager (Nextflow, Snakemake, SLURM array …).  Non-interactive installs
+    default to False.
     """
-    if args.mode:          # --mode supplied on CLI
-        return args.mode
-    if args.quiet:         # non-interactive install
-        return "daily"
-
-    help_txt = "(l)ocal – one log file per day (hint type l)   |   (h)pc – one log per run-ID hint type (h)"
+    if args.quiet:
+        return False 
     while True:
-        ans = input(f"Where will you run MicroSeq? {help_txt} [l]: ").lower() or 'l'
-        if ans.startswith('l'):
-            return 'daily'
-        if ans.startswith('h'):
-            return 'runid'
-        print("Please type L or H")
+        ans = input(
+            "Will MicroSeq ever run inside an automated pipeline on "
+            "this machine or on the HPC? (y/N) "
+        ).strip().lower() or "n" 
+        if ans in ("y", "yes"):
+            return True 
+        if ans in ("n", "no"):
+            return False 
+        print("Please type y or n") 
 
-log_mode = choose_mode()         
+pipeline_user = ask_pipeline_usage()       
 
 # ───────────────────────── helpers ──────────────────────────────────────
 def log(msg: str) -> None:
@@ -270,7 +264,7 @@ export MICROSEQ_DB_HOME="{db_root}"
 export BLASTDB="$MICROSEQ_DB_HOME/gg2:$MICROSEQ_DB_HOME/silva:$MICROSEQ_DB_HOME/ncbi"
 export BLASTDB_LMDB=0
 export MICROSEQ_LOG_DIR="{log_dir}"
-export MICROSEQ_LOG_MODE="{log_mode}" 
+export MICROSEQ_SESSION_ID=$RUN_NAME 
 """
 
     def append_once(target: Path, text: str) -> None:
@@ -294,6 +288,9 @@ export MICROSEQ_LOG_MODE="{log_mode}"
     cfg = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
     cfg.setdefault("logging", {})
     cfg["logging"]["dir"] = str(log_dir)
+    cfg["logging"]["backup_count"] = 0 # keep every log
+    if pipeline_user:
+        cfg["logging"]["session_env"] = "MICROSEQ_SESSION_ID"
     cfg["databases"] = {
         "gg2":   {"blastdb": "${MICROSEQ_DB_HOME}/gg2/greengenes2_db",
             "taxonomy": "${MICROSEQ_DB_HOME}/gg2/taxonomy.tsv"},
