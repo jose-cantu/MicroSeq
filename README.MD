@@ -350,6 +350,8 @@ CAP3 names every output file `<prefix>.cap.<suffix>` where `<prefix>` is the inp
 1. Copies `*.contigs` → `asm/contigs.fasta` for downstream BLAST. `*.singlets` remain in `workdir/asm/` should you wish to analyse them separately.
 2. Parses `*.info` to log assembly statistics (number of contigs, N50, max length).
 3. Leaves all original CAP3 files in `workdir/asm/` so you can inspect quality or visualise in external tools.
+
+Note when blasting there are two algorithms: The Fast (megablast ≥ 95 % ID) is sufficient for typical Sanger 16 S workflows. If the best hit drops below 90 % identity or coverage, MicroSeq automatically repeats the search with Comprehensive and more sensitive (blastn) algorithm to catch divergent taxa.
 ## microseq-fix-tsv
 
 `microseq-fix-tsv` converts comma- or space-delimited tables into tab-separated files in-place. Use it to normalise spreadsheets before feeding them to other MicroSeq commands.

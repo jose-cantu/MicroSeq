@@ -7,6 +7,7 @@ Return an int exit-code (0 = success) & raise on fatal errors.
 from __future__ import annotations
 from pathlib import Path
 from typing import Union, Sequence
+import pandas as pd 
 import logging
 try:
     from PySide6.QtCore import QThread
@@ -57,11 +58,11 @@ def run_trim(
 ) -> int:
     """Trim reads and convert if needed.
 
-    When ``sanger=True`` the *input_path* must point to an ``.ab1`` file or
+    When ``sanger=True`` the input_path must point to an ``.ab1`` file or
     directory.  Those traces are converted to FASTQ before trimming.
     With ``sanger=False`` the function expects standard FASTQ input.
     When *summary_tsv* is given, write one-line stats per file to that path.
-    Set *link_raw* to ``True`` to symlink AB1 traces into ``raw_ab1`` instead of
+    Set link_raw to ``True`` to symlink AB1 traces into ``raw_ab1`` instead of
     copying them.
 
 
@@ -127,6 +128,7 @@ def run_assembly(fasta_in: PathLike, out_dir: PathLike) -> int:
 
 
 # ───────────────────────────────────────────────────────── BLAST
+
 def run_blast_stage(
     fasta_in: PathLike,
     db_key: str,
@@ -138,23 +140,68 @@ def run_blast_stage(
     on_progress=None,
     blast_task: str = "megablast", 
 ) -> int:
-    from microseq_tests.blast.run_blast import BlastOptions 
+    from microseq_tests.blast.run_blast import BlastOptions # local import keeps AB1 safe 
+     
 
     thr = QThread.currentThread()
     if thr and thr.isInterruptionRequested():
         raise RuntimeError("Cancelled")
 
+
+    # ------ first pass ---------------------------
+    opts = BlastOptions(task=blast_task) 
+
     run_blast(
         fasta_in,
         db_key,
         out_tsv,
-        options=BlastOptions(task=blast_task), 
+        options=opts, 
         search_id=identity,
         search_qcov=qcov,
         max_target_seqs=max_target_seqs,
         threads=threads,
         on_progress=on_progress,
     )
+    # ------- Sensitive-mode fallback ----------------------
+    # if the user chose the fast algorithm and the best hit is below 90 ID / 90 qcov   # then redo the search but with the more sensitive comprehesive blastn 
+    if blast_task == "megablast":
+        try:
+            hits = pd.read_csv(out_tsv, sep="\t", comment="#", usecols=["pident", "qcovhsp"], nrows=1, dtype=float) 
+            # empty -> no rows or best identity / qcov below 90 
+            if hits.empty:                       # no hits at all
+                best_id = best_qcov = 0.0
+
+            else:                                # grab the first-row values
+                first = hits.iloc[0]
+                best_id   = float(first.pident)
+                best_qcov = float(first.qcovhsp)
+
+            needs_retry = (best_id < 90.0) or (best_qcov < 90.0)
+
+
+
+        except Exception as e: # malformed table -> playing it safe 
+            L.warning("Fallback check failed (%s) - rerunning with blastn", e)
+            needs_retry = True 
+
+        if needs_retry:
+            L.info("Fast run found no close hit - so rerunning in sensitive mode",
+                   best_id, best_qcov)
+
+            opts.task="blastn" # flip the dataclass 
+            run_blast(
+                fasta_in,
+                db_key,
+                out_tsv,
+                options=opts,   # ← switch task in question 
+                search_id=identity,
+                search_qcov=qcov,
+                max_target_seqs=max_target_seqs,
+                threads=threads,
+                on_progress=on_progress,
+                ) 
+
+
     if thr and thr.isInterruptionRequested():
         raise RuntimeError("Cancelled")
     return 0
@@ -219,7 +266,7 @@ def run_full_pipeline(
 ) -> dict[str, Path]:
     """Run trim → FASTA merge → BLAST → taxonomy (+ optional post‑BLAST).
 
-    *infile* may be FASTA, FASTQ, a single ``.ab1`` trace, or a directory of
+    infile may be FASTA, FASTQ, a single ``.ab1`` trace, or a directory of
     ``.ab1`` files.  Sanger mode is triggered automatically when *infile* is a
     directory or ends with ``.ab1``.  When *summary_tsv* is ``None`` the summary
     is written to ``qc/trim_summary.tsv`` inside *out_dir*.
@@ -334,7 +381,7 @@ def run_ab1_to_fastq(
     overwrite: bool = False,
 ) -> int:
     """
-    Convert every *.ab1 in *input_dir* to FASTQ files in *output_dir*.
+    Convert every *.ab1 in input_dir to FASTQ files in output_dir.
     Returns 0 on success, 1 on failure (and logs the error).
     """
     try:
@@ -354,7 +401,7 @@ def run_fastq_to_fasta(
     output_fasta: PathLike,
 ) -> int:
     """
-    Merge all *.fastq in *input_dir* into a single FASTA *output_fasta*.
+    Merge all *.fastq in input_dir into a single FASTA output_fasta.
     """
     try:
         out = fastq_to_fasta(input_dir, output_fasta)
