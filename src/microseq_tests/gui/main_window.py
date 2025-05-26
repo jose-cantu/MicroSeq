@@ -11,10 +11,10 @@ import sys, logging, traceback, subprocess, shlex, time
 from pathlib import Path 
 from typing import Optional 
 
-from PySide6.QtCore import Qt, QObject, QThread, Signal, Slot, QMetaObject, Q_ARG
+from PySide6.QtCore import Qt, QObject, QThread, Signal, Slot, QMetaObject, Q_ARG, QSettings  
 from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
-        QHBoxLayout, QPushButton, QLabel, QTextEdit, QSpinBox, QMessageBox, QComboBox, QProgressBar, QCheckBox   
+        QHBoxLayout, QPushButton, QLabel, QTextEdit, QSpinBox, QMessageBox, QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, 
         )
 
 # ==== MicroSeq wrappers ---------- 
@@ -41,7 +41,7 @@ class Worker(QObject):
         super().__init__()
         self._fn = fn 
         self._args = args 
-        self._kwargs = kwargs 
+        self._kwargs = kwargs
 
 
     @Slot() # design to warn if any errors occur 
@@ -75,6 +75,7 @@ class Worker(QObject):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.settings = QSettings("MicroSeq", "MicroSeq") 
         self.setWindowTitle("MicroSeq GUI v1.0") # title for it 
         self.resize(800, 520) # size of app considering also log space here 
 
@@ -114,7 +115,25 @@ class MainWindow(QMainWindow):
         self.hits_spin = QSpinBox()
         self.hits_spin.setRange(1, 500)
         self.hits_spin.setValue(5)
-        self.hits_spin.setSuffix(" hits") 
+        self.hits_spin.setSuffix(" hits")
+
+        # ---- Alignmnet mode box ----------------
+        mode_box = QGroupBox("Alignment mode")
+        fast_rb = QRadioButton("Fast (megablast)")
+        slow_rb = QRadioButton("Comprehensive - sensitivity (blastn)") 
+        vbox = QVBoxLayout(mode_box)
+        vbox.addWidget(fast_rb)
+        vbox.addWidget(slow_rb)
+
+        # restore previous choice (default = megablast)
+        task = self.settings.value("blast_task", "megablast")
+        (fast_rb if task == "megablast" else slow_rb).setChecked(True) 
+
+        # save whever user toggles 
+        fast_rb.toggled.connect(
+            lambda on: on and self.settings.setValue("blast_task", "megablast"))
+        slow_rb.toggled.connect(
+            lambda on: on and self.settings.setValue("blast_task", "blastn")) 
 
         # ------- progress bar ----------
         self.progress = QProgressBar()
@@ -177,7 +196,9 @@ class MainWindow(QMainWindow):
         mid.addWidget(self.hits_spin) 
 
         mid.addWidget(QLabel("Threads"))
-        mid.addWidget(self.threads_spin) 
+        mid.addWidget(self.threads_spin)
+
+        mid.addWidget(mode_box) # setting this here so its left aligned  
 
         mid.addWidget(self.progress)
 
@@ -285,7 +306,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No input", "Choose a file or folder first.")
             return
 
-        self.progress.setValue(0)  # resets progress bar during each run 
+        self.progress.setValue(0)  # resets progress bar during each run
+
+        task = self.settings.value("blast_task", "megablast") 
 
         # derive output file beside input; disables button; logs starts 
         hits_path = self._infile.with_suffix(".hits.tsv")
@@ -305,6 +328,7 @@ class MainWindow(QMainWindow):
                 qcov=self.qcov_spin.value(),
                 max_target_seqs=self.hits_spin.value(),
                 threads=self.threads_spin.value(),
+                blast_task=task,
                 )
         t0 = time.time()
 
@@ -388,6 +412,9 @@ class MainWindow(QMainWindow):
         if not self._infile:
             QMessageBox.warning(self, "No input", "Choose a file or folder first.")
             return
+
+        task = self.settings.value("blast_task", "megablast") 
+
         self._launch(
             run_full_pipeline,
             self._infile,
@@ -395,6 +422,7 @@ class MainWindow(QMainWindow):
             threads=self.threads_spin.value(),
             postblast=self.biom_chk.isChecked(),
             metadata=None,        # Trim → Convert → BLAST → Tax
+            blast_task=task, 
         )
     
     # ------ Run full pipeline with Post-Blast as well ------------- 
@@ -410,7 +438,10 @@ class MainWindow(QMainWindow):
                 "Click ‘Browse metadata…’ first or un-tick ‘Make BIOM’."
             )
             return
-        # launch the pipeline here 
+        # launch the pipeline here
+
+        task = self.settings.value("blast_task", "megablast") 
+
         self._launch(
             run_full_pipeline,
             self._infile,
@@ -418,6 +449,7 @@ class MainWindow(QMainWindow):
             threads=self.threads_spin.value(),
             postblast=self.biom_chk.isChecked(), # source of truth decide via checkbox
             metadata=self.meta_path,         # None or Path run the Post-BLAST stage too
+            blast_task=task, 
     )
 
     # ------ Run stand-alone Post-BLAST ---------------------------------
