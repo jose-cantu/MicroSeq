@@ -42,7 +42,7 @@ For version control, please see the changelog I have attached. [CHANGELOG](https
 
   * Collapse hits, choose ID/Q‑cov cut‑offs, export BIOM / CSV tables (`microseq postblast`).
 * **Config‑driven defaults** for duplicate‑policy & ID‑normalisers (regex or built‑ins).
-* **Robust logging**  – daily‑rolling or run‑ID modes; logs can live anywhere you point `MICROSEQ_LOG_DIR`.
+* **Robust logging**  – session-based logs via $MICROSEQ_SESSION_ID or timestamp fallback; logs can live anywhere you point `MICROSEQ_LOG_DIR`.
 * **TSV normalisation** (`microseq-fix-tsv`) – convert CSV or space‑delimited tables into proper TSV.
 * **Portable**  – pure‑Python (≥3.10) + external binaries already in Conda env (BLAST+, TaxonKit, CAP3).
 * **GUI preview** (`microseq-gui`) – drag‑and‑drop queue, live log pane, progress
@@ -120,7 +120,8 @@ Run once per machine (or whenever DB versions change):
 
 ```bash
 microseq-setup                # interactive prompts
-# flags: --quiet  •  --db-root /path/to/dbs  •  --log-dir /path/to/logs  •  --mode daily|runid
+# flags: --quiet  •  --db-root /path/to/dbs  •  --log-dir /path/to/logs
+# answer "y" when asked about pipelines to aggregate logs by session ID
 ```
 
 What it does:
@@ -141,7 +142,7 @@ Re‑run anytime with different flags to move DBs or logs elsewhere.
 | `--workdir` (CLI)   | Per‑run scratch folder for intermediate files                     | `default_workdir` from `config.yaml` (e.g. `~/microseq_runs`)          | `--workdir /scratch/$USER/run42`            |
 | `MICROSEQ_LOG_DIR`  | Where rotated log files are written                               | `<repo>/logs`              | `export MICROSEQ_LOG_DIR=/var/log/microseq` |
 | `MICROSEQ_LOG_FILE` | Override log file location entirely | — | `export MICROSEQ_LOG_FILE=/tmp/microseq.log` |
-| `MICROSEQ_LOG_MODE` | `daily` (one file per day) or `runid` (fresh file per invocation) | chosen in `microseq-setup` | `export MICROSEQ_LOG_MODE=runid`            |
+| `MICROSEQ_SESSION_ID` | Aggregates multiple runs into one log when set; otherwise timestamped files | — | `export MICROSEQ_SESSION_ID=my_run` |
 
 A symlink `logs/microseq_latest.log` always points at the active log file, so `tail ‑F logs/microseq_latest.log` just works.
 
@@ -269,7 +270,6 @@ This step also writes `<output>_blast_provenance.csv`, `<output>_taxonomy_only.c
 | --------------------------- | ----------------- | --------------------------------------- |
 | `--db-root DIR`             | `~/.microseq_dbs` | Where to store BLAST DBs.               |
 | `--log-dir DIR`             | `<repo>/logs`     | Central log folder.                     |
-| `--mode {auto,daily,runid}` | ask               | Choose log‑rotation scheme.             |
 | `--quiet`                   | —                 | Non‑interactive install (use defaults). |
 
 ---
@@ -278,12 +278,12 @@ This step also writes `<output>_blast_provenance.csv`, `<output>_taxonomy_only.c
 
 | Task                                                                                    | Typical command                                                                                                           |
 | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| **First‑time setup on a fresh laptop**                                                  | `git clone … && conda env create … && conda activate MicroSeq && pip install -e . && microseq-setup --quiet --mode daily` |
+| **First‑time setup on a fresh laptop**                                                  | `git clone … && conda env create … && conda activate MicroSeq && pip install -e . && microseq-setup --quiet` |
 | **Update to the latest patch or new feature**          | `git pull && pip install -e .` |
 | **Convert ABI traces + QC + assemble + classify**                                       | See AB1 trace workflow in Examples.                                                                                       |
 | **Optimise BLAST cut‑offs for 96‑well plate**   **Keep in mind, these are estimates!**  | `microseq blast --relaxed --export-sweeper … → microseq suggest-cutoffs … 530 → microseq filter-hits`                     |
 | **Batch merge hits from three runs**                                                    | `microseq merge-hits -i run*/blast/hits.tsv -o merged.tsv`                                                                |
-| **HPC Slurm job**                                                                       | Pre‑export `MICROSEQ_LOG_DIR=$SCRATCH/logs` & use `--workdir $SLURM_TMPDIR` in each step.                                 |
+| **HPC Slurm job**                                                                       | Pre‑export `MICROSEQ_LOG_DIR=$SCRATCH/logs` and `MICROSEQ_SESSION_ID=$SLURM_JOB_ID`; use `--workdir $SLURM_TMPDIR` in each step.                                 |
 
 ---
 
@@ -362,7 +362,7 @@ Note when blasting there are two algorithms: The Fast (megablast ≥ 95 % ID) is
 ## Advanced topics
 
 * **Custom databases** – point `microseq blast -d /path/my_db` and supply a matching taxonomy TSV to `microseq add_taxonomy`.
-* **Nextflow/Snakemake integration** – set `MICROSEQ_LOG_MODE=runid` + per‑process `--workdir` to avoid clashes.
+* **Nextflow/Snakemake integration** – export `MICROSEQ_SESSION_ID=$RUN_NAME` and use per-process `--workdir` to avoid clashes.
 
 ---
 
