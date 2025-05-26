@@ -3,7 +3,7 @@
 **MicroSeq** is an end‑to‑end microbial sequence‑analysis toolkit that scales from a single laptop to a multi‑node HPC cluster.
 It automates everything from raw trace files (AB1) or FASTQ reads all the way to BIOM/CSV tables that are ready for downstream statistics or visualisation.
 
-*Current status – May 2025*: CLI workflow is feature‑complete and battle‑tested internally; the PySide6 GUI will land in v1.0. Rust speed‑ups  for alignment and I/O are planned for v2.0. Note that the GUI is nowhere near done. I plan on removing and adding things to it. I need to go back to the whiteboard and rethink some things. The roadmap is below. 
+*Current status – May 2025*: CLI workflow is feature‑complete and battle‑tested internally; the PySide6 GUI will land in v1.0. Rust speed‑ups  for alignment and I/O are planned for v2.0. Note that the GUI is nowhere near done. I plan on removing and adding things to it. I need to go back to the whiteboard and rethink some things. The roadmap is below in the roadmap section, close to the end. 
 
 For version control, please see the changelog I have attached. [CHANGELOG](https://github.com/jose-cantu/MicroSeq/blob/master/CHANGELOG.MD) 
 
