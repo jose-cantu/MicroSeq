@@ -16,11 +16,21 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 
 ### Added Feature 
 
+- Session-based logging; export `MICROSEQ_SESSION_ID` to aggregate logs.
+- GUI toggle for speed vs. sensitivity BLAST algorithms.
+- Fallback to classic `blastn` when identity or coverage falls below 90%.
+- Added pytests covering the new logging behaviour.
 
 ### Changes Made 
+- Simplified `microseq-setup` wizard, removing obsolete logging mode.
+- Updated README with new logging instructions.
+- Default log `backup_count` set to 0 and new `session_env` config key.
+- Algorithms list now shows correctly via wrapper on second run.
 
 
 ### Fixed Bugs 
+- Percent signs escape properly for `argparse`.
+- Second BLAST run now wraps the command correctly.
 
 
 ---
