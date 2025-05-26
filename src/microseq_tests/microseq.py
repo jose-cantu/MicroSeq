@@ -90,7 +90,7 @@ def main() -> None:
     p_blast.add_argument("--relaxed-id", type=float, default=80.0, help="Search percent-identity when --relaxed (default 80)") 
     p_blast.add_argument("--relaxed-qcov", type=float, default=0.0, help="Search qcov_hsp_perc when --relaxed (default 0)")
     p_blast.add_argument("--export-sweeper", action="store_true", help="Also write hits_full_sweeper.tsv containing " "sample_id, bitscore, clean headers") 
-    p_blast.add_argument("--blast-task", choices=["megablast", "blastn"], default="megablast", help="BLAST algorithm: megablast (fast, ≥95 % ID) or blastn (comprehensive, use <95% ID)") 
+    p_blast.add_argument("--blast-task", choices=["megablast", "blastn"], default="megablast", help="BLAST algorithm: megablast (fast, ≥95 %% ID) or blastn (comprehensive, use <95%% ID)") 
 
 
     # sweeper used to predict PASS cutoff point to hit desired TARGET PASS count 
