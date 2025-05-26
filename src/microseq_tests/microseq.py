@@ -241,25 +241,26 @@ def main() -> None:
 
         # build the option object from CLI flag here ......
         # also adding local import  
-        from microseq_tests.blast.run_blast import BlastOptions 
+        from microseq_tests.blast.run_blast import BlastOptions
+        from microseq_tests.pipeline import run_blast_stage 
         options = BlastOptions(task=args.blast_task) 
 
         # treat this as one monolithic bar for all isolates/samples in one run 
-        with stage_bar(total, desc="blast", unit="seq"):
-            run_blast(
-                pathlib.Path(args.input),  # temporary patch for blasting and post biom only will need to think around 
+        with stage_bar(total, desc="blast", unit="seq") as bar:
+
+            # simple progress hook – keep the nice outer tqdm
+            progress_cb = lambda pct: bar.update( max(0, int(pct*total/100) - bar.n) )
+
+            run_blast_stage(
+                pathlib.Path(args.input),
                 args.db,
                 pathlib.Path(args.output),
-                max_target_seqs = args.max_target_seqs, 
+                identity=args.identity,
+                qcov=args.qcov,
+                max_target_seqs=args.max_target_seqs,
                 threads=args.threads,
-                search_id=search_id,
-                search_qcov=search_qcov,
-                report_id=report_id,
-                report_qcov=report_qcov, 
-                # I removed the on_progress var here since the nested helper updates parent bar via thread-local _tls 
-                log_missing=(pathlib.Path(args.log_missing) if args.log_missing else None), clean_titles=args.clean_titles,
-                export_sweeper=args.export_sweeper,
-                options=options, 
+                on_progress=progress_cb,
+                blast_task=args.blast_task,
             )
 
     elif args.cmd == "merge-hits":

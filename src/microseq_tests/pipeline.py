@@ -185,7 +185,7 @@ def run_blast_stage(
             needs_retry = True 
 
         if needs_retry:
-            L.info("Fast run found no close hit - so rerunning in sensitive mode",
+            L.info("Fast run found no close hit - so rerunning in sensitive mode using blastn" "(best %.1f %% ID / %.1f %% qcov)",
                    best_id, best_qcov)
 
             opts.task="blastn" # flip the dataclass 
