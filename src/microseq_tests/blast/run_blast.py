@@ -1,4 +1,4 @@
-# -- src/micrseq_tests/blast/run_blast.py ---------------
+# -- src/microseq_tests/blast/run_blast.py ---------------
 from __future__ import annotations 
 import logging, os, subprocess, shutil, re, functools, threading, time
 try:
@@ -14,10 +14,16 @@ from Bio import SeqIO
 from microseq_tests.utility.utils import load_config, expand_db_path
 from microseq_tests.utility.progress import _tls # access to parent progress bar 
 import pandas as pd
-from microseq_tests.utility.id_normaliser import NORMALISERS 
+from microseq_tests.utility.id_normaliser import NORMALISERS
+from dataclasses import dataclass 
 
 L = logging.getLogger(__name__) 
 PathLike = str | Path
+
+@dataclass 
+class BlastOptions:
+    task: str = "megablast" # default option goes first 
+
 
 FIELD_LIST = [ "qseqid","sseqid","pident","qlen","qcovhsp","length","evalue","bitscore","stitle"]
 def header_row() -> str: 
@@ -42,8 +48,7 @@ def _progress_tail(tmp_path: Path, total: int, callback):
         time.sleep(1)
 
 # db_key is the shorthand string for "gg2" or "silva" best keep it str here for future reference 
-def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
-              search_id: float = 97.0, search_qcov: float = 80.0, report_id: float = 97.0, report_qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, on_progress: Optional[Callable[[int], None]] = None, log_missing: PathLike | None = None, clean_titles: bool = False, export_sweeper: bool = False, id_normaliser: str = "strip_suffix" ) -> None:
+def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *, options: BlastOptions = BlastOptions(), search_id: float = 97.0, search_qcov: float = 80.0, report_id: float = 97.0, report_qcov: float = 80.0, max_target_seqs: int = 5, threads: int = 1, on_progress: Optional[Callable[[int], None]] = None, log_missing: PathLike | None = None, clean_titles: bool = False, export_sweeper: bool = False, id_normaliser: str = "strip_suffix" ) -> None:
     """
     Run blastn against one of the configured 16 S databases.
     You will also emit a percentage progress bar I have set to make it look more a      ppealing. =) 
@@ -111,7 +116,7 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
 
     cmd=["stdbuf", "-oL", "-eL", # line -buffered to see if bar updates real time 
          "blastn",
-         "-task", "blastn", # why not? 
+         "-task", options.task, # user-selected algorithm 
          "-query", str(q),   # casting q to str before passing to subprocess 
          "-db", blastdb,
          "-max_target_seqs", str(max_target_seqs), # keep only the best alignment here HSP that has the best-overall score
@@ -121,6 +126,8 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *,
          "-out", str(tmp_out), # temporary path will append blast with header 
          "-num_threads", str(threads),
          ]
+    # debugging to make sure it works 
+    print("BLAST CMD:", " ".join(cmd)) 
 
     # merge env here so BLASTDB_LMDB_MAP_SIZE is kept 
     env = os.environ.copy() # start from full parent env 

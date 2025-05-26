@@ -24,7 +24,6 @@ from microseq_tests.utility.cutoff_sweeper import suggest_after_collapse as sugg
 from microseq_tests.utility import filter_hits_cli 
 from microseq_tests.utility.id_normaliser import NORMALISERS 
 from microseq_tests import __version__
-from microseq_tests.blast.run_blast import BlastOptions 
 
 def main() -> None:
     cfg = load_config() 
@@ -240,7 +239,9 @@ def main() -> None:
 
         report_id, report_qcov = args.identity, args.qcov
 
-        # build the option object from CLI flag here ...... 
+        # build the option object from CLI flag here ......
+        # also adding local import  
+        from microseq_tests.blast.run_blast import BlastOptions 
         options = BlastOptions(task=args.blast_task) 
 
         # treat this as one monolithic bar for all isolates/samples in one run 
