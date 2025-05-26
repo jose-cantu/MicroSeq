@@ -23,7 +23,8 @@ from microseq_tests.utility.merge_hits import merge_hits as merged_hits
 from microseq_tests.utility.cutoff_sweeper import suggest_after_collapse as suggest
 from microseq_tests.utility import filter_hits_cli 
 from microseq_tests.utility.id_normaliser import NORMALISERS 
-from microseq_tests import __version__ 
+from microseq_tests import __version__
+from microseq_tests.blast.run_blast import BlastOptions 
 
 def main() -> None:
     cfg = load_config() 
@@ -90,6 +91,8 @@ def main() -> None:
     p_blast.add_argument("--relaxed-id", type=float, default=80.0, help="Search percent-identity when --relaxed (default 80)") 
     p_blast.add_argument("--relaxed-qcov", type=float, default=0.0, help="Search qcov_hsp_perc when --relaxed (default 0)")
     p_blast.add_argument("--export-sweeper", action="store_true", help="Also write hits_full_sweeper.tsv containing " "sample_id, bitscore, clean headers") 
+    p_blast.add_argument("--blast-task", choices=["megablast", "blastn"], default="megablast", help="BLAST algorithm: megablast (fast, ≥95 % ID) or blastn (comprehensive, use <95% ID)") 
+
 
     # sweeper used to predict PASS cutoff point to hit desired TARGET PASS count 
     p_sweep = sp.add_parser("suggest-cutoffs", help="Suggest identity/qcov pairs to hit TARGET PASS count of number of samples after per-sample collapse", description=("Given a BLAST sweeper table (*.tsv) from a relaxed search, "
@@ -235,7 +238,10 @@ def main() -> None:
         else:
             search_id, search_qcov = args.identity, args.qcov 
 
-        report_id, report_qcov = args.identity, args.qcov 
+        report_id, report_qcov = args.identity, args.qcov
+
+        # build the option object from CLI flag here ...... 
+        options = BlastOptions(task=args.blast_task) 
 
         # treat this as one monolithic bar for all isolates/samples in one run 
         with stage_bar(total, desc="blast", unit="seq"):
@@ -251,7 +257,8 @@ def main() -> None:
                 report_qcov=report_qcov, 
                 # I removed the on_progress var here since the nested helper updates parent bar via thread-local _tls 
                 log_missing=(pathlib.Path(args.log_missing) if args.log_missing else None), clean_titles=args.clean_titles,
-                export_sweeper=args.export_sweeper, 
+                export_sweeper=args.export_sweeper,
+                options=options, 
             )
 
     elif args.cmd == "merge-hits":

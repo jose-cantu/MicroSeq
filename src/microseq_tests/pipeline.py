@@ -136,7 +136,10 @@ def run_blast_stage(
     max_target_seqs: int = 5,
     threads: int = 1,
     on_progress=None,
+    blast_task: str = "megablast", 
 ) -> int:
+    from microseq_tests.blast.run_blast import BlastOptions 
+
     thr = QThread.currentThread()
     if thr and thr.isInterruptionRequested():
         raise RuntimeError("Cancelled")
@@ -145,6 +148,7 @@ def run_blast_stage(
         fasta_in,
         db_key,
         out_tsv,
+        options=BlastOptions(task=blast_task), 
         search_id=identity,
         search_qcov=qcov,
         max_target_seqs=max_target_seqs,
@@ -207,6 +211,7 @@ def run_full_pipeline(
     qcov: int = 80,
     max_target_seqs: int = 5,
     threads: int = 4,
+    blast_task: str = "megablast", 
     metadata: Path | None = None,
     summary_tsv: Path | None = None,
     on_stage=None,
@@ -288,6 +293,7 @@ def run_full_pipeline(
         max_target_seqs=max_target_seqs,
         threads=threads,
         on_progress=subprog(pct),
+        blast_task=blast_task, 
     )
     if thr and thr.isInterruptionRequested():
         raise RuntimeError("Cancelled")
