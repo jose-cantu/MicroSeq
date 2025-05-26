@@ -4,6 +4,7 @@ from pathlib import Path
 
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
+pytest.importorskip("pandas")
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
@@ -28,8 +29,11 @@ def test_full_button_progress(qtbot, monkeypatch, tmp_path):
     dummy.write_text("@r1\nACGT\n+\n!!!!\n")
     win._infile = dummy
 
+
     qtbot.mouseClick(win.full_btn, Qt.LeftButton)
     qtbot.waitSignal(win._worker.finished, timeout=2000)
+    # wait for the QThread to quit so _done() fully completes
+    qtbot.waitSignal(win._thread.finished, timeout=2000)
 
     # progress bar is reset to 0 in _done(); wait for that 
     qtbot.waitUntil(lambda: win.progress.value() == 0, timeout=1000)
