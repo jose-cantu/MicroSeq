@@ -1,8 +1,9 @@
+# .github/workflows/ci.yml
 name: CI
 
 on:
-  push:          # run on every push, any branch
-  pull_request:  # and on every PR
+  push:
+  pull_request:
 
 jobs:
   install-and-test:
@@ -10,39 +11,63 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ── Linux job: full environment (includes cap3) ───────────────
+          # ───────── Linux ─────────
           - os: ubuntu-latest
             envfile: config/environment.yml
+            create_args: ""
+            conda_subdir: ""
+            post_cleanup: true
+            needs_brew_expect: false
 
-          # ── macOS & Windows: skip cap3 (not available) ────────────────
+          # ─────── macOS (Apple-silicon) ───────
           - os: macos-latest
-            envfile: config/environment-nocap.yml
+            envfile: config/environment.yml
+            create_args: "--platform osx-64"   # pull Intel bioconda packages → cap3
+            conda_subdir: osx-64
+            post_cleanup: true
+            needs_brew_expect: true            # install expect for unbuffer
+
+          # ─────── Windows (no cap3) ────────
           - os: windows-latest
             envfile: config/environment-nocap.yml
+            create_args: ""
+            conda_subdir: ""
+            post_cleanup: false                # avoid cleanup bug
+            needs_brew_expect: false           # brew not available
 
     runs-on: ${{ matrix.os }}
 
     steps:
-    # 1 ▸ Check out the repo
+    # 1 ▸ Checkout repository
     - uses: actions/checkout@v4
 
-    # 2 ▸ Create the Conda environment with micromamba
+    # 2 ▸ Micromamba: create env
     - uses: mamba-org/setup-micromamba@v1
       with:
         environment-file: ${{ matrix.envfile }}
-        cache-downloads: true        # re-uses downloaded packages
+        cache-downloads: true
+        create-args: ${{ matrix.create_args }}
+        post-cleanup: ${{ matrix.post_cleanup }}
+      env:
+        CONDA_SUBDIR: ${{ matrix.conda_subdir }}
 
-    # 3 ▸ Editable install of MicroSeq
+    # 3 ▸ (macOS only) install Expect via Homebrew → provides `unbuffer`
+    - name: brew install expect   # matches README step 3b
+      if: ${{ matrix.needs_brew_expect }}
+      run: |
+        brew install expect
+
+    # 4 ▸ Editable pip install
     - name: pip install -e .
       shell: bash -l {0}
       run: python -m pip install -e .
 
-    # 4 ▸ Download reference BLAST databases (non-interactive)
+    # 5 ▸ Download reference BLAST DBs
     - name: microseq-setup --quiet
       shell: bash -l {0}
       run: microseq-setup --quiet
 
-    # 5 ▸ Tiny smoke test against all three databases
+    # 6 ▸ Tiny smoke test
     - name: Tiny BLAST smoke test
       shell: bash -l {0}
       run: |
