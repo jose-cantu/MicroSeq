@@ -17,6 +17,25 @@ import pandas as pd
 from microseq_tests.utility.id_normaliser import NORMALISERS
 from dataclasses import dataclass 
 
+# --- Choose the first unbuffer tool we can find here sooo -----------
+def _find_unbuffer_tool() -> list[str]:
+    """
+    Return a ['tool', 'arg1', …] prefix that forces line-buffered output,
+    or an empty list if no such tool exists on this system.
+    """
+    for tool, args in (("stdbuf", ["-oL", "-eL"]), 
+        ("gstdbuf", ["-oL", "-eL"]), 
+        ("unbuffer", [])): # expect-dev 
+        if (p := shutil.which(tool)):
+            logging.getLogger(__name__).debug("streaming via %s", tool)
+            return [p] + args 
+    logging.getLogger(__name__).debug("no buffer tool; output may be buffered")
+    return []
+
+UNBUFFER_PREFIX = _find_unbuffer_tool() 
+         
+
+
 L = logging.getLogger(__name__) 
 PathLike = str | Path
 
@@ -114,8 +133,8 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *, options: Bl
     tmp_out = Path(out_tsv).with_suffix(".blasttmp")   
 
 
-    cmd=["stdbuf", "-oL", "-eL", # line -buffered to see if bar updates real time 
-         "blastn",
+    cmd=(UNBUFFER_PREFIX + # line -buffered to see if bar updates real time 
+         ["blastn",
          "-task", options.task, # user-selected algorithm 
          "-query", str(q),   # casting q to str before passing to subprocess 
          "-db", blastdb,
@@ -125,7 +144,7 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *, options: Bl
          "-outfmt", outfmt,
          "-out", str(tmp_out), # temporary path will append blast with header 
          "-num_threads", str(threads),
-         ]
+         ])
     # debugging to make sure it works 
     print("BLAST CMD:", " ".join(cmd)) 
 
