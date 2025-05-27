@@ -84,6 +84,10 @@ $ conda activate MicroSeq
 # 3  Editable install (good while developing)
 $ pip install -e .
 
+# 3b macOS users this step only (Windows and Linux users please ignore) - adding GNU stdbuf 
+brew install coreutils
+ln -s /opt/homebrew/bin/gstdbuf "$(dirname $(which blastn))/stdbuf" 
+
 # 4  Download reference DBs & configure logging
 $ microseq-setup                 # interactive, 3–5 min first run
 #     └─ adds $MICROSEQ_DB_HOME, $MICROSEQ_LOG_DIR, $BLASTDB, $BLASTDB_LMDB=0 to ~/.bashrc
@@ -114,7 +118,7 @@ Keep in mind for MacOS install the intel variation provided from miniconda and N
 | git                    | Clone the repo, pull updates                            | [https://git-scm.com/book/en/v2/Getting-Started-Installing-Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git) |
 | Conda / Mamba          | Manages the `MicroSeq` env incl. BLAST+, CAP3, TaxonKit | [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html)                               |
 | Python 3.10 – 3.13     | Runs the CLI & GUI                                      | [https://www.python.org/downloads/](https://www.python.org/downloads/)                                                         |
-| BLAST+, TaxonKit, CAP3 | Auto‑installed into the Conda env – no action needed    | –                                                                                                                              |
+| BLAST+, TaxonKit, CAP3 | Auto‑installed into the Conda env – no action needed    | –                                                                   | Brew                   | For MacOS users only needed for running blast smoothly  | [https://brew.sh] 
 
 ---
 
