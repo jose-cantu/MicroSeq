@@ -1,9 +1,9 @@
+# .github/workflows/ci.yml
 name: CI
+
 on:
-  push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ] 
+  push:          # run on every push to any branch
+  pull_request:  # and on every PR
 
 jobs:
   install-and-test:
@@ -16,22 +16,27 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+    # ── 1. Check out the repo ────────────────────────────────────────────
     - uses: actions/checkout@v4
 
-    - uses: mamba-org/provision-with-micromamba@v15
+    # ── 2. Install micromamba & solve the env from environment.yml ──────
+    - uses: mamba-org/setup-micromamba@v1
       with:
         environment-file: config/environment.yml
-        cache-env: true
+        cache-downloads: true                  # caches pkgs, not executables
         extra-specs: python=${{ matrix.python-version }}
 
+    # ── 3. Editable install of MicroSeq ──────────────────────────────────
     - name: pip install -e .
       shell: bash -l {0}
       run: python -m pip install -e .
 
-    - name: Download reference databases
+    # ── 4. Download reference BLAST DBs (non-interactive) ───────────────
+    - name: microseq-setup --quiet
       shell: bash -l {0}
       run: microseq-setup --quiet
 
+    # ── 5. Tiny smoke test on all three DBs ─────────────────────────────
     - name: Tiny BLAST smoke test
       shell: bash -l {0}
       run: |
