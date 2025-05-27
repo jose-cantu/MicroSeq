@@ -33,12 +33,12 @@ MicroSeq began as an open-source replacement for the narrow slice of Geneious Pr
 
 * **Dual input.** Accepts raw `.ab1` traces or demultiplexed FASTQ amplicons.
 * **Contig aware (planned v1.1).** When more than one read belongs to an isolate, MicroSeq will automatically assemble them with CAP3, boosting consensus quality. In the current version run `microseq assembly` first.
-* **GreenGenes 2, SILVA, or NCBI—one switch.** `--db gg2|silva|ncbi` works in both CLI and GUI; MicroSeq is currently the only tool that ships a GreenGenes 2–indexed classifier.
+* **GreenGenes 2, SILVA, or NCBI one switch.** `--db gg2|silva|ncbi` works in both CLI and GUI; MicroSeq is currently the only tool that ships a GreenGenes 2–indexed classifier.
 * **Immediate downstream compatibility.** `microseq postblast` writes BLAST results directly to BIOM (or flat CSV) so the same file can feed QIIME‑2, phyloseq, or scikit‑bio without hand conversion.
 * **Bench-to-cluster consistency.** A single YAML config runs unchanged on a laptop or under Slurm; thread and memory limits are flags, not hard-coded paths.
 * **Permissive licence.** MIT/LGPL so the lab can redistribute binaries internally without negotiating commercial terms.
 
-In short: MicroSeq is the only open-source package that ingests raw Sanger or FASTQ reads, classifies them against GreenGenes 2, SILVA, or NCBI in one step, and emits a BIOM table—all under a scriptable CLI with an optional GUI for bench scientists. Automatic contig assembly is scheduled for version 1.1.
+In short: MicroSeq is the only open-source package that ingests raw Sanger or FASTQ reads, classifies them against GreenGenes 2, SILVA, or NCBI in one step, and emits a BIOM table all under a scriptable CLI with an optional GUI for bench scientists. Automatic contig assembly is scheduled for version 1.1.
 
 ---
 
