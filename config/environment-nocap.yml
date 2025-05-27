@@ -1,0 +1,29 @@
+# config/environment.yml : this file is meant to help tell Conda what to install eg 'Conda env create / env update' 
+# to create env for first ime use 'conda env create -f config/envionrment.yml or to update your environment 
+# 'conda env update -f config/environment.yml' 
+
+name: MicroSeq
+channels:
+  - conda-forge 
+  - bioconda  # where trimmomatic, blast, and cap3 live at 
+dependencies:
+  # core language/runtime 
+  - python = 3.10
+
+  # python libraries imported 
+  - pyyaml 
+  - pytest   # test runner 
+  - pyside6     # GUI 
+  - pip # pip-install extras 
+  - pynvim
+  - typing_extensions
+  - biom-format # Needed for BIOM 
+  - h5py # necessary for BIOM
+  - pandas
+  - taxonkit # for parsing and creating taxonomy.tsv for NCBI16s and SILVA  
+  - ete3
+  - pytest-qt 
+
+  # external bio-tools
+  - trimmomatic    # adds trimmomatic to $CONDA_PREFIX/bin  
+  - blast          # installs blastn, makeblastdb, etc. 
