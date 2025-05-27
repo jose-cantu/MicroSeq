@@ -1,4 +1,3 @@
-# .github/workflows/ci.yml
 name: CI
 
 on:
@@ -16,32 +15,30 @@ jobs:
             envfile: config/environment.yml
             create_args: ""
             conda_subdir: ""
-            post_cleanup: true
             needs_brew_expect: false
+            post_cleanup: all          # default
 
           # ─────── macOS (Apple-silicon) ───────
           - os: macos-latest
             envfile: config/environment.yml
-            create_args: "--platform osx-64"   # pull Intel bioconda packages → cap3
+            create_args: "--platform osx-64"
             conda_subdir: osx-64
-            post_cleanup: true
-            needs_brew_expect: true            # install expect for unbuffer
+            needs_brew_expect: true
+            post_cleanup: all          # default
 
-          # ─────── Windows (no cap3) ────────
+          # ─────── Windows (no cap3) ───────
           - os: windows-latest
             envfile: config/environment-nocap.yml
             create_args: ""
             conda_subdir: ""
-            post_cleanup: false                # avoid cleanup bug
-            needs_brew_expect: false           # brew not available
+            needs_brew_expect: false
+            post_cleanup: none         # skip buggy de-init step
 
     runs-on: ${{ matrix.os }}
 
     steps:
-    # 1 ▸ Checkout repository
     - uses: actions/checkout@v4
 
-    # 2 ▸ Micromamba: create env
     - uses: mamba-org/setup-micromamba@v1
       with:
         environment-file: ${{ matrix.envfile }}
@@ -51,23 +48,19 @@ jobs:
       env:
         CONDA_SUBDIR: ${{ matrix.conda_subdir }}
 
-    # 3 ▸ (macOS only) install Expect via Homebrew → provides `unbuffer`
-    - name: brew install expect   # matches README step 3b
+    # macOS: install Expect → unbuffer
+    - name: brew install expect
       if: ${{ matrix.needs_brew_expect }}
-      run: |
-        brew install expect
+      run: brew install expect
 
-    # 4 ▸ Editable pip install
     - name: pip install -e .
       shell: bash -l {0}
       run: python -m pip install -e .
 
-    # 5 ▸ Download reference BLAST DBs
     - name: microseq-setup --quiet
       shell: bash -l {0}
       run: microseq-setup --quiet
 
-    # 6 ▸ Tiny smoke test
     - name: Tiny BLAST smoke test
       shell: bash -l {0}
       run: |
