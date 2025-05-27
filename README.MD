@@ -29,7 +29,7 @@ For version control, please see the changelog I have attached. [CHANGELOG](https
 
 ## Why MicroSeq?
 
-MicroSeq began as an open-source replacement for the narrow slice of Geneious Prime we relied on—turning raw Sanger chromatograms into taxonomically annotated sequences—but has grown into the only FLOSS pipeline that goes from AB1 or FASTQ input to a BIOM/OTU table in one reproducible run.
+MicroSeq began as an open-source replacement for the narrow slice of Geneious Prime we relied on turning raw Sanger chromatograms into taxonomically annotated sequences but has grown into the only FLOSS pipeline that goes from AB1 or FASTQ input to a BIOM/OTU table in one reproducible run.
 
 * **Dual input.** Accepts raw `.ab1` traces or demultiplexed FASTQ amplicons.
 * **Contig aware (planned v1.1).** When more than one read belongs to an isolate, MicroSeq will automatically assemble them with CAP3, boosting consensus quality. In the current version run `microseq assembly` first.
