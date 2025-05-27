@@ -1,0 +1,41 @@
+name: CI
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  install-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10"]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: mamba-org/provision-with-micromamba@v15
+      with:
+        environment-file: config/environment.yml
+        cache-env: true
+        extra-specs: python=${{ matrix.python-version }}
+
+    - name: pip install -e .
+      shell: bash -l {0}
+      run: python -m pip install -e .
+
+    - name: Download reference databases
+      shell: bash -l {0}
+      run: microseq-setup --quiet
+
+    - name: Tiny BLAST smoke test
+      shell: bash -l {0}
+      run: |
+        printf ">demo\nACGT\n" > tiny.fasta
+        for d in gg2 silva ncbi; do
+          microseq blast -i tiny.fasta -d $d -o /tmp/$d.tsv --identity 50 --qcov 10
+        done
+
