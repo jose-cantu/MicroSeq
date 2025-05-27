@@ -221,8 +221,9 @@ def fetch_ncbi() -> None:
 
 
     # accession -> taxid (blastdbcmd) 
-    acc_tax = nd / "acc_taxid.tsv" 
-    run(["blastdbcmd", "-db", "16S_ribosomal_RNA", "-entry", "all", "-outfmt", "%a\t%T", "-out", acc_tax]) 
+    acc_tax = nd / "acc_taxid.tsv"
+    blast_db = nd / "16S_ribosomal_RNA"  
+    run(["blastdbcmd", "-db", blast_db, "-entry", "all", "-outfmt", "%a\t%T", "-out", acc_tax]) 
 
     # taxid -> lineage via TaxonKit 
     log("-> running TaxonKit lineage (TaxonKit will fetch taxonomy DB if missing)") 
