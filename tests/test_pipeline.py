@@ -1,8 +1,10 @@
 # tests/test_pipeline.py 
 
 from pathlib import Path
-import subprocess, pandas as pd
+import subprocess
 import pytest
+pytest.importorskip("pandas")
+import pandas as pd
 
 biom = pytest.importorskip("biom")
 

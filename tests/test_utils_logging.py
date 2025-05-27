@@ -1,7 +1,17 @@
 # tests/test_utils_logging.py 
 
-import logging  
-from microseq_tests.utility.utils import setup_logging 
+import logging
+import importlib.util, sys
+from pathlib import Path
+import pytest
+
+# import utility module directly to avoid importing the full package
+ROOT = Path(__file__).resolve().parents[1]
+UTIL_PATH = ROOT / "src" / "microseq_tests" / "utility" / "utils.py"
+spec = importlib.util.spec_from_file_location("mutils", UTIL_PATH)
+mutils = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mutils)
+setup_logging = mutils.setup_logging
 
 def test_setup_logging_handlers(tmp_path):
     log_file = setup_logging(

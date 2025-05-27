@@ -9,10 +9,13 @@ default_workdir fallback via config patch I made
 -v/-vv logging levels 
 """
 
-import subprocess, logging, os 
-from pathlib import Path 
-from microseq_tests.utility import utils 
-from microseq_tests.trimming import ab1_to_fastq 
+import subprocess, logging, os
+from pathlib import Path
+import pytest
+pytest.importorskip("pandas")
+pytest.importorskip("Bio")
+from microseq_tests.utility import utils
+from microseq_tests.trimming import ab1_to_fastq
 
 CLI = ["python", "-m", "microseq_tests.microseq"] # invoke module in-process 
 

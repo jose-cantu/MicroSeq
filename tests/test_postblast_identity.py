@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+pytest.importorskip("pandas")
+pytest.importorskip("numpy")
 import numpy as np          # for a dense BIOM matrix
 import pandas as pd
-import pytest
 
 biom = pytest.importorskip("biom")
 

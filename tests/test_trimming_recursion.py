@@ -1,5 +1,7 @@
 import pathlib
 import shutil
+import pytest
+pytest.importorskip("Bio")
 from Bio import SeqIO
 from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq
 from microseq_tests.trimming.fastq_to_fasta import fastq_folder_to_fasta

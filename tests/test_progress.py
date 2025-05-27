@@ -7,9 +7,11 @@ The approach used is a temporary monkeypatch == py.test.monkeypatch
  - The public function merged_hits or trim_folder on a small fixture dataset and asset the counter equals the number of files.
 
 """ 
-from __future__ import annotations 
-from pathlib import Path 
-import io, textwrap, pytest 
+from __future__ import annotations
+from pathlib import Path
+import io, textwrap, pytest
+pytest.importorskip("pandas")
+pytest.importorskip("Bio")
 
 # functions that are going to be tested 
 from microseq_tests.microseq import merge_hits 

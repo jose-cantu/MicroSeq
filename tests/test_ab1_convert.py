@@ -1,5 +1,7 @@
-import pathlib 
-from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq 
+import pathlib
+import pytest
+pytest.importorskip("Bio")
+from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq
 
 def test_ab1_to_fastq(tmp_path: pathlib.Path):
     fixtures = pathlib.Path(__file__).parent / "fixtures" 

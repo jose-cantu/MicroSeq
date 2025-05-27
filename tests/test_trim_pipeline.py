@@ -19,6 +19,9 @@ from pathlib import Path          # pathlib makes path maths ( / , .resolve() â€
 import subprocess                 # run the CLI exactly as a user would
 import sys                        # gives us sys.executable â†’ the Python in the current env
 import uuid                       # create a unique temp workdir per test run
+import pytest
+pytest.importorskip("pandas")
+pytest.importorskip("Bio")
 
 # pytest automatically supplies a `tmp_path` fixture: a unique temporary
 # directory that is cleaned up after the test finishes.

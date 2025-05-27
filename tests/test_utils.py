@@ -1,7 +1,8 @@
-from __future__ import annotations 
+from __future__ import annotations
 import sys, inspect
+import os, logging, pathlib, pytest
+pytest.importorskip("pandas")
 import microseq_tests, importlib.util
-import os, logging, pathlib, pytest 
 from microseq_tests.utility.utils import load_config, setup_logging
 
 def test_load_config(): 

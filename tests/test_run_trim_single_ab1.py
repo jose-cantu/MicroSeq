@@ -1,4 +1,7 @@
 from pathlib import Path
+import pytest
+pytest.importorskip("pandas")
+pytest.importorskip("Bio")
 import microseq_tests.pipeline as mp
 
 

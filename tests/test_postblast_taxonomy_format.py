@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pandas as pd
 import pytest
+pytest.importorskip("pandas")
+import pandas as pd
 
 from microseq_tests.post_blast_analysis import run as postblast_run
 

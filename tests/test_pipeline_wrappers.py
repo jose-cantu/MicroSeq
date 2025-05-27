@@ -1,6 +1,7 @@
+import pytest
+pytest.importorskip("pandas")
 import pandas as pd
 from pathlib import Path
-import pytest
 
 biom = pytest.importorskip("biom")
 from microseq_tests import pipeline as mp
