@@ -120,6 +120,8 @@ Keep in mind for MacOS install the intel variation provided from miniconda and N
 | Python 3.10 – 3.13     | Runs the CLI & GUI                                      | [https://www.python.org/downloads/](https://www.python.org/downloads/)                                                         |
 | BLAST+, TaxonKit, CAP3 | Auto‑installed into the Conda env – no action needed    | –                                                                   | Brew                   | For MacOS users only needed for running blast smoothly  | [https://brew.sh] 
 
+ Brew                    For MacOS users only needed for running blast smoothly    [https://brew.sh] 
+
 
 ---
 
