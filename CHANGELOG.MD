@@ -32,6 +32,7 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 ### Fixed Bugs 
 - Percent signs escape properly for `argparse`.
 - Second BLAST run now wraps the command correctly.
+- Patched blastdbcmd so that it can see the fullpath and avoid MemoryMap Error on wizard command microseq-setup 
 
 
 ---
