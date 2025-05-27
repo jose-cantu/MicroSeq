@@ -172,6 +172,12 @@ def main() -> None:
         default="error",
         help="How to handle duplicates SampleID rows after normalisation",
     )
+
+    # hardware helper ------------------------------------------------------
+    sp.add_parser(
+        "recommend-threads",
+        help="Suggest a default --threads value for this machine",
+    )
     
     # parse out arguments 
     args = ap.parse_args()
@@ -323,8 +329,12 @@ def main() -> None:
                     ["biom", "convert",
                      "-i", out_biom, "-o", json_out,
                      "--to-json"])
-            print(f" ✓ JSON : {json_out}") 
-            
+
+            print(f" ✓ JSON : {json_out}")
+
+    elif args.cmd == "recommend-threads":
+        from microseq_tests.hardware import recommend_threads
+        print(recommend_threads())
 
     elif args.cmd == "add_taxonomy":
     # --db key -> ${MICROSEQ_DB_HOME}/key-db-used/taxonomy.tsv 

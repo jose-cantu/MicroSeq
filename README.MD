@@ -17,13 +17,14 @@ For version control, please see the changelog I have attached. [CHANGELOG](https
 4. [Prerequisites](#prerequisites)
 5. [Detailed installation](#detailed-installation)
 6. [Logging & run locations](#logging--run-locations)
-7. [Command reference](#command-reference)
-8. [End‑to‑end examples](#end-to-end-examples)
-9. [QC & Assembly tools explained](#qc--assembly-tools-explained)
-10. [CAP3 (microseq assembly)](#cap3-microseq-assembly)
-11. [Advanced topics](#advanced-topics)
-12. [Contributing / Support](#contributing--support)
-13. [License & Citation](#license--citation)
+7. [Choosing the right `--threads`](#choosing-the-right-threads)
+8. [Command reference](#command-reference)
+9. [End‑to‑end examples](#end-to-end-examples)
+10. [QC & Assembly tools explained](#qc--assembly-tools-explained)
+11. [CAP3 (microseq assembly)](#cap3-microseq-assembly)
+12. [Advanced topics](#advanced-topics)
+13. [Contributing / Support](#contributing--support)
+14. [License & Citation](#license--citation)
 
 ---
 
@@ -181,6 +182,16 @@ preserves every log.
 
 ### Workdir basics
 When omitted, `--workdir` defaults to the `default_workdir` value in `config.yaml`. Each run creates `qc/`, `asm/` and `blast/` folders inside this directory. Use `--workdir PATH` to place intermediates elsewhere or `--workdir .` to write outputs next to your input files.
+
+### Choosing the right `--threads`
+
+| Scenario | Quick answer | Why |
+|----------|--------------|-----|
+| **Laptop, 8 GB RAM** | `microseq blast … --threads $(microseq recommend-threads)` | Leaves ~2 GB for the OS, avoids swap. |
+| **Workstation, 32 cores / 64 GB** | Same as above, usually returns 16. | Diminishing returns beyond 16 for BLAST; memory still the limiter. |
+| **SLURM / cluster** | Let your job script set `--threads $SLURM_CPUS_ON_NODE` | Scheduler already assigns CPUs & cgroups; auto-detection is unreliable. |
+
+> **Tip:** `microseq recommend-threads` inspects *this* machine only. On shared clusters the admin may cap RAM per core, so follow the queue’s guidelines instead.
 
 ---
 
