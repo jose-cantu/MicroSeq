@@ -84,9 +84,10 @@ $ conda activate MicroSeq
 # 3  Editable install (good while developing)
 $ pip install -e .
 
-# 3b macOS users this step only (Windows and Linux users please ignore) - adding GNU stdbuf 
-brew install coreutils
-ln -s /opt/homebrew/bin/gstdbuf "$(dirname $(which blastn))/stdbuf" 
+# 3b macOS users optional: install Expect for live progress (no symlink needed)
+brew install expect  # provides 'unbuffer'
+# Do **not** symlink `gstdbuf` to `stdbuf`; this is optional for live progress
+# MicroSeq still works without this; progress updates less often without unbuffer
 
 # 4  Download reference DBs & configure logging
 $ microseq-setup                 # interactive, 3–5 min first run

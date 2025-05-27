@@ -1,6 +1,6 @@
 # -- src/microseq_tests/blast/run_blast.py ---------------
-from __future__ import annotations 
-import logging, os, subprocess, shutil, re, functools, threading, time
+from __future__ import annotations
+import logging, os, subprocess, shutil, re, functools, threading, time, sys
 try:
     from PySide6.QtCore import QThread
 except Exception:  # allow running without Qt
@@ -19,16 +19,16 @@ from dataclasses import dataclass
 
 # --- Choose the first unbuffer tool we can find here sooo -----------
 def _find_unbuffer_tool() -> list[str]:
-    """
-    Return a ['tool', 'arg1', …] prefix that forces line-buffered output,
-    or an empty list if no such tool exists on this system.
-    """
-    for tool, args in (("stdbuf", ["-oL", "-eL"]), 
-        ("gstdbuf", ["-oL", "-eL"]), 
-        ("unbuffer", [])): # expect-dev 
-        if (p := shutil.which(tool)):
+    """Return a command prefix that forces line-buffered output."""
+    if sys.platform.startswith("linux"):
+        for tool in ("stdbuf",):
+            if p := shutil.which(tool):
+                logging.getLogger(__name__).debug("streaming via %s", tool)
+                return [p, "-oL", "-eL"]
+    for tool in ("unbuffer",):  # expect package
+        if p := shutil.which(tool):
             logging.getLogger(__name__).debug("streaming via %s", tool)
-            return [p] + args 
+            return [p]
     logging.getLogger(__name__).debug("no buffer tool; output may be buffered")
     return []
 
