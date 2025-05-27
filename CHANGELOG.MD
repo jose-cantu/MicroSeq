@@ -20,6 +20,7 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 - GUI toggle for speed vs. sensitivity BLAST algorithms.
 - Fallback to classic `blastn` when identity or coverage falls below 90%.
 - Added pytests covering the new logging behaviour.
+- New `recommend-threads` command suggests a safe default for `--threads`.
 
 ### Changes Made 
 - Simplified `microseq-setup` wizard, removing obsolete logging mode.
