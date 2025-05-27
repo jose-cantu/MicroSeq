@@ -146,6 +146,22 @@ Re‑run anytime with different flags to move DBs or logs elsewhere.
 
 A symlink `logs/microseq_latest.log` always points at the active log file, so `tail ‑F logs/microseq_latest.log` just works.
 
+If `MICROSEQ_SESSION_ID` is **not** set, the logger prints one warning and
+generates a random session ID, e.g.:
+
+```
+⚠️  MICROSEQ_SESSION_ID not set – using auto session ID 20250101-123456-abcd
+   (export MICROSEQ_SESSION_ID=YOUR_ID to aggregate multiple commands)
+```
+
+Define the variable ahead of time to suppress the warning and group multiple runs
+into a single log file.
+
+Old logs are kept indefinitely. Tweak `logging.backup_count` in
+`config/config.yaml` (or pass `backup_count` to `setup_logging` when scripting)
+to retain only the last *N* auto-generated files. The default value of `0`
+preserves every log.
+
 
 ### Workdir basics
 When omitted, `--workdir` defaults to the `default_workdir` value in `config.yaml`. Each run creates `qc/`, `asm/` and `blast/` folders inside this directory. Use `--workdir PATH` to place intermediates elsewhere or `--workdir .` to write outputs next to your input files.
