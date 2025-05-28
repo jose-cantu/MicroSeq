@@ -84,7 +84,7 @@ $ conda activate MicroSeq
 # 3  Editable install (good while developing)
 $ pip install -e .
 
-# 3b macOS users optional: install Expect for live progress (no symlink needed)
+# 3b macOS users only install Expect for live progress bar 
 brew install expect  # provides 'unbuffer'
 
 # 4  Download reference DBs & configure logging
