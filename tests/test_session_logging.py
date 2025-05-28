@@ -1,4 +1,5 @@
 import os, logging, time
+import subprocess
 from pathlib import Path
 import re
 import pytest
@@ -78,7 +79,6 @@ def test_prune_only_auto_logs(tmp_path, monkeypatch):
     assert len(auto_remaining) == 6                   # 5 old logs + new one
     assert "microseq_myRun.log" in remaining          # untouched
 
-
 # ──────────────────────────────────────────────────────────────
 def test_session_id_flag_respected(tmp_path, monkeypatch):
     """setup_logging should honour MICROSEQ_SESSION_ID when set later."""
@@ -89,3 +89,42 @@ def test_session_id_flag_respected(tmp_path, monkeypatch):
     f = setup_logging(tmp_path, force=True, console=False)
 
     assert f.name.endswith("microseq_cliDemo.log")
+
+# ──────────────────────────────────────────────────────────────
+def test_parent_child_logging(tmp_path, monkeypatch):
+    """Child process logs to same session file as parent."""
+    monkeypatch.setenv("MICROSEQ_SESSION_ID", "shared123")
+
+    log_file = setup_logging(tmp_path, force=True, console=False)
+    logging.getLogger().info("parent-line")
+    logging.shutdown()
+
+    child_script = tmp_path / "child.py"
+    child_script.write_text(
+        """
+import importlib.util, types, os, sys, logging
+from pathlib import Path
+ROOT = Path(os.environ['REPO_ROOT'])
+UTIL_PATH = ROOT / 'src' / 'microseq_tests' / 'utility' / 'utils.py'
+yaml_stub = types.ModuleType('yaml')
+yaml_stub.safe_load = lambda fh: {}
+sys.modules.setdefault('yaml', yaml_stub)
+spec = importlib.util.spec_from_file_location('mutils', UTIL_PATH)
+mutils = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mutils)
+setup_logging = mutils.setup_logging
+setup_logging(Path(os.environ['LOG_DIR']), force=True, console=False)
+logging.getLogger().info('child-line')
+logging.shutdown()
+"""
+    )
+
+    env = os.environ.copy()
+    env['REPO_ROOT'] = str(ROOT)
+    env['LOG_DIR'] = str(tmp_path)
+    subprocess.run([sys.executable, str(child_script)], check=True, env=env)
+
+    logs = log_file.read_text()
+    assert 'parent-line' in logs
+    assert 'child-line' in logs
+

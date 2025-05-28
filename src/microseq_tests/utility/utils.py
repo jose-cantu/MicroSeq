@@ -131,7 +131,7 @@ def setup_logging(
             encoding="utf-8", delay=True
         )
     else:
-        fh = logging.FileHandler(logfile, mode="w", encoding="utf-8", delay=True)
+        fh = logging.FileHandler(logfile, mode="a", encoding="utf-8", delay=True)
 
     fh.setFormatter(fmt)
     root_logger.addHandler(fh)
