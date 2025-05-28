@@ -86,8 +86,6 @@ $ pip install -e .
 
 # 3b macOS users optional: install Expect for live progress (no symlink needed)
 brew install expect  # provides 'unbuffer'
-# Do **not** symlink `gstdbuf` to `stdbuf`; this is optional for live progress
-# MicroSeq still works without this; progress updates less often without unbuffer
 
 # 4  Download reference DBs & configure logging
 $ microseq-setup                 # interactive, 3–5 min first run
