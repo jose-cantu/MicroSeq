@@ -181,6 +181,7 @@ generates a random session ID, e.g.:
 
 Define the variable ahead of time to suppress the warning and group multiple runs
 into a single log file.
+> **Note:** If multiple processes write to the same log file (e.g. job arrays with the same session ID), NFS filesystems might interleave lines. If this occurs, give each task a unique `MICROSEQ_SESSION_ID`.
 
 Old logs are kept indefinitely. Tweak `logging.backup_count` in
 `config/config.yaml` (or pass `backup_count` to `setup_logging` when scripting)
