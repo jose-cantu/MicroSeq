@@ -77,3 +77,15 @@ def test_prune_only_auto_logs(tmp_path, monkeypatch):
     auto_remaining = sorted(n for n in remaining if n.startswith("microseq_2025"))
     assert len(auto_remaining) == 6                   # 5 old logs + new one
     assert "microseq_myRun.log" in remaining          # untouched
+
+
+# ──────────────────────────────────────────────────────────────
+def test_session_id_flag_respected(tmp_path, monkeypatch):
+    """setup_logging should honour MICROSEQ_SESSION_ID when set later."""
+    monkeypatch.delenv("MICROSEQ_SESSION_ID", raising=False)
+    setup_logging(tmp_path, force=True, console=False)
+
+    monkeypatch.setenv("MICROSEQ_SESSION_ID", "cliDemo")
+    f = setup_logging(tmp_path, force=True, console=False)
+
+    assert f.name.endswith("microseq_cliDemo.log")

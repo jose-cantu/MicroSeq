@@ -34,7 +34,8 @@ def main() -> None:
     ap.add_argument("--workdir", default=cfg.get("default_workdir","data"), help="Root folder for intermediate outputs (default: ./data) note: Yaml is placed as a 2ndary place for a shared repo project which can you modify and change without using workdir flag otherwise use --workdir to point where you want to set up your individual project")
     ap.add_argument("--threads", type=int, default=4,
                     help="CPU threads for parallel stages")
-    ap.add_argument("-v", "--verbose", action="count", default=0, help="-v: info, -vv: use for debugging") 
+    ap.add_argument("--session-id", help="Override MICROSEQ_SESSION_ID")
+    ap.add_argument("-v", "--verbose", action="count", default=0, help="-v: info, -vv: use for debugging")
     sp = ap.add_subparsers(dest="cmd", required=True)
 
     # trimming sub command 
@@ -182,8 +183,11 @@ def main() -> None:
     # parse out arguments 
     args = ap.parse_args()
 
+    if args.session_id:
+        os.environ["MICROSEQ_SESSION_ID"] = args.session_id
+
     LEVEL = {0: logging.WARNING, 1: logging.INFO}.get(args.verbose, logging.DEBUG)
-    setup_logging(level=LEVEL)  # reusing helper, but expose by level 
+    setup_logging(level=LEVEL)  # reusing helper, but expose by level
 
     # createing the directory for workdir
     workdir_arg = args.workdir or cfg.get("default_workdir", "data")

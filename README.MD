@@ -170,6 +170,7 @@ your shell and source it before running MicroSeq.
 | `--workdir` (CLI)   | Per‑run scratch folder for intermediate files                     | `default_workdir` from `config.yaml` (e.g. `~/microseq_runs`)          | `--workdir /scratch/$USER/run42`            |
 | `MICROSEQ_LOG_DIR`  | Where rotated log files are written                               | `<repo>/logs`              | `export MICROSEQ_LOG_DIR=/var/log/microseq` |
 | `MICROSEQ_LOG_FILE` | Override log file location entirely | — | `export MICROSEQ_LOG_FILE=/tmp/microseq.log` |
+| `--session-id` (CLI) | Set the value of `MICROSEQ_SESSION_ID` for this run | — | `--session-id my_run` |
 | `MICROSEQ_SESSION_ID` | Aggregates multiple runs into one log when set; otherwise timestamped files | — | `export MICROSEQ_SESSION_ID=my_run` |
 
 A symlink `logs/microseq_latest.log` always points at the active log file, so `tail ‑F logs/microseq_latest.log` just works.
