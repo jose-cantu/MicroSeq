@@ -157,6 +157,9 @@ What it does:
 4. Writes or patches `config/config.yaml` so library calls inherit the same paths.
 
 Re‑run anytime with different flags to move DBs or logs elsewhere.
+Example scripts to initialise a logging session are under
+`config/templates/activate_microseq_session.*.example`.  Copy the variant for
+your shell and source it before running MicroSeq.
 
 ---
 
@@ -182,6 +185,14 @@ generates a random session ID, e.g.:
 Define the variable ahead of time to suppress the warning and group multiple runs
 into a single log file.
 > **Note:** If multiple processes write to the same log file (e.g. job arrays with the same session ID), NFS filesystems might interleave lines. If this occurs, give each task a unique `MICROSEQ_SESSION_ID`.
+
+Example helper scripts to do so live in
+`config/templates/activate_microseq_session.sh.example` (bash or zsh) and
+`config/templates/activate_microseq_session.fish.example`.  Copy the one
+matching your shell and source it on login to keep all commands under the same
+session ID.
+
+(Adjusted microseq-setup to include more than just bash also zsh and fish and created config files to use after setup depending on scenario)
 
 Old logs are kept indefinitely. Tweak `logging.backup_count` in
 `config/config.yaml` (or pass `backup_count` to `setup_logging` when scripting)
@@ -414,7 +425,7 @@ Note when blasting there are two algorithms: The Fast (megablast ≥ 95 % ID) is
 ## Advanced topics
 
 * **Custom databases** – point `microseq blast -d /path/my_db` and supply a matching taxonomy TSV to `microseq add_taxonomy`.
-* **Nextflow/Snakemake integration** – export `MICROSEQ_SESSION_ID=$RUN_NAME` and use per-process `--workdir` to avoid clashes.
+* **Nextflow/Snakemake integration** – export `MICROSEQ_SESSION_ID` to your scheduler's run ID (e.g. `$SLURM_JOB_ID`, `${workflow.runName}`) and use per-process `--workdir` to avoid clashes.
 
 ---
 

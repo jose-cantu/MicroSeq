@@ -265,7 +265,8 @@ export MICROSEQ_DB_HOME="{db_root}"
 export BLASTDB="$MICROSEQ_DB_HOME/gg2:$MICROSEQ_DB_HOME/silva:$MICROSEQ_DB_HOME/ncbi"
 export BLASTDB_LMDB=0
 export MICROSEQ_LOG_DIR="{log_dir}"
-export MICROSEQ_SESSION_ID=$RUN_NAME 
+# export MICROSEQ_SESSION_ID=$SLURM_JOB_ID      # Slurm
+# export MICROSEQ_SESSION_ID=${{workflow.runName}} # Nextflow
 """
 
     def append_once(target: Path, text: str) -> None:
@@ -303,7 +304,15 @@ export MICROSEQ_SESSION_ID=$RUN_NAME
     cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
     log(f"✓ config.yaml updated at {cfg_path}")
 
+    # --------- helper template locations ---------------------------------
+    template_dir = REPO_ROOT / "config" / "templates"
+    sh_tpl = template_dir / "activate_microseq_session.sh.example"
+    fish_tpl = template_dir / "activate_microseq_session.fish.example"
+
     print("\nDone! Open a new shell (or `source ~/.bashrc`) and test it using the smoke test I have setup in github install:")
+    print("Session helper templates:")
+    print(f"  bash/zsh: {sh_tpl}")
+    print(f"  fish:     {fish_tpl}")
 
 if __name__ == "__main__":
     main() 

@@ -1,0 +1,1 @@
+set -gx MICROSEQ_SESSION_ID ( test -n "$MICROSEQ_SESSION_ID" ; and echo $MICROSEQ_SESSION_ID ; or date "+%Y%m%d-%H%M%S"-$$ )

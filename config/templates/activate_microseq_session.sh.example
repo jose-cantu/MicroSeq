@@ -1,0 +1,1 @@
+export MICROSEQ_SESSION_ID=${MICROSEQ_SESSION_ID:-$(date +%Y%m%d-%H%M%S)-$$}
