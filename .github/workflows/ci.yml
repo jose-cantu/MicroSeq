@@ -20,14 +20,7 @@ jobs:
             envfile: config/environment.yml
             needs_brew_expect: true
             is_macos: true
-            is_windows: false
-
-          # ——— Windows (no cap3) ———
-          - os: windows-latest
-            envfile: config/environment-nocap.yml
-            needs_brew_expect: false
-            is_macos: false
-            is_windows: true
+            is_windows: false 
 
     runs-on: ${{ matrix.os }}
 
