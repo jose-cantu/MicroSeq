@@ -24,6 +24,11 @@ license-files = [
 [tool.setuptools.packages.find]
 where = ["src"]    # find all packages unders src/
 
+[project.entry-points."microseq.aligners"]
+blastn = "microseq_tests.aligners.blast:BlastAligner" 
+
+
+
 [project.scripts]
 microseq = "microseq_tests.microseq:main"
 microseq-setup = "microseq_tests.utility.fetch_dbs:main"
