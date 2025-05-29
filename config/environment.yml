@@ -11,7 +11,10 @@ dependencies:
   - python = 3.10
 
   # python libraries imported 
-  - pyyaml 
+  - pyyaml
+  - numpy<2 # keeping Pandera 0.17 and Python 3.10 compatible 
+  - pandera>=0.17,<0.18 # keeping 3.10 Python compatible 
+  - multimethod>=1.9,<2 # pinned version so Pandera doesn't break on use 
   - pytest   # test runner 
   - pyside6     # GUI 
   - pip # pip-install extras 
