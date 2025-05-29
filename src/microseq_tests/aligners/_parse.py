@@ -7,11 +7,10 @@ from pathlib import Path
 COLS ="qseqid sseqid pident qlen qcovhsp length evalue bitscore stitle".split()
 
 def parse_blast_tab(tsv: Path) -> pd.DataFrame:
-    df = pd.read_csv(tsv, sep="\t", names = COLS, comment="#")
-    # If the header line isn't commented, drop it expicityly:
-    if df.iloc[0, 0] == "qseqid":
-        df = df.iloc[1:].reset_index(drop=True)
+    df = pd.read_csv(tsv, sep="\t", names = COLS, comment="#", skiprows=1)
+
     return df[COLS] 
+ 
 
 
 

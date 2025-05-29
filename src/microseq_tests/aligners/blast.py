@@ -34,13 +34,18 @@ class BlastAligner(BaseAligner):
             threads=threads,
             **kw,
         )
-        df = validate(parse_blast_tab(out_tsv)) 
+        df = parse_blast_tab(out_tsv) 
+        if not df.empty:
+            df = validate(df) 
+        
 
         if fast:
            needs_retry = df.empty or (
+            (not df.empty) and (
                df.iloc[0]["pident"]   < ident_cut or
                df.iloc[0]["qcovhsp"] < qcov_cut
-           )
+            )
+           ) 
        
            if needs_retry:
                    run_blast(
@@ -51,7 +56,10 @@ class BlastAligner(BaseAligner):
                        threads=threads,
                        **kw,
                    )
-                   df = validate(parse_blast_tab(out_tsv))
+                   df = parse_blast_tab(out_tsv)
+                   if not df.empty:
+                       df = validate(df) 
+
         return df
 
 
