@@ -547,11 +547,12 @@ class MainWindow(QMainWindow):
             b.setEnabled(True)
         self.cancel_btn.setEnabled(False)
 
-        # safe Qt clean‑up ------------------------------------------
-        if self._worker:
-            self._worker.deleteLater()
-        if self._thread:
-            self._thread.deleteLater()
+        # safe Qt clean-up ------------------------------------------
+        #
+        # Using deleteLater() here caused occasional crashes when the
+        # tests run under pytest-qt.  The objects will be cleaned up
+        # by Qt once the window closes, so simply drop the references
+        # instead of explicitly scheduling them for deletion.
         self._worker = None
         self._thread = None
 
