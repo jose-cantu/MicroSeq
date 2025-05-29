@@ -91,9 +91,8 @@ def main() -> None:
     p_blast.add_argument("--relaxed-id", type=float, default=80.0, help="Search percent-identity when --relaxed (default 80)") 
     p_blast.add_argument("--relaxed-qcov", type=float, default=0.0, help="Search qcov_hsp_perc when --relaxed (default 0)")
     p_blast.add_argument("--export-sweeper", action="store_true", help="Also write hits_full_sweeper.tsv containing " "sample_id, bitscore, clean headers") 
-    p_blast.add_argument("--blast-task", choices=["megablast", "blastn"], default="megablast", help="BLAST algorithm: megablast (fast, ≥95 %% ID) or blastn (comprehensive, use <95%% ID)") 
-
-
+    p_blast.add_argument("--aligner", choices=["auto", "blastn", "vsearch"], default="auto", help="Alignment engine: auto=length rule, blastn, or vsearch")
+    
     # sweeper used to predict PASS cutoff point to hit desired TARGET PASS count 
     p_sweep = sp.add_parser("suggest-cutoffs", help="Suggest identity/qcov pairs to hit TARGET PASS count of number of samples after per-sample collapse", description=("Given a BLAST sweeper table (*.tsv) from a relaxed search, "
         "scan identity/qcov combinations and report those that yield a "
@@ -251,27 +250,33 @@ def main() -> None:
 
         # build the option object from CLI flag here ......
         # also adding local import  
-        from microseq_tests.blast.run_blast import BlastOptions
-        from microseq_tests.pipeline import run_blast_stage 
-        options = BlastOptions(task=args.blast_task) 
+        from microseq_tests.aligners import load as load_aligner
 
-        # treat this as one monolithic bar for all isolates/samples in one run 
-        with stage_bar(total, desc="blast", unit="seq") as bar:
+        # choose engine
+        if args.aligner == "auto":
+            longest = max(len(r.seq) for r in SeqIO.parse(args.input, "fasta"))
+            chosen  = "blastn" if longest >= 1200 else "blastn"  # megablast handled inside BlastAligner via fast=True
+        else:
+            chosen = args.aligner
 
-            # simple progress hook – keep the nice outer tqdm
-            progress_cb = lambda pct: bar.update( max(0, int(pct*total/100) - bar.n) )
+        aligner = load_aligner(chosen)
 
-            run_blast_stage(
-                pathlib.Path(args.input),
+        # single run wrapped in progress bar 
+        with stage_bar(total, desc=chosen, unit="seq") as bar:
+            # single progress hook is fine; aligner prints its own bar if any
+            hits_df = aligner.run(
+                args.input,
                 args.db,
-                pathlib.Path(args.output),
-                identity=args.identity,
-                qcov=args.qcov,
-                max_target_seqs=args.max_target_seqs,
                 threads=args.threads,
-                on_progress=progress_cb,
-                blast_task=args.blast_task,
+                identity_cutoff=args.identity,
+                qcov_cutoff=args.qcov,
             )
+        hits_df.to_csv(args.output, sep="\t", index=False)
+        print(f"✓ {chosen} hits → {args.output}")
+
+
+
+
 
     elif args.cmd == "merge-hits":
         # resolve globs after argparse to keep it cross-platform functional 

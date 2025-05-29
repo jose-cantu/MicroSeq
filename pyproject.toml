@@ -25,7 +25,8 @@ license-files = [
 where = ["src"]    # find all packages unders src/
 
 [project.entry-points."microseq.aligners"]
-blastn = "microseq_tests.aligners.blast:BlastAligner" 
+blastn = "microseq_tests.aligners.blast:BlastAligner"
+vsearch = "microseq_tests.aligners.vsearch:VsearchAligner" 
 
 
 

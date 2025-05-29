@@ -25,7 +25,8 @@ dependencies:
   - pandas
   - taxonkit # for parsing and creating taxonomy.tsv for NCBI16s and SILVA  
   - ete3
-  - pytest-qt 
+  - pytest-qt
+  - vsearch # for vsearch global alignment algorithm 
 
   # external bio-tools
   - trimmomatic    # adds trimmomatic to $CONDA_PREFIX/bin  
