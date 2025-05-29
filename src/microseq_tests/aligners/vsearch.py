@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess, os, pandas as pd 
 from .base import BaseAligner 
 from ._parse import parse_blast_tab 
-from .scheme import validate 
+from .schema import validate 
 
 class VsearchAligner(BaseAligner):
     name = "vsearch"
