@@ -342,8 +342,8 @@ class MainWindow(QMainWindow):
 
         worker.progress.connect(_progress_with_eta)
         # injecting wrapper + args into Worker; moves into new thread 
-        thread = QThread(self) # autodeleted with window 
-        worker.moveToThread(thread) 
+        thread = QThread()
+        worker.moveToThread(thread)
 
         # wire signal between log streaming, completion and thread shutdown
 
@@ -373,7 +373,7 @@ class MainWindow(QMainWindow):
         self.cancel_btn.setEnabled(True)
 
         worker = Worker(fn, *args, **kw)
-        thread = QThread(self)
+        thread = QThread()
         worker.moveToThread(thread)
 
         t0 = time.time()
@@ -398,8 +398,9 @@ class MainWindow(QMainWindow):
             self._last_result = r 
         worker.finished.connect(_remember) 
 
-        worker.finished.connect(thread.quit) # ask thread to exit 
-        thread.finished.connect(self._done) # run _done when thread is gone 
+        worker.finished.connect(thread.quit) # ask thread to exit
+        thread.finished.connect(self._done) # run _done when thread is gone
+        thread.finished.connect(thread.deleteLater)
 
         self._worker = worker
         self._thread = thread
@@ -476,13 +477,14 @@ class MainWindow(QMainWindow):
             self.meta_path,
             out_biom,
         )
-        thread = QThread(self)
+        thread = QThread()
         worker.moveToThread(thread)
         worker.log.connect(self.log_box.append)
         thread.started.connect(worker.run)
         worker.finished.connect(lambda r: setattr(self, "_last_result", r))
         worker.finished.connect(thread.quit)
         thread.finished.connect(self._done)
+        thread.finished.connect(thread.deleteLater)
 
         self._worker = worker
         self._thread = thread
@@ -548,13 +550,12 @@ class MainWindow(QMainWindow):
         self.cancel_btn.setEnabled(False)
 
         # safe Qt clean-up ------------------------------------------
-        #
-        # Using deleteLater() here caused occasional crashes when the
-        # tests run under pytest-qt.  The objects will be cleaned up
-        # by Qt once the window closes, so simply drop the references
-        # instead of explicitly scheduling them for deletion.
-        self._worker = None
-        self._thread = None
+        if self._worker:
+            self._worker.deleteLater()
+            self._worker = None
+        if self._thread:
+            self._thread.deleteLater()
+            self._thread = None
 
 
 
