@@ -17,7 +17,12 @@ class VsearchAligner(BaseAligner):
         db_fa = f"{os.environ['MICROSEQ_DB_HOME']}/{db_key}/greengenes2_db.fasta"
 
         subprocess.run([
-            "vsearch", "--usearch_global", query_fa, "--db", db_fa, "--blast6out", out_tsv, "--threads", str(threads),], check=True) 
+            "vsearch", "--usearch_global", query_fa,
+            "--db", db_fa,
+            "--blast6out", out_tsv,
+            "--id", "0.8",
+            "--threads", str(threads),
+        ], check=True)
 
         df = parse_blast_tab(out_tsv)
         if not df.empty:

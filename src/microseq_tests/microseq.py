@@ -254,7 +254,10 @@ def main() -> None:
 
         # choose engine
         if args.aligner == "auto":
-            longest = max(len(r.seq) for r in SeqIO.parse(args.input, "fasta"))
+            try:
+                longest = max(len(r.seq) for r in SeqIO.parse(args.input, "fasta"))
+            except ValueError:
+                longest = max(len(r.seq) for r in SeqIO.parse(args.input, "fastq"))
             chosen  = "blastn" if longest >= 1200 else "blastn"  # megablast handled inside BlastAligner via fast=True
         else:
             chosen = args.aligner
