@@ -1,6 +1,6 @@
 default_workdir: ~/microseq_runs
 logging:
-  dir: /home/jason/MicroSeq/logs
+  dir: /Users/josecantu/MicroSeq/logs
   backup_count: 0
   session_env: MICROSEQ_SESSION_ID
 tools:

@@ -118,12 +118,18 @@ class MainWindow(QMainWindow):
         self.hits_spin.setSuffix(" hits")
 
         # ---- Alignmnet mode box ----------------
-        mode_box = QGroupBox("Alignment mode")
-        fast_rb = QRadioButton("Fast (megablast)")
-        slow_rb = QRadioButton("Comprehensive - sensitivity (blastn)") 
-        vbox = QVBoxLayout(mode_box)
-        vbox.addWidget(fast_rb)
-        vbox.addWidget(slow_rb)
+        self.mode_box = QComboBox()
+        self.mode_box.addItems([
+            "Fast (megablast)",
+            "Comprehensive (blastn)",
+            "Global (vsearch)",
+            ]) 
+        # --- persistence ---------------
+        index = {"megablast": 0, "blastn"; 1, "vsearch": 2}.get(
+                self.settings.value("aligner", "megablast"), 0 ) 
+        self.mode_box.setCurrentIndexChanged.connect(
+            lambda i: self.settings.setValue("aligner", ("megablast", "blastn", "vsearch")[i]) 
+            ) 
 
         # restore previous choice (default = megablast)
         task = self.settings.value("blast_task", "megablast")
@@ -259,7 +265,7 @@ class MainWindow(QMainWindow):
                 self._infile = Path(dir_path)
         else:
 
-            # multi-file selection is allowed but only the first file is used
+            # multi-file selection is allowed but only the first file is used (Need to update to include nested file usage) 
             self._infile = Path(paths[0])
 
 
