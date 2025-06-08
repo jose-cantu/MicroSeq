@@ -31,6 +31,8 @@ jobs:
     - name: installer smoke-test (macOS)
       if: ${{ matrix.is_macos }}
       shell: bash -euo pipefail {0} 
+      env:
+        MICROSEQ_CHOICE: 1 # pre-seed "miniconda" for non-interacitve run 
       run: |
         source install_macos_microseq.sh 
         test -n "$(detect_arch)"

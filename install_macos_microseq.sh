@@ -22,12 +22,22 @@ if have_conda; then # inspect if conda exists
    fi
 fi  # fi closes both if statements here
 
+# Detect CI / non-interacitve shells and pre-seed choice here 
+if [[ ! -t 0 ]]; then # stdin is not a TTY -> scipt source by CI 
+  choice=${MICROSEQ_CHOICE:-1} # allow override via env; default to 1 (miniconda)
+else 
+  choice="" # interactive session -> will use prompts I made below 
+fi 
+
 # ask the user where they wants miniconda or anaconda 
-echo 
-echo "Select Conda distribution:"
-echo " [1] Miniconda (roughly 80 MB) ~ beginners to conda"
-echo " [2] Anaconda (rouchly 4GB, bundles science stack) ~ peeps familiar with Conda" 
-read -rp "Choice 1/2 -> " choice 
+if [[ -z $choice ]]; then	
+	echo 
+	echo "Select Conda distribution:"
+	echo " [1] Miniconda (roughly 80 MB) ~ beginners to conda"
+	echo " [2] Anaconda (rouchly 4GB, bundles science stack) ~ peeps familiar with Conda" 
+	read -rp "Choice 1/2 -> " choice 
+fi
+
 [[ $choice == 1 || $choice == 2 ]] || { echo "Abort - enter 1 or 2."; exit 1; }
 
 # build download URL and local filename 
