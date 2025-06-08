@@ -17,7 +17,7 @@ if have_conda; then # inspect if conda exists
    curr=$(get_conda_subdir || true) # may be empty or unset here 
    [[ -z $curr ]] && curr=osx-64 # empty means conda uses its default 
    if [[ $curr != osx-64 ]]; then # when key  is missing treat as intel osx-64 
-     echo "[installer] conda subdir is '$curr' - will patch to osx-64" 
+	   echo "[installer] Found a non-Intel conda (subdir=$curr). Switching to Miniconda-x86_64." 
      patch_needed=true 
    fi
 fi  # fi closes both if statements here
@@ -107,6 +107,13 @@ if [[ $(uname) == Darwin ]]; then
 fi
 
 pip install -e . # editable install keeps repo and CLI in sync (Pip install after so unbuffer works....)  
+
+# if running in GitHub actions, expose this env's bin/ to later steps 
+if [[ -n ${CI-} ]]; then # variable always set in Actions 
+  echo "[installer] exporting $CONDA_PREFIX/bin to GITHUB_PATH"
+  echo "$CONDA_PREFIX/bin" >> "$GITHUB_PATH" # makes microseq visible in next steps 
+fi 
+
 
 echo "[installer] running microseq-setup (may take 3-5 min) please wait until prompt which will take some time to show up ~ 1min" 
 if [[ -n ${CI-} ]]; then # CI -> non-interactive wizard for github actions test 
