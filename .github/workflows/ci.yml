@@ -1,5 +1,4 @@
 name: CI
-
 on: [push, pull_request]
 
 jobs:
@@ -8,87 +7,64 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ——— Linux (native cap3) ———
+          # Linux native
           - os: ubuntu-latest
-            envfile: config/environment.yml
-            needs_brew_expect: false
             is_macos: false
-            is_windows: false
-
-          # ——— macOS-arm64 (Intel cap3 via Rosetta) ———
+          # macOS – normal path
           - os: macos-latest
-            envfile: config/environment.yml
-            needs_brew_expect: true
             is_macos: true
-            is_windows: false 
+            preinstall_bad_conda: false
+          # macOS – wrong-arch conda
+          - os: macos-latest
+            is_macos: true
+            preinstall_bad_conda: true
 
     runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v4
 
-    # --- 0 Installer smoke test (macOS only) ----
-    - name: installer smoke-test (macOS)
-      if: ${{ matrix.is_macos }}
-      shell: bash -euo pipefail {0} 
-      env:
-        MICROSEQ_CHOICE: 1 # pre-seed "miniconda" for non-interacitve run 
-      run: |
-        source install_macos_microseq.sh 
-        test -n "$(detect_arch)"
-        echo "detect_arch returned $(detect_arch)"
-
-    # --- check conda presence and test for it 
-    - name: conda presence/subdir test (macOS)
-      if: ${{ matrix.is_macos }} 
+    # ── 0 ▸ (macOS test) deliberately install wrong-arch conda
+    - name: arm64 Miniforge (bad conda)
+      if: ${{ matrix.preinstall_bad_conda }}
       shell: bash -euo pipefail {0}
-      run: | 
-        source install_macos_microseq.sh 
-        have_conda && echo "conda present" || echo "no conda yet" 
-        if have_conda; then
-        sub=$(get_conda_subdir || true) 
-        [[ -z "$sub" ]] && sub=osx-64 
-        test "$sub" = osx-64 
-        echo "subdir = $sub" 
-        fi
+      run: |
+        curl -L https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-MacOSX-arm64.sh -o mf.sh
+        bash mf.sh -b -p "$HOME/miniforge_bad"
+        export PATH="$HOME/miniforge_bad/bin:$PATH"
+        conda config --show subdir | head -1                     # shows osx-arm64
 
-    # ── 1 ▸ Micromamba on Linux & Windows (no platform override) ──
+    # ── 1 ▸ run installer (macOS only)
+    - name: run MicroSeq installer
+      if: ${{ matrix.is_macos }}
+      shell: bash -euo pipefail {0}
+      env:
+        MICROSEQ_CHOICE: 1           # auto-select Miniconda in CI
+        CI: true                     # flag for --quiet wizard
+      run: |
+        source install_macos_microseq.sh
+        echo "patch_needed = $patch_needed"
+
+    # ── 1b ▸ legacy Micromamba path (Linux/Windows only)
     - name: setup micromamba (Linux/Windows)
       if: ${{ !matrix.is_macos }}
       uses: mamba-org/setup-micromamba@v1
       with:
-        environment-file: ${{ matrix.envfile }}
+        environment-file: config/environment.yml
         cache-downloads: true
-        post-cleanup: none               # avoid ENOENT bug
-
-    # ── 1b ▸ Micromamba on macOS (force osx-64) ──
-    - name: setup micromamba (macOS arm → osx-64)
-      if: ${{ matrix.is_macos }}
-      uses: mamba-org/setup-micromamba@v1
-      with:
-        environment-file: ${{ matrix.envfile }}
-        cache-downloads: true
-        create-args: --platform osx-64
         post-cleanup: none
-      env:
-        CONDA_SUBDIR: osx-64
 
-    # ── 2 ▸ macOS only: install Expect → `unbuffer` ──
-    - name: brew install expect
-      if: ${{ matrix.needs_brew_expect }}
-      run: brew install expect
-
-    # ── 3 ▸ Editable install of MicroSeq ──
-    - name: pip install -e .
+    - name: pip install MicroSeq (Linux/Windows)
+      if: ${{ !matrix.is_macos }}
       shell: bash -l {0}
       run: python -m pip install -e .
 
-    # ── 4 ▸ Download BLAST DBs ──
-    - name: microseq-setup --quiet
+    - name: microseq-setup --quiet (Linux/Windows)
+      if: ${{ !matrix.is_macos }}
       shell: bash -l {0}
       run: microseq-setup --quiet
 
-    # ── 5 ▸ Tiny smoke test ──
+    # ── 2 ▸ universal tiny BLAST smoke test
     - name: Tiny BLAST smoke test
       shell: bash -l {0}
       run: |
