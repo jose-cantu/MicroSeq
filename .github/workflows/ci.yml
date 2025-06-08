@@ -36,6 +36,20 @@ jobs:
         test -n "$(detect_arch)"
         echo "detect_arch returned $(detect_arch)"
 
+    # --- check conda presence and test for it 
+    - name: conda presence/subdir test (macOS)
+      if: ${{ matrix.is_macos }} 
+      shell: bash -euo pipefail {0}
+      run: | 
+        source install_macos_microseq.sh 
+        have_conda && echo "conda present" || echo "no conda yet" 
+        if have_conda; then
+        sub=$(get_conda_subdir || true) 
+        [[ -z "$sub" ]] && sub=osx-64 
+        test "$sub" = osx-64 
+        echo "subdir = $sub" 
+        fi
+
     # ── 1 ▸ Micromamba on Linux & Windows (no platform override) ──
     - name: setup micromamba (Linux/Windows)
       if: ${{ !matrix.is_macos }}
