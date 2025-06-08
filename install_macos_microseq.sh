@@ -80,4 +80,23 @@ if $patch_needed; then
   echo "[installer] Wrote osx-64 subdir to ~/.condarc" 
 fi
 
+# --- clone repo and build env and run wizard ------------
+[[ -d MicroSeq ]] || git clone https://github.com/jose-cantu/MicroSeq.git # clone once 
+cd MIcroSeq # enter repo 
+
+# make 'conda acitvate' available inside a sourced script 
+source "$(conda info --base)/etc/profile.d/conda.sh" 
+
+# create env only if it doesn't exist 
+conda env list | grep -q '^MicroSeq ' || conda env create -f config/environment.yml -n MicroSeq 
+
+conda activate MicroSeq # put env's Python on PATH 
+pip install -e . # editable install keeps repo and CLI in sync 
+
+echo "[installer] running microseq-setup (may take 3-5 min) please wait until prompt which will take some time to show up ~ 1min" 
+if [[ -n ${CI-} ]]; then # CI -> non-interactive wizard for github actions test 
+  microseq-setup --quiet 
+else 
+  microseq-setup # local user that I want full prompts for 
+fi 
 
