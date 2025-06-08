@@ -22,6 +22,12 @@ if have_conda; then # inspect if conda exists
    fi
 fi  # fi closes both if statements here
 
+# --- short-circuit reuse existing Intel conda -----------
+if have_conda && [[ $(get_conda_subdir || echo osx-64) = osx-64 ]]; then
+  echo "[installer] conda with osx-64 subdir already is present so skipping bootstrp." 
+  return 0 # script source'd so return is safer vs exit .....
+fi # fall thorugh when conda missing or wrong-arch 
+
 # Detect CI / non-interacitve shells and pre-seed choice here 
 if [[ ! -t 0 ]]; then # stdin is not a TTY -> scipt source by CI 
   choice=${MICROSEQ_CHOICE:-1} # allow override via env; default to 1 (miniconda)
