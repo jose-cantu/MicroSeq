@@ -234,7 +234,7 @@ class MainWindow(QMainWindow):
         self.hits_path: Optional[Path] = None
         self.meta_path: Optional[Path] = None
         self._current_stage: str = ""
-        setup_logging(level=logging.INFO)  # file + console stderr
+        setup_logging(level=logging.INFO, log_dir=None)  # file + console stderr
         root_logger = logging.getLogger()
         self._qt_handler = _QtHandler(self.log_box)
         root_logger.addHandler(self._qt_handler)

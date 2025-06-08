@@ -186,7 +186,7 @@ def main() -> None:
         os.environ["MICROSEQ_SESSION_ID"] = args.session_id
 
     LEVEL = {0: logging.WARNING, 1: logging.INFO}.get(args.verbose, logging.DEBUG)
-    setup_logging(level=LEVEL)  # reusing helper, but expose by level
+    setup_logging(level=LEVEL, log_dir=None)  # use config.logging.dir if set
 
     # createing the directory for workdir
     workdir_arg = args.workdir or cfg.get("default_workdir", "data")

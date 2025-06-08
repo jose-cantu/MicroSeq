@@ -82,11 +82,16 @@ def setup_logging(
         logfile.parent.mkdir(parents=True, exist_ok=True)
         root_dir = logfile.parent
     else:
-        root_dir = (
-            Path(log_dir).expanduser()
-            if log_dir is not None
-            else Path(os.getenv("MICROSEQ_LOG_DIR", LOG_ROOT)).expanduser()
-        )
+        if log_dir is None:
+            env_dir = os.getenv("MICROSEQ_LOG_DIR")
+            if env_dir is not None:
+                root_dir = Path(env_dir).expanduser()
+            else:
+                cfg_dir = load_config().get("logging", {}).get("dir")
+                root_dir = Path(cfg_dir or LOG_ROOT).expanduser()
+        else:
+            root_dir = Path(log_dir).expanduser()
+
         root_dir.mkdir(parents=True, exist_ok=True)
 
         # ── choose session ID -----------------------------------------
