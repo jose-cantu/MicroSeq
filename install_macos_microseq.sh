@@ -23,8 +23,7 @@ if have_conda; then # inspect if conda exists
 fi  # fi closes both if statements here
 
 # --- short-circuit reuse existing Intel conda -----------
-if { have_conda && [[ $(get_conda_subdir || echo osx-64) = osx-64 ]]; } \
-   || [[ -d "$HOME/miniconda3" || -d "$HOME/anaconda3" ]]; then
+if have_conda && [[ $(get_conda_subdir || echo osx-64) = osx-64 ]]; then
   echo "[installer] Existing osx-64 conda detected so skipping bootstrp." 
   return 0 # script source'd so return is safer vs exit .....
 fi # fall thorugh when conda missing or wrong-arch
