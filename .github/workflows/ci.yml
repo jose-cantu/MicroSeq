@@ -27,6 +27,15 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # --- 0 Installer smoke test (macOS only) ----
+    - name: installer smoke-test (macOS)
+      if: ${{ matrix.is_macos }}
+      shell: bash -euo pipefail {0} 
+      run: |
+        source install_macos_microseq.sh 
+        test -n "$(detect_arch)"
+        echo "detect_arch returned $(detect_arch)"
+
     # ── 1 ▸ Micromamba on Linux & Windows (no platform override) ──
     - name: setup micromamba (Linux/Windows)
       if: ${{ !matrix.is_macos }}
