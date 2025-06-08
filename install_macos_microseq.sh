@@ -20,5 +20,45 @@ if have_conda; then # inspect if conda exists
      echo "[installer] conda subdir is '$curr' - will patch to osx-64" 
      patch_needed=true 
    fi
-fi  # fi closes both if statements here 
+fi  # fi closes both if statements here
+
+# ask the user where they wants miniconda or anaconda 
+echo 
+echo "Select Conda distribution:"
+echo " [1] Miniconda (roughly 80 MB) ~ beginners to conda"
+echo " [2] Anaconda (rouchly 4GB, bundles science stack) ~ peeps familiar with Conda" 
+read -rp "Choice 1/2 -> " choice 
+[[ $choice == 1 || $choice == 2 ]] || { echo "Abort - enter 1 or 2."; exit 1; }
+
+# build download URL and local filename 
+base_url=https://repo.anaconda.com 
+file_miniconda=Miniconda3-latest-MacOSX-x86_64.sh 
+file_anaconda=Anaconda3-latest-MacOSX-x86_64.sh 
+
+if [[ $choice == 1 ]]; then # user picked Miniconda 
+  inst_file=$file_miniconda
+  url="$base_url/miniconda/$inst_file" 
+  prefix="$HOME/miniconda3" # install here 
+else
+  inst_files=$file_anaconda
+  url="$base_url/archive/$inst_file"
+  prefix="$HOME/anaconda3" # install here ..... 
+fi 
+
+
+# download if not cached - idempotent which skips redownload on re-run 
+[[ -f $inst_file ]] || curl -L "$url" -o "$inst_file" 
+
+# run installer under ROsetta when needed 
+run_cmd="bash"
+[[ $(detect_arch) == arm64 ]] && run_cmd="arch -x86_64 bash" 
+$run_cmd "$inst_file" -b -p "$prefix"
+echo "[installer] ${inst_file%%-*} installed to $prefix"
+
+# patch ~/.condarc only when requried 
+if $patch_needed; then 
+  echo -e "\n# Pinned by MicroSeq installer\ nsubdir: osx-64" >> ~/.condarc 
+  echo "[installer] Wrote osx-64 subdir to ~/.condarc" 
+fi
+
 
