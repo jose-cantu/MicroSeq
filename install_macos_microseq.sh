@@ -29,10 +29,6 @@ if { have_conda && [[ $(get_conda_subdir || echo osx-64) = osx-64 ]]; } \
   return 0 # script source'd so return is safer vs exit .....
 fi # fall thorugh when conda missing or wrong-arch
 
-# after installer invocation 
-$run_cmd "$inst_file" -b -p "$prefix"
-export PATH="$prefix/bin:$PATH" # made conda visible to current shell 
-echo "[installer] ${inst_file%%-*} installed to $prefix" 
 
 # Detect CI / non-interacitve shells and pre-seed choice here 
 if [[ ! -t 0 ]]; then # stdin is not a TTY -> scipt source by CI 
@@ -62,7 +58,7 @@ if [[ $choice == 1 ]]; then # user picked Miniconda
   url="$base_url/miniconda/$inst_file" 
   prefix="$HOME/miniconda3" # install here 
 else
-  inst_files=$file_anaconda
+  inst_file=$file_anaconda
   url="$base_url/archive/$inst_file"
   prefix="$HOME/anaconda3" # install here ..... 
 fi 
@@ -75,6 +71,7 @@ fi
 run_cmd="bash"
 [[ $(detect_arch) == arm64 ]] && run_cmd="arch -x86_64 bash" 
 $run_cmd "$inst_file" -b -p "$prefix"
+export PATH="$prefix/bin:$PATH"
 echo "[installer] ${inst_file%%-*} installed to $prefix"
 
 # patch ~/.condarc only when requried 
