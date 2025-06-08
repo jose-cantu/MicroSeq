@@ -82,7 +82,7 @@ fi
 
 # --- clone repo and build env and run wizard ------------
 [[ -d MicroSeq ]] || git clone https://github.com/jose-cantu/MicroSeq.git # clone once 
-cd MIcroSeq # enter repo 
+cd MicroSeq # enter repo 
 
 # make 'conda acitvate' available inside a sourced script 
 source "$(conda info --base)/etc/profile.d/conda.sh" 
@@ -90,8 +90,23 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 # create env only if it doesn't exist 
 conda env list | grep -q '^MicroSeq ' || conda env create -f config/environment.yml -n MicroSeq 
 
-conda activate MicroSeq # put env's Python on PATH 
-pip install -e . # editable install keeps repo and CLI in sync 
+conda activate MicroSeq # put env's Python on PATH
+
+# ---- ensure Homebrew + expect is installed ----------
+if [[ $(uname) == Darwin ]]; then 
+  if ! command -v brew >/dev/null 2>&1; then # no homebrew 
+    echo "[installer] Homebrew not found - soo installing that now for you."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" 
+    eval "$(/opt/homebrew/bin/brew shellenv)" # add brew to PATH for arm Macs 
+  fi
+
+  if ! brew list --formula | grep -q '^expect$'; then  # if expect missing 
+    echo "[installer] Installing 'expect' via Homebrew." 
+    brew install expect 
+  fi
+fi
+
+pip install -e . # editable install keeps repo and CLI in sync (Pip install after so unbuffer works....)  
 
 echo "[installer] running microseq-setup (may take 3-5 min) please wait until prompt which will take some time to show up ~ 1min" 
 if [[ -n ${CI-} ]]; then # CI -> non-interactive wizard for github actions test 
