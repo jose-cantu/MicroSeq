@@ -116,7 +116,7 @@ else
   git clone https://github.com/jose-cantu/MicroSeq.git 
   repo_root="MicroSeq" 
 fi 
-cd MicroSeq # enter repo 
+cd "$repo_root" # enter repo 
 
 # make 'conda acitvate' available inside a sourced script 
 source "$(conda info --base)/etc/profile.d/conda.sh" 
