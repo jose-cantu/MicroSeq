@@ -106,6 +106,11 @@ $ printf ">demo\nACGT\n" > tiny.fasta
 
 > **Need the tools first?**  • [git ≥ 2.30](https://git-scm.com/)  • [Miniconda / Mamba](https://docs.conda.io/en/latest/miniconda.html)  • [Python ≥ 3.10](https://www.python.org/downloads/) – install those in any order, then follow the steps above. 
 
+macOS users can run `./install_macos_microseq.sh` for a guided setup. If Git
+is missing, the script launches the Xcode Command Line Tools installer. Once
+the tools finish (they install Git and `clang` together), re-run the script to
+continue.
+
 Keep in mind for MacOS install the intel variation provided from miniconda and NOT Apple Silicon. `cap3` is published on Bioconda only for the osx-64 (Intel/x86-64) platform, not for osx-arm64 (Apple Silicon). The conda environment will work on an Apple Silicon MacOS (I'm using one right now). Your conda solver will advertise `platform: osx-64` so it can find and install that build. 
 
 ---
