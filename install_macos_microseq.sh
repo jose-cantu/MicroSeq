@@ -104,8 +104,18 @@ if $patch_needed; then
   echo "[installer] Wrote osx-64 subdir to ~/.condarc" 
 fi
 
-# --- clone repo and build env and run wizard ------------
-[[ -d MicroSeq ]] || git clone https://github.com/jose-cantu/MicroSeq.git # clone once 
+# --- clone repo (skip if already cloned/existing) and build env and run wizard ----  
+if [[ -d .git ]]; then
+  echo "[installer] Repo already present in current directory so no need to clone."
+  repo_root="$PWD"
+elif [[ -d MicroSeq/.git ]]; then
+  echo "[installer] Repo ./MicroSeq already exists so reusing it."
+  repo_root="MicroSeq"
+else 
+  echo "[installer] Clone MicroSeq..."
+  git clone https://github.com/jose-cantu/MicroSeq.git 
+  repo_root="MicroSeq" 
+fi 
 cd MicroSeq # enter repo 
 
 # make 'conda acitvate' available inside a sourced script 
