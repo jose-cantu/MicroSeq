@@ -33,6 +33,8 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 - Logging files now open in append mode for multi-process runs.
 - Buffering tool detection prefers `unbuffer` or `stdbuf` depending on OS.
 - Added note about log files on NFS in the README.
+- Clarified macOS installer message: re-run after Xcode Command Line Tools
+  install Git and `clang`.
 
 
 ### Fixed Bugs 
