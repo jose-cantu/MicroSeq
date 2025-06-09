@@ -12,6 +12,19 @@ get_conda_subdir() { # asking existing conda what platform its solving for
   conda config --show subdir 2>/dev/null | awk '/^subdir/ {print $2}' 
 }
 
+# --- prerequisite: ensure Git is available ----------------------------------
+if ! command -v git >/dev/null 2>&1; then
+  if [[ $(uname) == Darwin ]]; then
+    echo "[installer] Git not found – installing Xcode Command-Line Tools…"
+    xcode-select --install || true                # GUI pops up; no effect in CI
+    echo "[installer] Re-run this script after the installer finishes Xcode Command Line Tools will help in installing git for you."
+  else
+    echo "[installer] Git not found."
+    echo "           Run:  sudo apt install git   (or use your distro’s package manager)"
+  fi
+  exit 1
+fi
+
 patch_needed=false # default: assume no fix required 
 if have_conda; then # inspect if conda exists 
    curr=$(get_conda_subdir || true) # may be empty or unset here 
