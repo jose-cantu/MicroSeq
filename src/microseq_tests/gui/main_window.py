@@ -4,8 +4,11 @@ from __future__ import annotations
 import logging
 L = logging.getLogger(__name__)
 import os
-import inspect 
-os.environ.setdefault("QT_QPA_PLATFORM", "xcb")   # force X11 backend
+import inspect
+import platform 
+# Force the X11 backend only on Linux; let Qt choose 'cocoa' on macOS
+if platform.system() == "Linux":
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb") 
 
 import sys, logging, traceback, subprocess, shlex, time
 from pathlib import Path 
