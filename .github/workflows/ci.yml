@@ -58,7 +58,8 @@ jobs:
 
     - name: Run installer (Anaconda here)
       if: ${{ matrix.is_macos }}
-      env: MICROSEQ_CHOICE: "2" 
+      env: 
+        MICROSEQ_CHOICE: "2" 
       run: ./install_macos_microseq.sh  
 
     # ── 2 ▸ macOS only: install Expect → `unbuffer` ──
