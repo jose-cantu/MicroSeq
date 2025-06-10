@@ -1,6 +1,6 @@
 #!/usr/bin/env bash 
 
-set -euo pipefail # exit on error, unset vars, pipe failures 
+set -euo pipefail # exit on error, unset vars, pipe failures
 
 detect_arch() { # this here is a funciton that detects the architechture of your machine 
   uname -m 
@@ -119,7 +119,10 @@ fi
 cd "$repo_root" # enter repo 
 
 # make 'conda acitvate' available inside a sourced script 
-source "$(conda info --base)/etc/profile.d/conda.sh" 
+source "$(conda info --base)/etc/profile.d/conda.sh"
+
+# helper alias here always MicroSeq interpreter 
+conda_cmd="conda run -n MicroSeq" # always invokes the env's interpreter which shields from mixed Anaconda/Miniconda roots situation should user install one root and have the other already beforehand 
 
 # create env only if it doesn't exist 
 conda env list | grep -q '^MicroSeq ' || conda env create -f config/environment.yml -n MicroSeq 
@@ -140,7 +143,7 @@ if [[ $(uname) == Darwin ]]; then
   fi
 fi
 
-pip install -e . # editable install keeps repo and CLI in sync (Pip install after so unbuffer works....)  
+$conda_cmd pip install -e . # editable install keeps repo and CLI in sync (Pip install after so unbuffer works....)  
 
 # if running in GitHub actions, expose this env's bin/ to later steps 
 if [[ -n ${CI-} ]]; then # variable always set in Actions 
@@ -151,8 +154,8 @@ fi
 
 echo "[installer] running microseq-setup (may take 3-5 min) please wait until prompt which will take some time to show up ~ 1min" 
 if [[ -n ${CI-} ]]; then # CI -> non-interactive wizard for github actions test 
-  microseq-setup --quiet 
+  $conda_cmd microseq-setup --quiet 
 else 
-  microseq-setup # local user that I want full prompts for 
+  $conda_cmd microseq-setup # local user that I want full prompts for 
 fi 
 

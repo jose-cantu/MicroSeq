@@ -48,6 +48,19 @@ jobs:
       env:
         CONDA_SUBDIR: osx-64
 
+    # -- 1c Micromamba on MacOS (recreate double root conda scenario)
+    - name: Install second Conda root
+      if: ${{ matrix.is_macos }}
+      run: curl -L https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o mc.sh && bash mc.sh -b -p $HOME/second_root # drops a different conda tree on disk   
+    - name: Shadow PATH with second root 
+      if: ${{ matrix.is_macos }} 
+      run: echo "$HOME/second_root/bin" >> $GITHUB_PATH
+
+    - name: Run installer (Anaconda here)
+      if: ${{ matrix.is_macos }}
+      env: MICROSEQ_CHOICE: "2" 
+      run: ./install_macos_microseq.sh  
+
     # ── 2 ▸ macOS only: install Expect → `unbuffer` ──
     - name: brew install expect
       if: ${{ matrix.needs_brew_expect }}
