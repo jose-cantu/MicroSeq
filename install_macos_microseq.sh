@@ -2,6 +2,12 @@
 
 set -euo pipefail # exit on error, unset vars, pipe failures
 
+# --- checking if rosetta is installed 
+if [[ $(uname -m) == arm64 ]] && !pgrep -qx oahd; then # Apple-silcon and Rosetta missing for Full anaconda install 
+    echo "[installer] Rosetta 2 not detected. That is needed for full anaconda distribution whereas miniconda it isn't necessary."
+    echo "            Run: sudo softwareupdate --install-rosetta --agree-to-license" 
+fi
+
 detect_arch() { # this here is a funciton that detects the architechture of your machine 
   uname -m 
 }
@@ -82,12 +88,25 @@ if ! $bootstrap_done; then
     prefix="$HOME/anaconda3"                 # install here.....
   fi
 
+  # adding a safeguard for Rosetta Anaconda on Apple-silicon only -------------  
+  if [[ $choice == 2 ]]; then # Anaconda only here 
+     if [[ $(uname -m) == arm64 ]] && ! pgrep -qx oahd;then 
+	echo "[installer] Rosetta 2 required for the Intel-only Anaconda installer and I recognize you don't have that" 
+	echo "            Will use... softwareupdate --install-rosetta --agree-to-license" 
+	echo "[installer] will now install rosetta for you so Anaconda installer will run..." 
+	sudo /usr/sbin/softwareupdate --install-rosetta --agree-to-license 
+     fi
+     run_cmd="arch -x86_64 bash" # Intel interpreter 
+   else 
+     run_cmd="bash" # Miniconda or Intel host 
+  fi 
+
   # download if not cached - idempotent which skips redownload on re-run
   [[ -f $inst_file ]] || curl -L "$url" -o "$inst_file"
+  
+  #  
 
-  # run installer under Rosetta when needed
-  run_cmd="bash"
-  [[ $(detect_arch) == arm64 ]] && run_cmd="arch -x86_64 bash"
+
   $run_cmd "$inst_file" -b -p "$prefix"
   source "$prefix/etc/profile.d/conda.sh"    # refresh functions in current shell
   export PATH="$prefix/bin:$PATH"
@@ -97,6 +116,8 @@ else
   echo "[installer] Using existing conda at $(command -v conda)"
 fi
 
+# launch installer --------------
+$run_cmd "$inst_file" -b -p "$prefix" 
 
 # patch ~/.condarc only when requried 
 if $patch_needed; then 
