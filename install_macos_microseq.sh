@@ -2,12 +2,6 @@
 
 set -euo pipefail # exit on error, unset vars, pipe failures
 
-# --- checking if rosetta is installed 
-if [[ $(uname -m) == arm64 ]] && !pgrep -qx oahd; then # Apple-silcon and Rosetta missing for Full anaconda install 
-    echo "[installer] Rosetta 2 not detected. That is needed for full anaconda distribution whereas miniconda it isn't necessary."
-    echo "            Run: sudo softwareupdate --install-rosetta --agree-to-license" 
-fi
-
 detect_arch() { # this here is a funciton that detects the architechture of your machine 
   uname -m 
 }
@@ -52,6 +46,9 @@ _reuse_existing_conda() {                    # fn scope -> return legit
 
 # call helper early in main script flow
 _reuse_existing_conda
+
+run_cmd="bash" # default interpreter; ARM-Anaconda 
+# block below can overired this later based on choice selected for conda selected 
 
 # ---------------------------------------------------------------------
 # run Miniconda / Anaconda bootstrap only when not already done
@@ -115,9 +112,6 @@ if ! $bootstrap_done; then
 else
   echo "[installer] Using existing conda at $(command -v conda)"
 fi
-
-# launch installer --------------
-$run_cmd "$inst_file" -b -p "$prefix" 
 
 # patch ~/.condarc only when requried 
 if $patch_needed; then 
