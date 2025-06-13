@@ -109,15 +109,41 @@ if ! $bootstrap_done; then
   # download if not cached - idempotent which skips redownload on re-run
   # lookup official SHA-256 once per version (Anaconda published .sha256) 
   sha_url="$url.sha256" # append .sha256 to file URL 
-
-  # download installer + checksum atomically 
-  if [[ ! -f $inst_file ]]; then 
-      curl --retry 3 -fL "$url" -o "$inst_file" # robust download 
-      curl -fL "$sha_url" -o "$insta_file.sha" # grab checksum 
+  
+  # ─── resume download ────────────────────────────────────────────────
+  rc=0
+  curl --retry 3 -C - -fL "$url" -o "$inst_file" || rc=$? # store curl code 
+ 
+  if [[ $rc -ne 0 ]]; then 
+     if [[ $rc -eq 22 || $rc -eq 33 ]]; then # 416 range error 
+	echo "[installer] curl exit $rc (HTTP 416) verifying local file...." 
+     else 
+	exit $rc 
+     fi 
   fi 
 
-  # verify integrity before exec 
-  sha256sum -c "$inst_file.sha" # aborts on mismatch 
+  # ── tier-1: per-file checksum ──────────────────────────────────────────────
+  if curl -sfL "$sha_url" -o "$inst_file.sha"; then
+    echo "[installer] downloaded per-file checksum"
+  else
+    echo "[installer] .sha256 missing – trying master SHA256SUMS"
+    sums_url=https://repo.anaconda.com/archive/sha256sum.txt                # <- actual file name
+    if curl -sfL "$sums_url" -o SHA256SUMS; then
+        grep "  $inst_file\$" SHA256SUMS >"$inst_file.sha" || true
+    fi
+  fi
+
+  # ── tier-3: warn if checksum still absent ─────────────────────────────────
+  if [[ ! -f $inst_file.sha || ! -s $inst_file.sha ]]; then
+    echo "[installer] WARNING: no checksum available – proceeding without hash verification"
+  else
+    if ! sha256sum -c "$inst_file.sha"; then
+        echo "[installer] checksum failed – redownloading whole file"
+        rm -f "$inst_file"
+        curl --retry 3 -fL "$url" -o "$inst_file"
+        sha256sum -c "$inst_file.sha"      # must pass now or abort
+    fi
+  fi
 
 
   "${run_cmd[@]}" "$inst_file" -b -p "$prefix" # exec installer directly... 
