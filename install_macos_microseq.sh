@@ -74,9 +74,8 @@ if ! $bootstrap_done; then
   # helper: return latest filename for Mac x86_64 
   latest_anaconda() { # fn: echo newest installer 
       curl -s https://repo.anaconda.com/archive/ | # fetch HTML listing 
-	grep -oE 'Anaconda-[0-9.]+-MacOSX-x86_64.sh' | # keep matching links 
-	sort -V | # version-aware sort 
-	tail -n 1 # newest version = last line 
+	      grep -oE 'Anaconda3-[0-9]{4}\.[0-9]+(-[0-9]+)?-MacOSX-x86_64\.sh' | # keep matching links using grep to find latest version  
+	sort -V | tail -n 1 # version-aware sorting and newest version = last line 
 } 
 
   # build download URL and local filename
@@ -108,9 +107,17 @@ if ! $bootstrap_done; then
   fi 
 
   # download if not cached - idempotent which skips redownload on re-run
-  [[ -f $inst_file ]] || curl -fL "$url" -o "$inst_file"
-  
-  #  
+  # lookup official SHA-256 once per version (Anaconda published .sha256) 
+  sha_url="$url.sha256" # append .sha256 to file URL 
+
+  # download installer + checksum atomically 
+  if [[ ! -f $inst_file ]]; then 
+      curl --retry 3 -fL "$url" -o "$inst_file" # robust download 
+      curl -fL "$sha_url" -o "$insta_file.sha" # grab checksum 
+  fi 
+
+  # verify integrity before exec 
+  sha256sum -c "$inst_file.sha" # aborts on mismatch 
 
 
   "${run_cmd[@]}" "$inst_file" -b -p "$prefix" # exec installer directly... 
@@ -145,8 +152,7 @@ cd "$repo_root" # enter repo
 # make 'conda acitvate' available inside a sourced script 
 source "$(conda info --base)/etc/profile.d/conda.sh"
 
-# helper alias here always MicroSeq interpreter 
-conda_cmd="conda run -n MicroSeq" # always invokes the env's interpreter which shields from mixed Anaconda/Miniconda roots situation should user install one root and have the other already beforehand 
+conda_cmd="conda run --no-capture-stdin -n MicroSeq" # alias: env + stdin now fine...  
 
 # create env only if it doesn't exist 
 conda env list | grep -q '^MicroSeq ' || conda env create -f config/environment.yml -n MicroSeq 
@@ -180,6 +186,6 @@ echo "[installer] running microseq-setup (may take 3-5 min) please wait until pr
 if [[ -n ${CI-} ]]; then # CI -> non-interactive wizard for github actions test 
   $conda_cmd microseq-setup --quiet 
 else 
-  $conda_cmd microseq-setup # local user that I want full prompts for 
+  $conda_cmd microseq-setup  # local user that I want full prompts for 
 fi 
 
