@@ -71,10 +71,19 @@ if ! $bootstrap_done; then
   fi
   [[ $choice == 1 || $choice == 2 ]] || { echo "Abort - enter 1 or 2."; exit 1; }
 
+  # helper: return latest filename for Mac x86_64 
+  latest_anaconda() { # fn: echo newest installer 
+      curl -s https://repo.anaconda.com/archive/ | # fetch HTML listing 
+	grep -oE 'Anaconda-[0-9.]+-MacOSX-x86_64.sh' | # keep matching links 
+	sort -V | # version-aware sort 
+	tail -n 1 # newest version = last line 
+} 
+
   # build download URL and local filename
   base_url=https://repo.anaconda.com
   file_miniconda=Miniconda3-latest-MacOSX-x86_64.sh
-  file_anaconda=Anaconda3-latest-MacOSX-x86_64.sh
+  file_anaconda=$(latest_anaconda) # dynamic filename 
+  url="https://repo.anaconda.com/archive/$file_anaconda" 
   if [[ $choice == 1 ]]; then                # user picked Miniconda
     inst_file=$file_miniconda
     url="$base_url/miniconda/$inst_file"
@@ -89,22 +98,22 @@ if ! $bootstrap_done; then
   if [[ $choice == 2 ]]; then # Anaconda only here 
      if [[ $(uname -m) == arm64 ]] && ! pgrep -qx oahd;then 
 	echo "[installer] Rosetta 2 required for the Intel-only Anaconda installer and I recognize you don't have that" 
-	echo "            Will use... softwareupdate --install-rosetta --agree-to-license" 
+	echo "            Will use... sudo softwareupdate --install-rosetta --agree-to-license" 
 	echo "[installer] will now install rosetta for you so Anaconda installer will run..." 
 	sudo /usr/sbin/softwareupdate --install-rosetta --agree-to-license 
      fi
-     run_cmd="arch -x86_64 bash" # Intel interpreter 
+     run_cmd=(arch -x86_64 /bin/bash) # Call Apple's universal bash making it expicit path (simple and deterministic avoiding crash with homebrew arm-only bash) 
    else 
-     run_cmd="bash" # Miniconda or Intel host 
+     run_cmd=(bash) # Native interpreter for Miniconda or Intel host 
   fi 
 
   # download if not cached - idempotent which skips redownload on re-run
-  [[ -f $inst_file ]] || curl -L "$url" -o "$inst_file"
+  [[ -f $inst_file ]] || curl -fL "$url" -o "$inst_file"
   
   #  
 
 
-  $run_cmd "$inst_file" -b -p "$prefix"
+  "${run_cmd[@]}" "$inst_file" -b -p "$prefix" # exec installer directly... 
   source "$prefix/etc/profile.d/conda.sh"    # refresh functions in current shell
   export PATH="$prefix/bin:$PATH"
   echo "[installer] ${inst_file%%-*} installed to $prefix"
