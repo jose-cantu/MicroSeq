@@ -178,8 +178,12 @@ cd "$repo_root" # enter repo
 # make 'conda acitvate' available inside a sourced script 
 source "$(conda info --base)/etc/profile.d/conda.sh"
 
-conda_cmd="conda run --no-capture-stdin -n MicroSeq" # alias: env + stdin now fine...  
+conda_run="conda run -n MicroSeq"
 
+microseq_shell() { # interactive wrapper 
+	bash -c 'source "$(conda info --base)/etc/profile.d/conda.sh" && \
+		conda activate MicroSeq && "$@"'  
+	} 
 # create env only if it doesn't exist 
 conda env list | grep -q '^MicroSeq ' || conda env create -f config/environment.yml -n MicroSeq 
 
@@ -199,7 +203,7 @@ if [[ $(uname) == Darwin ]]; then
   fi
 fi
 
-$conda_cmd pip install -e . # editable install keeps repo and CLI in sync (Pip install after so unbuffer works....)  
+$conda_run pip install -e . # editable install keeps repo and CLI in sync (Pip install after so unbuffer works....)  
 
 # if running in GitHub actions, expose this env's bin/ to later steps 
 if [[ -n ${CI-} ]]; then # variable always set in Actions 
@@ -210,8 +214,8 @@ fi
 
 echo "[installer] running microseq-setup (may take 3-5 min) please wait until prompt which will take some time to show up ~ 1min" 
 if [[ -n ${CI-} ]]; then # CI -> non-interactive wizard for github actions test 
-  $conda_cmd microseq-setup --quiet 
+  $conda_run microseq-setup --quiet 
 else 
-  $conda_cmd microseq-setup  # local user that I want full prompts for 
+  $microseq_shell microseq-setup  # local user that I want full prompts for 
 fi 
 
