@@ -309,7 +309,7 @@ export MICROSEQ_LOG_DIR="{log_dir}"
     sh_tpl = template_dir / "activate_microseq_session.sh.example"
     fish_tpl = template_dir / "activate_microseq_session.fish.example"
 
-    print("\nDone! Open a new shell (or `source ~/.bashrc`) and test it using the smoke test I have setup in github install:")
+    print("\nDone! Open a new shell (or type `exec $SHELL -l` or `source ~/.bashrc` or `source ~/zshrc`) and test it using the smoke test I have setup in github install:")
     print("Session helper templates:")
     print(f"  bash/zsh: {sh_tpl}")
     print(f"  fish:     {fish_tpl}")

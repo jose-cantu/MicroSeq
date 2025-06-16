@@ -146,9 +146,13 @@ if ! $bootstrap_done; then
   fi
 
 
-  "${run_cmd[@]}" "$inst_file" -b -p "$prefix" # exec installer directly... 
+  "${run_cmd[@]}" "$inst_file" -b -p "$prefix" # exec installer directly...
+  # ----- making conda persistently available -------------------------------
   source "$prefix/etc/profile.d/conda.sh"    # refresh functions in current shell
-  export PATH="$prefix/bin:$PATH"
+  shell_name=$(basename "$SHELL") # covers zsh, bash, fish, etc .....
+  conda init "$shell_name" >/dev/null # write/upgrade RC block 
+  echo "[installer] conda initialized for $shell_name so restart in new terminal" 
+
   echo "[installer] ${inst_file%%-*} installed to $prefix"
 
 else
