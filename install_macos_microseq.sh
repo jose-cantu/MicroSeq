@@ -155,12 +155,6 @@ else
   echo "[installer] Using existing conda at $(command -v conda)"
 fi
 
-# patch ~/.condarc only when requried 
-if $patch_needed; then 
-  echo -e "\n# Pinned by MicroSeq installer\nsubdir: osx-64" >> ~/.condarc 
-  echo "[installer] Wrote osx-64 subdir to ~/.condarc" 
-fi
-
 # --- clone repo (skip if already cloned/existing) and build env and run wizard ----  
 if [[ -d .git ]]; then
   echo "[installer] Repo already present in current directory so no need to clone."
@@ -188,6 +182,8 @@ microseq_shell() { # interactive wrapper
 conda env list | grep -q '^MicroSeq ' || conda env create -f config/environment.yml -n MicroSeq 
 
 conda activate MicroSeq # put env's Python on PATH
+conda config --env --set subdir osx-64 # env-scoped pin, leave ~/condarc alone (This is to respect the user if the already have a conda env running that is the arm variation) 
+conda deactivate # back to outershell all helper commands point to MicroSeq env afterwards.... no need to keep it active here.... 
 
 # ---- ensure Homebrew + expect is installed ----------
 if [[ $(uname) == Darwin ]]; then 
@@ -216,6 +212,6 @@ echo "[installer] running microseq-setup (may take 3-5 min) please wait until pr
 if [[ -n ${CI-} ]]; then # CI -> non-interactive wizard for github actions test 
   $conda_run microseq-setup --quiet 
 else 
-  $microseq_shell microseq-setup  # local user that I want full prompts for 
+  microseq_shell microseq-setup  # local user that I want full prompts for 
 fi 
 
