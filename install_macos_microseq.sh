@@ -176,7 +176,7 @@ conda_run="conda run -n MicroSeq"
 
 microseq_shell() { # interactive wrapper 
 	bash -c 'source "$(conda info --base)/etc/profile.d/conda.sh" && \
-		conda activate MicroSeq && "$@"'  
+		conda activate MicroSeq && "$@"' _ "$@"   
 	} 
 # create env only if it doesn't exist 
 conda env list | grep -q '^MicroSeq ' || conda env create -f config/environment.yml -n MicroSeq 
