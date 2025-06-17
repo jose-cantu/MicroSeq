@@ -91,7 +91,7 @@ class MainWindow(QMainWindow):
         hits_btn.setToolTip(
             "Pick an existing BLAST-result table hits.tsv or hits_tax.tsv to run Post-BLAST and/or make a BIOM table."
         )
-
+        
         hits_btn.clicked.connect(self._choose_hits)
 
         # label place holder and browse button wired to file picker 
@@ -125,21 +125,13 @@ class MainWindow(QMainWindow):
             "Global (vsearch)",
             ]) 
         # --- persistence ---------------
-        index = {"megablast": 0, "blastn"; 1, "vsearch": 2}.get(
-                self.settings.value("aligner", "megablast"), 0 ) 
-        self.mode_box.setCurrentIndexChanged.connect(
+        index_map = {"megablast": 0, "blastn": 1, "vsearch": 2} 
+        self.mode_box.setCurrentIndex(index_map.get(self.settings.value("aligner", "megablast"), 0)) 
+
+
+        self.mode_box.currentIndexChanged.connect(
             lambda i: self.settings.setValue("aligner", ("megablast", "blastn", "vsearch")[i]) 
             ) 
-
-        # restore previous choice (default = megablast)
-        task = self.settings.value("blast_task", "megablast")
-        (fast_rb if task == "megablast" else slow_rb).setChecked(True) 
-
-        # save whever user toggles 
-        fast_rb.toggled.connect(
-            lambda on: on and self.settings.setValue("blast_task", "megablast"))
-        slow_rb.toggled.connect(
-            lambda on: on and self.settings.setValue("blast_task", "blastn")) 
 
         # ------- progress bar ----------
         self.progress = QProgressBar()
@@ -204,7 +196,7 @@ class MainWindow(QMainWindow):
         mid.addWidget(QLabel("Threads"))
         mid.addWidget(self.threads_spin)
 
-        mid.addWidget(mode_box) # setting this here so its left aligned  
+        mid.addWidget(self.mode_box) # setting this here so its left aligned  
 
         mid.addWidget(self.progress)
 
@@ -314,7 +306,8 @@ class MainWindow(QMainWindow):
 
         self.progress.setValue(0)  # resets progress bar during each run
 
-        task = self.settings.value("blast_task", "megablast") 
+        task = ("megablast", "blastn", "vsearch")
+        [self.mode_box.currentIndex()] # worker now recieves real engine that will be selected in the GUI 
 
         # derive output file beside input; disables button; logs starts 
         hits_path = self._infile.with_suffix(".hits.tsv")
