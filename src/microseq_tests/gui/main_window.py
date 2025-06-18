@@ -3,11 +3,14 @@
 from __future__ import annotations 
 import logging
 L = logging.getLogger(__name__)
-import os
+import os, sys
 import inspect 
-os.environ.setdefault("QT_QPA_PLATFORM", "xcb")   # force X11 backend
+if sys.platform.startswith("linux"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+elif sys.platform == "darwin": # macOS
+    os.environ.setdefault("QT_QPA_PLATFORM", "cocoa") 
 
-import sys, logging, traceback, subprocess, shlex, time
+import logging, traceback, subprocess, shlex, time
 from pathlib import Path 
 from typing import Optional 
 

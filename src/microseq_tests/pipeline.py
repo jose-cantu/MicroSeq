@@ -30,6 +30,7 @@ from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
 from microseq_tests.post_blast_analysis import run as postblast_run
+from microseq_tests.aligners import load as load_aligner 
 
 __all__ = [
     "run_trim",
@@ -128,7 +129,6 @@ def run_assembly(fasta_in: PathLike, out_dir: PathLike) -> int:
 
 
 # ───────────────────────────────────────────────────────── BLAST
-
 def run_blast_stage(
     fasta_in: PathLike,
     db_key: str,
@@ -140,6 +140,16 @@ def run_blast_stage(
     on_progress=None,
     aligner: str = "megablast", 
 ) -> int:
+
+   # vsearch will go here ---------------------------
+    if aligner == "vsearch":
+         df = load_aligner("vsearch").run(
+            fasta_in, db_key, threads=threads
+         ) 
+         Path(out_tsv).parent.mkdir(parents=True, exist_ok=True)
+         df.to_csv(out_tsv, sep="\t", index=False) # give GUI the TSV it expects.....
+         return 0 
+
     from microseq_tests.blast.run_blast import BlastOptions # local import keeps AB1 safe 
      
 
