@@ -306,8 +306,7 @@ class MainWindow(QMainWindow):
 
         self.progress.setValue(0)  # resets progress bar during each run
 
-        task = ("megablast", "blastn", "vsearch")
-        [self.mode_box.currentIndex()] # worker now recieves real engine that will be selected in the GUI 
+        aligner = ("megablast", "blastn", "vsearch")[self.mode_box.currentIndex()] # worker now recieves real engine that will be selected in the GUI 
 
         # derive output file beside input; disables button; logs starts 
         hits_path = self._infile.with_suffix(".hits.tsv")
@@ -327,7 +326,7 @@ class MainWindow(QMainWindow):
                 qcov=self.qcov_spin.value(),
                 max_target_seqs=self.hits_spin.value(),
                 threads=self.threads_spin.value(),
-                blast_task=task,
+                aligner=aligner,
                 )
         t0 = time.time()
 
@@ -413,7 +412,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No input", "Choose a file or folder first.")
             return
 
-        task = self.settings.value("blast_task", "megablast") 
+        aligner = self.settings.value("aligner", "megablast") 
 
         self._launch(
             run_full_pipeline,
@@ -422,7 +421,7 @@ class MainWindow(QMainWindow):
             threads=self.threads_spin.value(),
             postblast=self.biom_chk.isChecked(),
             metadata=None,        # Trim → Convert → BLAST → Tax
-            blast_task=task, 
+            aligner=aligner, 
         )
     
     # ------ Run full pipeline with Post-Blast as well ------------- 
@@ -440,7 +439,7 @@ class MainWindow(QMainWindow):
             return
         # launch the pipeline here
 
-        task = self.settings.value("blast_task", "megablast") 
+        aligner = self.settings.value("aligner", "megablast") 
 
         self._launch(
             run_full_pipeline,
@@ -449,7 +448,7 @@ class MainWindow(QMainWindow):
             threads=self.threads_spin.value(),
             postblast=self.biom_chk.isChecked(), # source of truth decide via checkbox
             metadata=self.meta_path,         # None or Path run the Post-BLAST stage too
-            blast_task=task, 
+            aligner=aligner, 
     )
 
     # ------ Run stand-alone Post-BLAST ---------------------------------
