@@ -3,9 +3,9 @@
 **MicroSeq** is an end‑to‑end microbial sequence‑analysis toolkit that scales from a single laptop to a multi‑node HPC cluster.
 It automates everything from raw trace files (AB1) or FASTQ reads all the way to BIOM/CSV tables that are ready for downstream statistics or visualisation.
 
-*Current status – May 2025*: CLI workflow is feature‑complete and battle‑tested internally; the PySide6 GUI will land in v1.0. Rust speed‑ups  for alignment and I/O are planned for v2.0. Note that the GUI is nowhere near done. I plan on removing and adding things to it. I need to go back to the whiteboard and rethink some things. The roadmap is below in the roadmap section, close to the end. 
+*Current status – May 2025*: CLI workflow is feature‑complete and battle‑tested internally; the PySide6 GUI will land in v1.0. Rust speed‑ups  for alignment and I/O are planned for v2.0. Note that the GUI is nowhere near done. I plan on removing and adding things to it. I need to go back to the whiteboard and rethink some things. The roadmap is below in the roadmap section, close to the end.
 
-For version control, please see the changelog I have attached. [CHANGELOG](https://github.com/jose-cantu/MicroSeq/blob/master/CHANGELOG.MD) 
+For version control, please see the changelog I have attached. [CHANGELOG](https://github.com/jose-cantu/MicroSeq/blob/master/CHANGELOG.MD)
 
 ---
 
@@ -70,7 +70,7 @@ In short: MicroSeq is the only open-source package that ingests raw Sanger or FA
 
 ---
 
-## Quick start (TL;DR) 
+## Quick start (TL;DR)
 
 ```bash
 # 1  Clone & enter repo
@@ -111,7 +111,7 @@ is missing, the script launches the Xcode Command Line Tools installer. Once
 the tools finish (they install Git and `clang` together), re-run the script to
 continue.
 
-Keep in mind for MacOS install the intel variation provided from miniconda and NOT Apple Silicon. `cap3` is published on Bioconda only for the osx-64 (Intel/x86-64) platform, not for osx-arm64 (Apple Silicon). The conda environment will work on an Apple Silicon MacOS (I'm using one right now). Your conda solver will advertise `platform: osx-64` so it can find and install that build. 
+Keep in mind for MacOS install the intel variation provided from miniconda and NOT Apple Silicon. `cap3` is published on Bioconda only for the osx-64 (Intel/x86-64) platform, not for osx-arm64 (Apple Silicon). The conda environment will work on an Apple Silicon MacOS (I'm using one right now). Your conda solver will advertise `platform: osx-64` so it can find and install that build.
 
 ---
 
@@ -122,10 +122,9 @@ Keep in mind for MacOS install the intel variation provided from miniconda and N
 | git                    | Clone the repo, pull updates                            | [https://git-scm.com/book/en/v2/Getting-Started-Installing-Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git) |
 | Conda / Mamba          | Manages the `MicroSeq` env incl. BLAST+, CAP3, TaxonKit | [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html)                               |
 | Python 3.10 – 3.13     | Runs the CLI & GUI                                      | [https://www.python.org/downloads/](https://www.python.org/downloads/)                                                         |
-| BLAST+, TaxonKit, CAP3 | Auto‑installed into the Conda env – no action needed    | –                                                                   | Brew                   | For MacOS users only needed for running blast smoothly  | [https://brew.sh] 
+| BLAST+, TaxonKit, CAP3 | Auto‑installed into the Conda env – no action needed    | –                                                                   | Brew                   | For MacOS users only needed for running blast smoothly  | [https://brew.sh]
 
- Brew                    For MacOS users only needed for running blast smoothly    [https://brew.sh] 
-
+ Brew                    For MacOS users only needed for running blast smoothly    [https://brew.sh]
 
 ---
 
@@ -206,8 +205,8 @@ Old logs are kept indefinitely. Tweak `logging.backup_count` in
 to retain only the last *N* auto-generated files. The default value of `0`
 preserves every log.
 
-
 ### Workdir basics
+
 When omitted, `--workdir` defaults to the `default_workdir` value in `config.yaml`. Each run creates `qc/`, `asm/` and `blast/` folders inside this directory. Use `--workdir PATH` to place intermediates elsewhere or `--workdir .` to write outputs next to your input files.
 
 ### Choosing the right `--threads`
@@ -336,6 +335,7 @@ Below is an index of every sub‑command with a one‑line summary.  Click the �
 | `--duplicate-policy {error,keep-first,merge}` | `error`        | Resolve duplicate IDs after normalisation. |                               |
 
 This step also writes `<output>_blast_provenance.csv`, `<output>_taxonomy_only.csv` and `<output>_metadata.csv` alongside the BIOM file.
+
 | Flag                        | Default           | Purpose                                 |
 | --------------------------- | ----------------- | --------------------------------------- |
 | `--db-root DIR`             | `~/.microseq_dbs` | Where to store BLAST DBs.               |
@@ -402,7 +402,7 @@ microseq postblast    -b hits_tax.tsv -m meta.tsv -o results.biom --json \
 
 *Why two paths?* AB1 chromatograms carry single‑end Sanger qualities that behave differently from generic FASTQ scores; the lightweight BioPython route avoids over‑trimming while still filtering low‑quality tails.
 
-## CAP3 (microseq assembly) 
+## CAP3 (microseq assembly)
 
 CAP3 names every output file `<prefix>.cap.<suffix>` where `<prefix>` is the input FASTA without extension.  The key artefacts are:
 
@@ -422,10 +422,10 @@ CAP3 names every output file `<prefix>.cap.<suffix>` where `<prefix>` is the inp
 3. Leaves all original CAP3 files in `workdir/asm/` so you can inspect quality or visualise in external tools.
 
 Note when blasting there are two algorithms: The Fast (megablast ≥ 95 % ID) is sufficient for typical Sanger 16 S workflows. If the best hit drops below 90 % identity or coverage, MicroSeq automatically repeats the search with Comprehensive and more sensitive (blastn) algorithm to catch divergent taxa.
+
 ## microseq-fix-tsv
 
 `microseq-fix-tsv` converts comma- or space-delimited tables into tab-separated files in-place. Use it to normalise spreadsheets before feeding them to other MicroSeq commands.
-
 
 ---
 
@@ -438,15 +438,16 @@ Note when blasting there are two algorithms: The Fast (megablast ≥ 95 % ID) is
 
 ## Road-Map
 
-All work lives in a public GitHub board project, and I will be actively working on the priorities listed, starting with P0. 
+All work lives in a public GitHub board project, and I will be actively working on the priorities listed, starting with P0.
 
 [View the board »](https://github.com/users/jose-cantu/projects/2/views/2)
 
 ### Current priorities
+
 - P0 – Refresh README and create CHANGELOG
-- P1 – `--blast-task` flag (default `megablast`)
-- P1 – GUI “Speed ↔ Sensitivity” toggle
-- P1 – Automatic contig assembly step in the main pipeline (v1.1)
+* P1 – `--blast-task` flag (default `megablast`)
+* P1 – GUI “Speed ↔ Sensitivity” toggle
+* P1 – Automatic contig assembly step in the main pipeline (v1.1)
 
 ---
 
@@ -458,9 +459,9 @@ Bug reports & feature requests are welcome! Please open an issue first to discus
 
 *Code* is released under the MIT License (see `LICENSES/MIT.txt`).
 The GUI bundles PySide6 / Qt 6, licensed under LGPL v3 (see `LICENSES/Qt_LGPLv3.txt`).
+GPL-v3
+> **Note on VSEARCH:** MicroSeq remains MIT-licensed. Calling the GPL-v3 VSEARCH binary at runtime is fine, but if you redistribute MicroSeq together with the VSEARCH executable you must ship it under GPL-v3 terms (source code + licence text).
 
-If you use MicroSeq in a publication, please cite me! =) 
+If you use MicroSeq in a publication, please cite me! =)
 
 > ---
-
-
