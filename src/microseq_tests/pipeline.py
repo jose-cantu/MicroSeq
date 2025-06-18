@@ -138,7 +138,7 @@ def run_blast_stage(
     max_target_seqs: int = 5,
     threads: int = 1,
     on_progress=None,
-    blast_task: str = "megablast", 
+    aligner: str = "megablast", 
 ) -> int:
     from microseq_tests.blast.run_blast import BlastOptions # local import keeps AB1 safe 
      
@@ -149,7 +149,7 @@ def run_blast_stage(
 
 
     # ------ first pass ---------------------------
-    opts = BlastOptions(task=blast_task) 
+    opts = BlastOptions(task="megablast" if aligner == "megablast" else "blastn") 
 
     run_blast(
         fasta_in,
@@ -164,7 +164,7 @@ def run_blast_stage(
     )
     # ------- Sensitive-mode fallback ----------------------
     # if the user chose the fast algorithm and the best hit is below 90 ID / 90 qcov   # then redo the search but with the more sensitive comprehesive blastn 
-    if blast_task == "megablast":
+    if aligner == "megablast":
         try:
             hits = pd.read_csv(out_tsv, sep="\t", comment="#", usecols=["pident", "qcovhsp"], nrows=1, dtype=float) 
             # empty -> no rows or best identity / qcov below 90 
@@ -258,7 +258,7 @@ def run_full_pipeline(
     qcov: int = 80,
     max_target_seqs: int = 5,
     threads: int = 4,
-    blast_task: str = "megablast", 
+    aligner: str = "megablast", 
     metadata: Path | None = None,
     summary_tsv: Path | None = None,
     on_stage=None,
@@ -340,7 +340,7 @@ def run_full_pipeline(
         max_target_seqs=max_target_seqs,
         threads=threads,
         on_progress=subprog(pct),
-        blast_task=blast_task, 
+        aligner=aligner, 
     )
     if thr and thr.isInterruptionRequested():
         raise RuntimeError("Cancelled")
