@@ -7,7 +7,7 @@ It automates everything from raw trace files (AB1) or FASTQ reads all the way to
 
 For version control, please see the changelog I have attached. [CHANGELOG](https://github.com/jose-cantu/MicroSeq/blob/master/CHANGELOG.MD)
 
-For the docs that go into more detail, such as for example how to use the GUI I have attached it here. [/docs/gui_usage.md](https://github.com/jose-cantu/MicroSeq/docs/gui_usage.md)
+For the docs that go into more detail, such as for example how to use the GUI I have attached it here. [docs/gui_usage.md](https://github.com/jose-cantu/MicroSeq/docs/gui_usage.md)
 
 ---
 
