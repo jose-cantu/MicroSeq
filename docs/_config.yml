@@ -1,1 +1,11 @@
-theme: minima
+# docs/_config.yml 
+title: MicroSeq # nabvar brand text 
+description: "Tookit docs GUI & CLI"
+theme: minima 
+header_pages:
+  - index.md
+  - gui_usage.md
+  - testing.md 
+
+
+
