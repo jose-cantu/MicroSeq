@@ -5,7 +5,9 @@ It automates everything from raw trace files (AB1) or FASTQ reads all the way to
 
 *Current status – May 2025*: CLI workflow is feature‑complete and battle‑tested internally; the PySide6 GUI will land in v1.0. Rust speed‑ups  for alignment and I/O are planned for v2.0. Note that the GUI is nowhere near done. I plan on removing and adding things to it. I need to go back to the whiteboard and rethink some things. The roadmap is below in the roadmap section, close to the end. 
 
-For version control, please see the changelog I have attached. [CHANGELOG](https://github.com/jose-cantu/MicroSeq/blob/master/CHANGELOG.MD) 
+For version control, please see the changelog I have attached. [CHANGELOG](https://github.com/jose-cantu/MicroSeq/blob/master/CHANGELOG.MD)
+
+For the docs that go into more detail, such as for example how to use the GUI I have attached it here. [/docs/gui_usage.md](https://github.com/jose-cantu/MicroSeq/docs/gui_usage.md)
 
 ---
 
