@@ -1,5 +1,8 @@
 # MicroSeq
 
+<!-- README badge -->
+[![Docs](https://img.shields.io/badge/docs-view-blue)](https://jose-cantu.github.io/MicroSeq/)
+
 **MicroSeq** is an end‑to‑end microbial sequence‑analysis toolkit that scales from a single laptop to a multi‑node HPC cluster.
 It automates everything from raw trace files (AB1) or FASTQ reads all the way to BIOM/CSV tables that are ready for downstream statistics or visualisation.
 
