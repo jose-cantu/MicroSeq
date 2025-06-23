@@ -23,7 +23,9 @@ Mode	Fast (megablast)	Alignment algorithm
 ## Configuring The Run 
 * In a future update I will have all the dials adjustable for now they are the default settings so keep that in mind. 
 * If you want the BIOM file you will need to tick the BIOM box when clicking full pipeline run note you will need to supply a metadata table (GUI will warn if missing). 
-* Choose Fast(megablast) for routine Sanger reads; Comprehensive (blastn) for divergent amplicon reads. Note I do have it set up where if the coverage or percent ID doesn't reach 90% blastn will rerun instead given the nature of megablast algorithm. 
+* Choose Fast(megablast) for routine Sanger reads; Comprehensive (blastn) for divergent amplicon reads. Note I do have it set up where if the coverage or percent ID doesn't reach 90% blastn will rerun instead given the nature of megablast algorithm.
+
+
 ## Execution What do the buttons do??
 
 * Button Stages Performed 
