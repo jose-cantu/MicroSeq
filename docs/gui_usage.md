@@ -24,12 +24,13 @@ Mode	Fast (megablast)	Alignment algorithm
 * In a future update I will have all the dials adjustable for now they are the default settings so keep that in mind. 
 * If you want the BIOM file you will need to tick the BIOM box when clicking full pipeline run note you will need to supply a metadata table (GUI will warn if missing). 
 * Choose Fast(megablast) for routine Sanger reads; Comprehensive (blastn) for divergent amplicon reads. Note I do have it set up where if the coverage or percent ID doesn't reach 90% blastn will rerun instead given the nature of megablast algorithm. 
-## Execution What do the buttons do?? 
-Button Stages Performed 
-Run QC Ab1 -> Fastq -> trim -> pass/fail 
-Run Blast BLAST only existing fasta/contigs 
-Full Pipeline (BIOM unchecked) QC + BLAST + Taxonomy (Note:Assembly for full length will be added in an update so I may just include a checkbox for partial 16s then clicking FullPipeline as a workaround.)
-Post-BLAST Collapse hits to best one + merge metadata to BIOM file that is outputted 
+## Execution What do the buttons do??
+
+* Button Stages Performed 
+* **Run QC** Ab1 -> Fastq -> trim -> pass/fail 
+* **Run Blast** BLAST only existing fasta/contigs 
+* **Full Pipeline** (BIOM unchecked) QC + BLAST + Taxonomy (Note:Assembly for full length will be added in an update so I may just include a checkbox for partial 16s thenclicking FullPipeline as a workaround.)
+* **Post-BLAST** Collapse hits to best one + merge metadata to BIOM file that is outputted 
 
 During execution the status bar showsn the current stage and ETA; log pane streams MicroSeq's standard logging I have embedded in it. 
 
