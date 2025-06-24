@@ -6,19 +6,36 @@ L = logging.getLogger(__name__)
 import os
 import inspect
 import platform 
-# Force the X11 backend only on Linux; let Qt choose 'cocoa' on macOS
-if platform.system() == "Linux":
-    os.environ.setdefault("QT_QPA_PLATFORM", "xcb") 
+# Pick the first visible backend that has a server......... 
+if "WSL_DISTRO_NAME" in os.environ: # running inside WSL 
+    if os.environ.get("WAYLAND_DISPLAY"):  # WSLg comositor up for windows 11 
+        # here let Qt auto-select 'wayland' which is best performance 
+        pass 
+    elif os.environ.get("DISPLAY"): # using external X-server/ Xwayland 
+        os.environ.setdefault("QT_QPA_PLATFORM", "xcb") 
+    else:                                            # headless CI, SSH 
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+elif platform.system() == "Linux":  # native Linux desktop 
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb") # native X11 
+
+    # macOS defaults to its own so no need for one here...... it would be 
+    # 'Darwin' and defaults to 'cocoa' just incase for reference and i forget 
 
 import sys, logging, traceback, subprocess, shlex, time
 from pathlib import Path 
-from typing import Optional 
+from typing import Optional
 
-from PySide6.QtCore import Qt, QObject, QThread, Signal, Slot, QMetaObject, Q_ARG, QSettings  
+
+from PySide6.QtCore import (
+        Qt, QObject, QThread, Signal, Slot, QMetaObject, Q_ARG, QSettings, QTimer)
+
 from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
         QHBoxLayout, QPushButton, QLabel, QTextEdit, QSpinBox, QMessageBox, QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, 
         )
+# log spam protection to avoid seg fault crash prevent worker thread emit log/progress faster than GUI thread can finish painting 
+from collections import deque 
 
 # ==== MicroSeq wrappers ---------- 
 from microseq_tests.pipeline import (
@@ -31,11 +48,28 @@ from microseq_tests.pipeline import (
         )
 from microseq_tests.utility.utils import setup_logging, load_config 
 
+# Logging class 
+class _QtHandler(logging.Handler):
+    """ROute any logging record into MainWindow._queue_log"""
+    def __init__(self, queue_fn):
+        super().__init__(logging.INFO)
+        self._queue = queue_fn 
+        self.setFormatter(logging.Formatter(
+            "%(asctime)s  %(levelname)s:  %(message)s")) 
+
+    def emit(self, record):
+        msg = self.format(record)
+        # hop to the main (GUI) thread before touching any Qt objects
+        QMetaObject.invokeMethod(
+            QApplication.instance(),         # any QObject living in GUI thread
+            lambda m=msg: self._queue(m),    # lambda executed in GUI thread
+            Qt.QueuedConnection
+        )
+
 # Worker class ---------------- 
 class Worker(QObject):
-    """Background runner living in its own QThread.""" 
+    """Background runner living in its own QThread redirects every status message to the Python logging framework instead of a Qt signal this way a single log channel for whole application.""" 
     finished = Signal(object) # exit-code 0 = success 
-    log = Signal(str) # text lines for log 
     progress = Signal(int)
     status = Signal(str) # emits TRIM, BLASt etc... 
 
@@ -61,14 +95,14 @@ class Worker(QObject):
 
 
         try:
-            self.log.emit(f"{self._fn.__name__} started")
+            logging.info("%s started", self._fn.__name__)
             result = self._fn(
                 *self._args,
                 **self._kwargs,
             )
-            self.log.emit(f"{self._fn.__name__} finished")
+            logging.info("%s finished", self._fn.__name__)
         except Exception as e:
-            self.log.emit(traceback.format_exc())
+            logging.exception("Worker crashed:")
             result = e
         self.finished.emit(result)   # dict | int | Exception
                  
@@ -168,6 +202,12 @@ class MainWindow(QMainWindow):
 
         # lets you scroll log output and nowarp keeps long commadn lines intact 
         self.log_box = QTextEdit(readOnly=True, lineWrapMode=QTextEdit.NoWrap)
+        
+        # Buffered Log output: avoid thousands of QTextEdit repaints 
+        self._log_buf: deque[str] = deque(maxlen=200)
+        self._flush_timer = QTimer(self, interval=40) 
+        self._flush_timer.timeout.connect(self._flush_log)
+        self._flush_timer.start() 
 
         # ---- Layout here will update UX -------------------------
         top = QHBoxLayout()
@@ -231,10 +271,14 @@ class MainWindow(QMainWindow):
         self.hits_path: Optional[Path] = None
         self.meta_path: Optional[Path] = None
         self._current_stage: str = ""
+
+        # placeholders to prevent AttributeErrors before first run
+        self._thread: Optional[QThread] = None
+        self._worker: Optional[QObject] = None 
         setup_logging(level=logging.INFO)  # file + console stderr
-        root_logger = logging.getLogger()
-        self._qt_handler = _QtHandler(self.log_box)
-        root_logger.addHandler(self._qt_handler)
+        root_logger = logging.getLogger() # grab singleton root logger 
+        self._qt_handler = _QtHandler(self._queue_log) # GUI-safe handler 
+        root_logger.addHandler(self._qt_handler) # Plug into new root logger 
     
     # ---- file picker --------------------------
     def _choose_infile(self):
@@ -334,8 +378,14 @@ class MainWindow(QMainWindow):
                 blast_task=task,
                 )
         t0 = time.time()
+        _last_pct = -1 
 
         def _progress_with_eta(pct: int) -> None:
+            nonlocal _last_pct 
+            if pct == _last_pct:
+                return 
+            _last_pct = pct 
+
             self.progress.setValue(pct)
             if pct:
                 eta = (time.time() - t0) * (100 - pct) / pct
@@ -343,20 +393,20 @@ class MainWindow(QMainWindow):
                     f"BLAST {pct}% – ETA {int(eta//60)} m {int(eta%60)} s"
                 )
 
-        worker.progress.connect(_progress_with_eta)
+        worker.progress.connect(_progress_with_eta, type=Qt.QueuedConnection) # UI repaint safe 
         # injecting wrapper + args into Worker; moves into new thread 
         thread = QThread(self) # autodeleted with window 
         worker.moveToThread(thread) 
 
         # wire signal between log streaming, completion and thread shutdown
 
-        worker.log.connect(self.log_box.append)
         thread.started.connect(worker.run)
         # remember results (int0 so _done can inspect it 
         worker.finished.connect(lambda r: setattr(self, "_last_result", r)) 
 
-        worker.finished.connect(thread.quit) 
-        thread.finished.connect(self._done) 
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater) # free QObject 
+        thread.finished.connect(self._on_job_done) 
 
         # keep references so closeEvent can see them 
         self._worker = worker 
@@ -380,12 +430,18 @@ class MainWindow(QMainWindow):
         worker.moveToThread(thread)
 
         t0 = time.time()
+        _last_pct = -1 
 
         def _stage(msg: str) -> None:
             self._current_stage = msg
             self.statusBar().showMessage(msg)
 
         def _progress_with_eta(pct: int) -> None:
+            nonlocal _last_pct 
+            if pct == _last_pct:
+                return 
+            _last_pct = pct 
+
             self.progress.setValue(pct)
             if pct:
                 eta = (time.time() - t0) * (100 - pct) / pct
@@ -393,16 +449,16 @@ class MainWindow(QMainWindow):
                     f"{self._current_stage} {pct}% – ETA {int(eta//60)} m {int(eta%60)} s"
                 )
 
-        worker.progress.connect(_progress_with_eta)
-        worker.status.connect(_stage)
-        worker.log.connect(self.log_box.append)
+        worker.progress.connect(_progress_with_eta, type=Qt.QueuedConnection)
+        worker.status.connect(_stage, type=Qt.QueuedConnection)
         # remember the result object 
         def _remember(r):
             self._last_result = r 
-        worker.finished.connect(_remember) 
-
+        worker.finished.connect(_remember)
+        worker.finished.connect(worker.deleteLater) # free QObject 
+        
         worker.finished.connect(thread.quit) # ask thread to exit 
-        thread.finished.connect(self._done) # run _done when thread is gone 
+        thread.finished.connect(self._on_job_done) # run _done when thread is gone 
 
         self._worker = worker
         self._thread = thread
@@ -481,30 +537,58 @@ class MainWindow(QMainWindow):
         )
         thread = QThread(self)
         worker.moveToThread(thread)
-        worker.log.connect(self.log_box.append)
         thread.started.connect(worker.run)
         worker.finished.connect(lambda r: setattr(self, "_last_result", r))
         worker.finished.connect(thread.quit)
-        thread.finished.connect(self._done)
+        worker.finished.connect(worker.deleteLater) # free QObject 
+        thread.finished.connect(self._on_job_done)
 
         self._worker = worker
         self._thread = thread
         thread.start()
 
+    # Helper method using here for batch log signals from worker threads 
+    @Slot(str)
+    def _queue_log(self, line: str) -> None:
+        """Enqueue a log line coming from a worker thread.""" 
+        self._log_buf.append(line) 
+
+    @Slot()
+    def _flush_log(self) -> None:
+        """Flush the ring-buffer into QTextEdit runs in GUI thread""" 
+        if self._log_buf: # anything waiting? 
+            self.log_box.append("\n".join(self._log_buf))
+            self._log_buf.clear() 
 
     def _cancel_run(self):
         """Request interruption of the running worker thread."""
         if getattr(self, "_thread", None) and self._thread.isRunning():
             self._thread.requestInterruption()
             self.cancel_btn.setEnabled(False)
-            self.log_box.append("Cancelling…")
+            self.log_box.append("Cancelling…") 
+
+
+    @Slot()
+    def _on_job_done(self):
+        # let any pending paint events drains before closing widgets 
+        QTimer.singleShot(0, self._safe_cleanup)
+
+    def _safe_cleanup(self):
+        if getattr(self, "_thread", None):
+            self._thread.quit()
+            self._thread.wait() # guarantees QPainter released
+            self._thread.deleteLater() 
+            self._thread = None 
+
+        self._finalise_ui() # old _done body 
+
 
 
     # Called when the background QThread has fully finished.
     # Read self._last_result (set in _launch / _launch_blast),
     # decide whether the run was a success, update the GUI, and
     # clean up Worker + QThread objects.
-    def _done(self):
+    def _finalise_ui(self):
         # interpret the saved result --------------------------------
         result = getattr(self, "_last_result", 1)     # default = error
         if isinstance(result, dict):                  # full‑pipeline success
@@ -550,11 +634,7 @@ class MainWindow(QMainWindow):
             b.setEnabled(True)
         self.cancel_btn.setEnabled(False)
 
-        # safe Qt clean‑up ------------------------------------------
-        if self._worker:
-            self._worker.deleteLater()
-        if self._thread:
-            self._thread.deleteLater()
+        # safe Qt clean‑up ------------------------------------------ 
         self._worker = None
         self._thread = None
 
@@ -566,34 +646,20 @@ class MainWindow(QMainWindow):
         """
         Prevent the window from clsoing while BLAST thread is still running.
         """
-        if getattr(self, "_thread", None) and self._thread.isRunning():
-            # ask the thread to finish, then auto-close the window
-            self._worker.finished.connect(lambda _: self.close())
-            self._thread.requestInterruption()    # politely signal
-            event.ignore()                        # keep window open
-            self.log_box.append("Waiting for BLAST thread to finish…")
-        else:
-            event.accept()
-            root = logging.getLogger()
+        if self._thread and self._thread.isRunning():
+            if self._worker:
+
+                # ask the thread to finish, then auto-close the window
+                self._worker.finished.connect(lambda *_: self.close())
+                self._thread.requestInterruption()    # politely signal
+                event.ignore()                        # keep window open
+                self.log_box.append("Waiting for BLAST thread to finish…")
+                return 
+            event.accept() 
+            root = logging.getLogger() 
             if getattr(self, "_qt_handler", None) in root.handlers:
                 root.removeHandler(self._qt_handler)
-                self._qt_handler = None
-
-
-# Custom QT Logging Handler --------------------------------
-class _QtHandler(logging.Handler):
-    """Relay root-logger records into the GUI log pane.""" 
-    def __init__(self, box: QTextEdit):
-        super().__init__(level=logging.INFO)
-        self._box = box 
-        self.setFormatter(logging.Formatter("%(asctime)s  %(levelname)s:  %(message)s"))
-
-    def emit(self, record):
-        # queued connection ensures thread-safety
-        QMetaObject.invokeMethod(
-            self._box, "append", Qt.QueuedConnection,
-            Q_ARG(str, self.format(record))
-        )
+                self._qt_handler = None 
 
 # Application entry point ------------------
 def launch():
