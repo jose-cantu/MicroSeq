@@ -60,11 +60,7 @@ class _QtHandler(logging.Handler):
     def emit(self, record):
         msg = self.format(record)
         # hop to the main (GUI) thread before touching any Qt objects
-        QMetaObject.invokeMethod(
-            QApplication.instance(),         # any QObject living in GUI thread
-            lambda m=msg: self._queue(m),    # lambda executed in GUI thread
-            Qt.QueuedConnection
-        )
+        QTimer.singleShot(0, lambda m=msg: self._queue(m)) 
 
 # Worker class ---------------- 
 class Worker(QObject):
@@ -402,7 +398,7 @@ class MainWindow(QMainWindow):
 
         thread.started.connect(worker.run)
         # remember results (int0 so _done can inspect it 
-        worker.finished.connect(lambda r: setattr(self, "_last_result", r)) 
+        worker.finished.connect(lambda r: setattr(self._remember_result, type=Qt.QueuedConnection)) 
 
         worker.finished.connect(thread.quit)
         thread.finished.connect(worker.deleteLater) # free QObject 
@@ -452,9 +448,7 @@ class MainWindow(QMainWindow):
         worker.progress.connect(_progress_with_eta, type=Qt.QueuedConnection)
         worker.status.connect(_stage, type=Qt.QueuedConnection)
         # remember the result object 
-        def _remember(r):
-            self._last_result = r 
-        worker.finished.connect(_remember)
+        worker.finished.connect(self._remember_result, type=Qt.QueuedConnection)
         worker.finished.connect(worker.deleteLater) # free QObject 
         
         worker.finished.connect(thread.quit) # ask thread to exit 
@@ -538,7 +532,7 @@ class MainWindow(QMainWindow):
         thread = QThread(self)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.finished.connect(lambda r: setattr(self, "_last_result", r))
+        worker.finished.connect(self._remember_result, type=Qt.QueuedConnection)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater) # free QObject 
         thread.finished.connect(self._on_job_done)
@@ -547,7 +541,12 @@ class MainWindow(QMainWindow):
         self._thread = thread
         thread.start()
 
-    # Helper method using here for batch log signals from worker threads 
+    # Helper method using here for batch log signals from worker threads
+    @Slot(object)
+    def _remember_result(self, result):
+        """Runs in the GUI thread -> safe to touch self.* attributes."""
+        self._last_result = result 
+
     @Slot(str)
     def _queue_log(self, line: str) -> None:
         """Enqueue a log line coming from a worker thread.""" 
