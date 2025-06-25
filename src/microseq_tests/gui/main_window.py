@@ -206,7 +206,7 @@ class MainWindow(QMainWindow):
         
         # Buffered Log output: avoid thousands of QTextEdit repaints 
         self._log_buf: deque[str] = deque(maxlen=200)
-        self._flush_timer = QTimer(self, interval=40) 
+        self._flush_timer = QTimer(self, interval=80) # set at 80 fewer repaints 
         self._flush_timer.timeout.connect(self._flush_log)
         self._flush_timer.start() 
 
@@ -409,7 +409,6 @@ class MainWindow(QMainWindow):
         worker.finished.connect(self._remember_result, type=Qt.QueuedConnection)
 
         worker.finished.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater) # free QObject Worker 
         thread.finished.connect(thread.deleteLater) # let Qt free QThread avoid manually doing it 
         thread.finished.connect(self._on_job_done) 
 
@@ -459,10 +458,8 @@ class MainWindow(QMainWindow):
         worker.status.connect(_stage, type=Qt.QueuedConnection)
         # remember the result object 
         worker.finished.connect(self._remember_result, type=Qt.QueuedConnection)
-        worker.finished.connect(worker.deleteLater) # free QObject 
         
         worker.finished.connect(thread.quit) # ask thread to exit
-        thread.finished.connect(worker.deleteLater) # free QObject Worker 
         thread.finished.connect(thread.deleteLater) 
         thread.finished.connect(self._on_job_done) # run _done when thread is gone 
 
@@ -569,9 +566,21 @@ class MainWindow(QMainWindow):
     @Slot()
     def _flush_log(self) -> None:
         """Flush the ring-buffer into QTextEdit runs in GUI thread""" 
-        if self._log_buf: # anything waiting? 
-            self.log_box.append("\n".join(self._log_buf))
-            self._log_buf.clear() 
+        if not self._log_buf:
+            return 
+
+        lines = "\n".join(self._log_buf)
+        self._log_buf.clear()
+
+        # NEVER touch a QWidget ddirectly schedule the append for the next
+        # GUI-event turn so we cannot run inside its current paintEvent. 
+        QMetaObject.invokeMethod(
+            self.log_box,
+            "append",
+            Qt.QueuedConnection,
+            Q_ARG(str, lines)
+
+        ) 
 
     def _cancel_run(self):
         """Request interruption of the running worker thread."""
