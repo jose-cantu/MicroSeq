@@ -366,6 +366,8 @@ class MainWindow(QMainWindow):
         self.postblast_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.log_box.append(f"\n▶ BLAST {self._infile.name} -> {hits_path.name}")
+        if getattr(self, "_flush_timer", None):
+            self._flush_timer.start() 
 
         # worker and thread wiring -------------------
         worker = Worker(
@@ -429,6 +431,8 @@ class MainWindow(QMainWindow):
         for b in (self.qc_btn, self.full_btn, self.run_btn, self.postblast_btn):
             b.setEnabled(False)
         self.cancel_btn.setEnabled(True)
+        if getattr(self, "_flush_timer", None):
+            self._flush_timer.start() 
 
         worker = Worker(fn, *args, **kw)
         worker.log.connect(lambda s: logging.info("%s", s), type=Qt.QueuedConnection)
@@ -533,6 +537,8 @@ class MainWindow(QMainWindow):
         self.log_box.append(
             f"\n▶ Post-BLAST {self.hits_path.name} -> {out_biom.name}"
         )
+        if getattr(self, "_flush_timer", None):
+            self._flush_timer.start() 
 
         worker = Worker(
             run_postblast,
@@ -599,6 +605,7 @@ class MainWindow(QMainWindow):
 
     def _safe_cleanup(self):
         if getattr(self, "_flush_timer", None) and self._flush_timer.isActive():
+            self._flush_log() 
             self._flush_timer.stop()
         if getattr(self, "_thread", None):
             self._thread = None
