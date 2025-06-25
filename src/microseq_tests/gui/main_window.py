@@ -34,7 +34,8 @@ from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
         QHBoxLayout, QPushButton, QLabel, QTextEdit, QSpinBox, QMessageBox, QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, 
         )
-# log spam protection to avoid seg fault crash prevent worker thread emit log/progress faster than GUI thread can finish painting 
+# log spam protection to avoid seg fault crash prevent worker thread emit log/progress faster than GUI thread can finish painting
+# Qt-safe ring-buffer + logging 
 from collections import deque 
 
 # ==== MicroSeq wrappers ---------- 
@@ -49,23 +50,24 @@ from microseq_tests.pipeline import (
 from microseq_tests.utility.utils import setup_logging, load_config 
 
 # Logging class 
-class _QtHandler(logging.Handler):
-    """ROute any logging record into MainWindow._queue_log"""
-    def __init__(self, queue_fn):
-        super().__init__(logging.INFO)
-        self._queue = queue_fn 
-        self.setFormatter(logging.Formatter(
-            "%(asctime)s  %(levelname)s:  %(message)s")) 
+class LogBridge(QObject, logging.Handler):
+    """Qt-aware logging.Handler: every record forwarded to a queued QT signal.
+    The signal is auto-disconnected when the parent (MainWindow) vanishes."""
+    sig = Signal(str)
+
+    def __init__(self, parent):
+        QObject.__init__(self, parent)
+        logging.Handler.__init__(self, logging.INFO)
+        self.setFormatter(logging.Formatter("%(asctime)s  %(levelname)s:  %(message)s")) 
 
     def emit(self, record):
-        msg = self.format(record)
-        # hop to the main (GUI) thread before touching any Qt objects
-        QTimer.singleShot(0, lambda m=msg: self._queue(m)) 
+        self.sig.emit(self.format(record)) 
 
 # Worker class ---------------- 
 class Worker(QObject):
     """Background runner living in its own QThread redirects every status message to the Python logging framework instead of a Qt signal this way a single log channel for whole application.""" 
-    finished = Signal(object) # exit-code 0 = success 
+    finished = Signal(object) # exit-code 0 = success
+    log = Signal(str) 
     progress = Signal(int)
     status = Signal(str) # emits TRIM, BLASt etc... 
 
@@ -91,13 +93,16 @@ class Worker(QObject):
 
 
         try:
+            self.log.emit(f"{self._fn.__name__} started")
             logging.info("%s started", self._fn.__name__)
             result = self._fn(
                 *self._args,
                 **self._kwargs,
             )
+            self.log.emit(f"{self._fn.__name__} finished") 
             logging.info("%s finished", self._fn.__name__)
         except Exception as e:
+            self.log.emit(traceback.format_exc()) 
             logging.exception("Worker crashed:")
             result = e
         self.finished.emit(result)   # dict | int | Exception
@@ -271,10 +276,11 @@ class MainWindow(QMainWindow):
         # placeholders to prevent AttributeErrors before first run
         self._thread: Optional[QThread] = None
         self._worker: Optional[QObject] = None 
-        setup_logging(level=logging.INFO)  # file + console stderr
-        root_logger = logging.getLogger() # grab singleton root logger 
-        self._qt_handler = _QtHandler(self._queue_log) # GUI-safe handler 
-        root_logger.addHandler(self._qt_handler) # Plug into new root logger 
+        setup_logging(level=logging.INFO)  # file + console stderr + GUI output 
+        root_logger = logging.getLogger() # grab singleton root logger
+        self._log_handler = LogBridge(self) 
+        self._log_handler.sig.connect(self._queue_log, Qt.QueuedConnection)  # GUI-safe handler 
+        root_logger.addHandler(self._log_handler) # Plug into new root logger 
     
     # ---- file picker --------------------------
     def _choose_infile(self):
@@ -373,6 +379,8 @@ class MainWindow(QMainWindow):
                 threads=self.threads_spin.value(),
                 blast_task=task,
                 )
+        # send Worker.log -> root logger -> _QtHandler -> GUI 
+        worker.log.connect(lambda s: logging.info("%s", s), type=Qt.QueuedConnection) 
         t0 = time.time()
         _last_pct = -1 
 
@@ -397,11 +405,12 @@ class MainWindow(QMainWindow):
         # wire signal between log streaming, completion and thread shutdown
 
         thread.started.connect(worker.run)
-        # remember results (int0 so _done can inspect it 
-        worker.finished.connect(lambda r: setattr(self._remember_result, type=Qt.QueuedConnection)) 
+        # remember results so _finalise_ui can inspect them
+        worker.finished.connect(self._remember_result, type=Qt.QueuedConnection)
 
         worker.finished.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater) # free QObject 
+        thread.finished.connect(worker.deleteLater) # free QObject Worker 
+        thread.finished.connect(thread.deleteLater) # let Qt free QThread avoid manually doing it 
         thread.finished.connect(self._on_job_done) 
 
         # keep references so closeEvent can see them 
@@ -422,6 +431,7 @@ class MainWindow(QMainWindow):
         self.cancel_btn.setEnabled(True)
 
         worker = Worker(fn, *args, **kw)
+        worker.log.connect(lambda s: logging.info("%s", s), type=Qt.QueuedConnection) 
         thread = QThread(self)
         worker.moveToThread(thread)
 
@@ -451,7 +461,9 @@ class MainWindow(QMainWindow):
         worker.finished.connect(self._remember_result, type=Qt.QueuedConnection)
         worker.finished.connect(worker.deleteLater) # free QObject 
         
-        worker.finished.connect(thread.quit) # ask thread to exit 
+        worker.finished.connect(thread.quit) # ask thread to exit
+        thread.finished.connect(worker.deleteLater) # free QObject Worker 
+        thread.finished.connect(thread.deleteLater) 
         thread.finished.connect(self._on_job_done) # run _done when thread is gone 
 
         self._worker = worker
@@ -529,12 +541,14 @@ class MainWindow(QMainWindow):
             self.meta_path,
             out_biom,
         )
+        worker.log.connect(lambda s: logging.info("%s", s), type=Qt.QueuedConnection) 
         thread = QThread(self)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.finished.connect(self._remember_result, type=Qt.QueuedConnection)
         worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater) # free QObject 
+        worker.finished.connect(worker.deleteLater) # free QObject Worker 
+        worker.finished.connect(thread.deleteLater) 
         thread.finished.connect(self._on_job_done)
 
         self._worker = worker
@@ -575,8 +589,8 @@ class MainWindow(QMainWindow):
     def _safe_cleanup(self):
         if getattr(self, "_thread", None):
             self._thread.quit()
-            self._thread.wait() # guarantees QPainter released
-            self._thread.deleteLater() 
+            self._thread.wait() # guarantees QPainter released ask worker event-loop to finish 
+            # thread.deleteLater() is connected below -> leave destruction to QT manually doing it is causing problems for me....
             self._thread = None 
 
         self._finalise_ui() # old _done body 
@@ -656,9 +670,9 @@ class MainWindow(QMainWindow):
                 return 
             event.accept() 
             root = logging.getLogger() 
-            if getattr(self, "_qt_handler", None) in root.handlers:
-                root.removeHandler(self._qt_handler)
-                self._qt_handler = None 
+            if getattr(self, "_log_handler", None) in root.handlers:
+                root.removeHandler(self._log_handler)
+                self._log_handler = None 
 
 # Application entry point ------------------
 def launch():
