@@ -546,8 +546,8 @@ class MainWindow(QMainWindow):
         thread.started.connect(worker.run)
         worker.finished.connect(self._remember_result, type=Qt.QueuedConnection)
         worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater) # free QObject Worker 
-        worker.finished.connect(thread.deleteLater) 
+        thread.finished.connect(worker.deleteLater) # free QObject Worker 
+        thread.finished.connect(thread.deleteLater) 
         thread.finished.connect(self._on_job_done)
 
         self._worker = worker
