@@ -399,8 +399,8 @@ class MainWindow(QMainWindow):
 
         worker.progress.connect(_progress_with_eta, type=Qt.QueuedConnection) # UI repaint safe 
         # injecting wrapper + args into Worker; moves into new thread 
-        thread = QThread(self) # autodeleted with window 
-        worker.moveToThread(thread) 
+        thread = QThread()
+        worker.moveToThread(thread)
 
         # wire signal between log streaming, completion and thread shutdown
 
@@ -409,8 +409,9 @@ class MainWindow(QMainWindow):
         worker.finished.connect(self._remember_result, type=Qt.QueuedConnection)
 
         worker.finished.connect(thread.quit)
-        thread.finished.connect(thread.deleteLater) # let Qt free QThread avoid manually doing it 
-        thread.finished.connect(self._on_job_done) 
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater) # let Qt free QThread avoid manually doing it
+        thread.finished.connect(self._on_job_done)
 
         # keep references so closeEvent can see them 
         self._worker = worker 
@@ -430,8 +431,8 @@ class MainWindow(QMainWindow):
         self.cancel_btn.setEnabled(True)
 
         worker = Worker(fn, *args, **kw)
-        worker.log.connect(lambda s: logging.info("%s", s), type=Qt.QueuedConnection) 
-        thread = QThread(self)
+        worker.log.connect(lambda s: logging.info("%s", s), type=Qt.QueuedConnection)
+        thread = QThread()
         worker.moveToThread(thread)
 
         t0 = time.time()
@@ -460,8 +461,9 @@ class MainWindow(QMainWindow):
         worker.finished.connect(self._remember_result, type=Qt.QueuedConnection)
         
         worker.finished.connect(thread.quit) # ask thread to exit
-        thread.finished.connect(thread.deleteLater) 
-        thread.finished.connect(self._on_job_done) # run _done when thread is gone 
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_job_done) # run _done when thread is gone
 
         self._worker = worker
         self._thread = thread
@@ -538,8 +540,8 @@ class MainWindow(QMainWindow):
             self.meta_path,
             out_biom,
         )
-        worker.log.connect(lambda s: logging.info("%s", s), type=Qt.QueuedConnection) 
-        thread = QThread(self)
+        worker.log.connect(lambda s: logging.info("%s", s), type=Qt.QueuedConnection)
+        thread = QThread()
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.finished.connect(self._remember_result, type=Qt.QueuedConnection)
@@ -596,13 +598,12 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._safe_cleanup)
 
     def _safe_cleanup(self):
+        if getattr(self, "_flush_timer", None) and self._flush_timer.isActive():
+            self._flush_timer.stop()
         if getattr(self, "_thread", None):
-            self._thread.quit()
-            self._thread.wait() # guarantees QPainter released ask worker event-loop to finish 
-            # thread.deleteLater() is connected below -> leave destruction to QT manually doing it is causing problems for me....
-            self._thread = None 
+            self._thread = None
 
-        self._finalise_ui() # old _done body 
+        self._finalise_ui() # old _done body
 
 
 
