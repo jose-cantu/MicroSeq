@@ -206,7 +206,9 @@ fi
 $conda_run pip install -e . # editable install keeps repo and CLI in sync (Pip install after so unbuffer works....)  
 
 # if running in GitHub actions, expose this env's bin/ to later steps 
-if [[ -n ${CI-} ]]; then # variable always set in Actions 
+if [[ -n ${CI-} ]]; then # variable always set in Actions
+  eval "$(conda shell.bash hook)" && conda activate MicroSeq # exports CONDA_PREFIX
+  : "${CONDA_PREFIX:=$(conda info --base)/envs/MicroSeq}" # fall back for safety 
   echo "[installer] exporting $CONDA_PREFIX/bin to GITHUB_PATH"
   echo "$CONDA_PREFIX/bin" >> "$GITHUB_PATH" # makes microseq visible in next steps 
 fi 
