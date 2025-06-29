@@ -112,7 +112,8 @@ class Worker(QObject):
 
 # ---- Main Window Constructor 
 class MainWindow(QMainWindow):
-    LOG_BATCH = 100
+    LOG_BATCH = 100 # lines queued before shedule flush 
+    LOG_FLUSH_CHUNK = 300 # max lines written in one flush - prevents long UI stalls
 
     def __init__(self):
         super().__init__()
@@ -287,7 +288,8 @@ class MainWindow(QMainWindow):
         self._flush_timer = QTimer(self)
         self._flush_timer.setInterval(150) # limits to ~7 FPS (5-8 sweetspot)
         self._flush_timer.timeout.connect(self._flush_log_batch)
-        self._flush_timer.start() 
+        self._flush_timer.start()
+        self._in_flush = False # re-entrancy guard against paaint 
 
     # ---- file picker --------------------------
     def _choose_infile(self):
@@ -576,12 +578,24 @@ class MainWindow(QMainWindow):
             self._flush_log_batch()
 
     def _flush_log_batch(self) -> None:
-        if not self._pending_lines:
-            return
-        self.log_box.setUpdatesEnabled(False)
-        self.log_box.appendPlainText("\n".join(self._pending_lines))
-        self.log_box.setUpdatesEnabled(True)
-        self._pending_lines.clear()
+        # Already inside the flush or nothing to flush so just exit 
+        if self._in_flush or not self._pending_lines:
+            return 
+        # Inside the flush 
+        self._in_flush = True 
+        try:
+            # write at most LOG_FLUSH_CHUNK lines → keeps UI responsive
+            chunk, self._pending_lines = (
+               self._pending_lines[:self.LOG_FLUSH_CHUNK],
+               self._pending_lines[self.LOG_FLUSH_CHUNK :],
+            )
+            
+            self.log_box.setUpdatesEnabled(False)
+            self.log_box.appendPlainText("\n".join(chunk))
+            self.log_box.setUpdatesEnabled(True)
+        finally:
+            # Allow next flush once paintEvent has returned 
+            self._in_flush = False 
 
     def _cancel_run(self):
         """Request interruption of the running worker thread."""
