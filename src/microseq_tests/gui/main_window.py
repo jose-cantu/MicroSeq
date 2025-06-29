@@ -28,7 +28,8 @@ from typing import Optional
 
 
 from PySide6.QtCore import (
-        Qt, QObject, QThread, Signal, Slot, QSettings, QTimer)
+        Qt, QObject, QThread, Signal, Slot, QSettings, QTimer,
+        QMetaObject, Q_ARG)
 
 from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
@@ -374,7 +375,7 @@ class MainWindow(QMainWindow):
         self.run_btn.setEnabled(False)
         self.postblast_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
-        self.log_box.appendPlainText(
+        self._enqueue_line(
             f"\n▶ BLAST {self._infile.name} -> {hits_path.name}"
         )
 
@@ -541,7 +542,7 @@ class MainWindow(QMainWindow):
 
         self.postblast_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
-        self.log_box.appendPlainText(
+        self._enqueue_line(
             f"\n▶ Post-BLAST {self.hits_path.name} -> {out_biom.name}"
         )
 
@@ -575,12 +576,16 @@ class MainWindow(QMainWindow):
     def _enqueue_line(self, line: str) -> None:
         self._pending_lines.append(line)
         if len(self._pending_lines) >= self.LOG_BATCH:
-            self._flush_log_batch()
+            self._schedule_flush()
+
+    def _schedule_flush(self) -> None:
+        QMetaObject.invokeMethod(
+            self, "_flush_log_batch", Qt.QueuedConnection)
 
     def _flush_log_batch(self) -> None:
-        # Already inside the flush or nothing to flush so just exit 
+        # Already inside the flush or nothing to flush so just exit
         if self._in_flush or not self._pending_lines:
-            return 
+            return
         # Inside the flush 
         self._in_flush = True 
         try:
@@ -590,19 +595,22 @@ class MainWindow(QMainWindow):
                self._pending_lines[self.LOG_FLUSH_CHUNK :],
             )
             
-            self.log_box.setUpdatesEnabled(False)
-            self.log_box.appendPlainText("\n".join(chunk))
-            self.log_box.setUpdatesEnabled(True)
+            QMetaObject.invokeMethod(
+                self.log_box,
+                "appendPlainText",
+                Qt.QueuedConnection,
+                Q_ARG(str, "\n".join(chunk)),
+            )
         finally:
-            # Allow next flush once paintEvent has returned 
-            self._in_flush = False 
+            # Allow next flush once paintEvent has returned
+            self._in_flush = False
 
     def _cancel_run(self):
         """Request interruption of the running worker thread."""
         if getattr(self, "_thread", None) and self._thread.isRunning():
             self._thread.requestInterruption()
             self.cancel_btn.setEnabled(False)
-            self.log_box.appendPlainText("Cancelling…")
+            self._enqueue_line("Cancelling…")
 
 
     @Slot()
@@ -656,7 +664,7 @@ class MainWindow(QMainWindow):
             msg = "Cancelled"
         else:
             msg = "Success" if rc == 0 else f"Failed (exit {rc})"
-        self.log_box.appendPlainText(f"● {msg}\n")
+        self._enqueue_line(f"● {msg}\n")
 
         if rc == 0 and out:
             QMessageBox.information(
@@ -689,7 +697,7 @@ class MainWindow(QMainWindow):
                 self._worker.finished.connect(lambda *_: self.close())
                 self._thread.requestInterruption()    # politely signal
                 event.ignore()                        # keep window open
-                self.log_box.appendPlainText("Waiting for BLAST thread to finish…")
+                self._enqueue_line("Waiting for BLAST thread to finish…")
                 return
 
         event.accept()
