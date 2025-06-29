@@ -112,7 +112,7 @@ class Worker(QObject):
 
 # ---- Main Window Constructor 
 class MainWindow(QMainWindow):
-    LOG_BATCH = 300
+    LOG_BATCH = 100
 
     def __init__(self):
         super().__init__()
@@ -283,7 +283,12 @@ class MainWindow(QMainWindow):
         self._log_handler = GuiLogger(self)
         self._log_handler.sig.connect(self._enqueue_line, Qt.QueuedConnection)
         root_logger.addHandler(self._log_handler)
-    
+        
+        self._flush_timer = QTimer(self)
+        self._flush_timer.setInterval(150) # limits to ~7 FPS (5-8 sweetspot)
+        self._flush_timer.timeout.connect(self._flush_log_batch)
+        self._flush_timer.start() 
+
     # ---- file picker --------------------------
     def _choose_infile(self):
 
@@ -567,7 +572,7 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def _enqueue_line(self, line: str) -> None:
         self._pending_lines.append(line)
-        if len(self._pending_lines) >= self.LOG_BATCH:
+        if len(self._pending_lines) >= self.LOG_CAP:
             self._flush_log_batch()
 
     def _flush_log_batch(self) -> None:
@@ -592,6 +597,8 @@ class MainWindow(QMainWindow):
 
     def _safe_cleanup(self):
         self._flush_log_batch()
+        if hasattr(self, "_flush_timer"):
+            self._flush_timer.stop() 
         if getattr(self, "_thread", None):
             self._thread = None
 
