@@ -28,7 +28,7 @@ from typing import Optional
 
 
 from PySide6.QtCore import (
-        Qt, QObject, QThread, Signal, Slot, QSettings)
+        Qt, QObject, QThread, Signal, Slot, QSettings, QTimer)
 
 from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
@@ -572,7 +572,7 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def _enqueue_line(self, line: str) -> None:
         self._pending_lines.append(line)
-        if len(self._pending_lines) >= self.LOG_CAP:
+        if len(self._pending_lines) >= self.LOG_BATCH:
             self._flush_log_batch()
 
     def _flush_log_batch(self) -> None:
