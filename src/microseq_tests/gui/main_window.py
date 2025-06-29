@@ -28,15 +28,13 @@ from typing import Optional
 
 
 from PySide6.QtCore import (
-        Qt, QObject, QThread, Signal, Slot, QMetaObject, Q_ARG, QSettings, QTimer)
+        Qt, QObject, QThread, Signal, Slot, QSettings, QTimer)
 
 from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
-        QHBoxLayout, QPushButton, QLabel, QTextEdit, QSpinBox, QMessageBox, QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, 
+        QHBoxLayout, QPushButton, QLabel, QPlainTextEdit, QSpinBox, QMessageBox, QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, 
         )
-# log spam protection to avoid seg fault crash prevent worker thread emit log/progress faster than GUI thread can finish painting
-# Qt-safe ring-buffer + logging 
-from collections import deque 
+# I removed the timer/buffer imports no needs for them anymore since paints over blastn process.....
 
 # ==== MicroSeq wrappers ---------- 
 from microseq_tests.pipeline import (
@@ -49,16 +47,19 @@ from microseq_tests.pipeline import (
         )
 from microseq_tests.utility.utils import setup_logging, load_config 
 
+# Logging -> GUI: one record -> one Qt signal -> one appendPlainText() 
+
 # Logging class 
-class LogBridge(QObject, logging.Handler):
-    """Qt-aware logging.Handler: every record forwarded to a queued QT signal.
-    The signal is auto-disconnected when the parent (MainWindow) vanishes."""
+class GuiLogger(QObject, logging.Handler):
+    """Forward every logging record to the GUI thread once via a QTt signal."""
     sig = Signal(str)
 
     def __init__(self, parent):
         QObject.__init__(self, parent)
         logging.Handler.__init__(self, logging.INFO)
-        self.setFormatter(logging.Formatter("%(asctime)s  %(levelname)s:  %(message)s")) 
+        self.setFormatter(
+                logging.Formatter("%(asctime)s  %(levelname)s: %(message)s")
+        ) 
 
     def emit(self, record):
         self.sig.emit(self.format(record)) 
@@ -201,15 +202,12 @@ class MainWindow(QMainWindow):
         self.meta_btn = QPushButton("Browse metadata...")
         self.meta_btn.clicked.connect(self._choose_metadata) 
 
-        # lets you scroll log output and nowarp keeps long commadn lines intact 
-        self.log_box = QTextEdit(readOnly=True, lineWrapMode=QTextEdit.NoWrap)
+        # --- log pane --- lets you scroll log output and nowarp keeps long commadn lines intact 
+        self.log_box = QPlainTextEdit(readOnly=True)
+        self.log_box.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.log_box.setMaximumBlockCount(5000) 
         
-        # Buffered Log output: avoid thousands of QTextEdit repaints 
-        self._log_buf: deque[str] = deque(maxlen=200)
-        self._flush_timer = QTimer(self, interval=80) # set at 80 fewer repaints 
-        self._flush_timer.timeout.connect(self._flush_log)
-        self._flush_timer.start() 
-
+     
         # ---- Layout here will update UX -------------------------
         top = QHBoxLayout()
         top.addWidget(self.fasta_lbl)
@@ -278,8 +276,8 @@ class MainWindow(QMainWindow):
         self._worker: Optional[QObject] = None 
         setup_logging(level=logging.INFO)  # file + console stderr + GUI output 
         root_logger = logging.getLogger() # grab singleton root logger
-        self._log_handler = LogBridge(self) 
-        self._log_handler.sig.connect(self._queue_log, Qt.QueuedConnection)  # GUI-safe handler 
+        self._log_handler = GuiLogger(self) 
+        self._log_handler.sig.connect(self._log_append, Qt.QueuedConnection)  # GUI-safe handler 
         root_logger.addHandler(self._log_handler) # Plug into new root logger 
     
     # ---- file picker --------------------------
@@ -366,8 +364,6 @@ class MainWindow(QMainWindow):
         self.postblast_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.log_box.append(f"\n▶ BLAST {self._infile.name} -> {hits_path.name}")
-        if getattr(self, "_flush_timer", None):
-            self._flush_timer.start() 
 
         # worker and thread wiring -------------------
         worker = Worker(
@@ -431,8 +427,6 @@ class MainWindow(QMainWindow):
         for b in (self.qc_btn, self.full_btn, self.run_btn, self.postblast_btn):
             b.setEnabled(False)
         self.cancel_btn.setEnabled(True)
-        if getattr(self, "_flush_timer", None):
-            self._flush_timer.start() 
 
         worker = Worker(fn, *args, **kw)
         worker.log.connect(lambda s: logging.info("%s", s), type=Qt.QueuedConnection)
@@ -537,8 +531,6 @@ class MainWindow(QMainWindow):
         self.log_box.append(
             f"\n▶ Post-BLAST {self.hits_path.name} -> {out_biom.name}"
         )
-        if getattr(self, "_flush_timer", None):
-            self._flush_timer.start() 
 
         worker = Worker(
             run_postblast,
@@ -567,28 +559,9 @@ class MainWindow(QMainWindow):
         self._last_result = result 
 
     @Slot(str)
-    def _queue_log(self, line: str) -> None:
-        """Enqueue a log line coming from a worker thread.""" 
-        self._log_buf.append(line) 
-
-    @Slot()
-    def _flush_log(self) -> None:
-        """Flush the ring-buffer into QTextEdit runs in GUI thread""" 
-        if not self._log_buf:
-            return 
-
-        lines = "\n".join(self._log_buf)
-        self._log_buf.clear()
-
-        # NEVER touch a QWidget ddirectly schedule the append for the next
-        # GUI-event turn so we cannot run inside its current paintEvent. 
-        QMetaObject.invokeMethod(
-            self.log_box,
-            "append",
-            Qt.QueuedConnection,
-            Q_ARG(str, lines)
-
-        ) 
+    def _log_append(self, line: str) -> None:
+        """Directly append a log line via queued connection."""
+        self.log_box.appendPlainText(line) 
 
     def _cancel_run(self):
         """Request interruption of the running worker thread."""
@@ -604,9 +577,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._safe_cleanup)
 
     def _safe_cleanup(self):
-        if getattr(self, "_flush_timer", None) and self._flush_timer.isActive():
-            self._flush_log() 
-            self._flush_timer.stop()
+        # nothing special to stop anymore; log updates are queued now 
         if getattr(self, "_thread", None):
             self._thread = None
 

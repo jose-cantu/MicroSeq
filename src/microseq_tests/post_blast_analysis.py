@@ -23,7 +23,11 @@ except ImportError:
     def embed_taxonomy_from_metadata(tbl, *_args, **_kw):
         return tbl
 
-setup_logging() # initialize global logging by configure as root logger  
+# Note of reference: On first launch of the GUI I've already configured handlers (via setup_logging() in main_window.py so When post_blast_analysis gets imported later, the root logger already has at least one handler, so the condition is False and the extra call is skipped If I run post_blast_analysis.py directly from the command line (no GUI involved) the root logger is still empty, so the guard evaluates to True and you still get console/file logging just as before
+
+# initialize logging only only if root logger is empty                  
+if not logging.getLogger().handlers: # If no handler configured yet? .....
+    setup_logging() # this is set as default so initialized global logging by configure as root logger  
 logger = logging.getLogger(__name__) # Now this then set as the real logger by passing everything from the root logger which doesn't return anything on its own  
 
 # -------
