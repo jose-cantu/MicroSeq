@@ -23,7 +23,7 @@ Mode	Fast (megablast)	Alignment algorithm
 ## Configuring The Run 
 * In a future update I will have all the dials adjustable for now they are the default settings so keep that in mind. 
 * If you want the BIOM file you will need to tick the BIOM box when clicking full pipeline run note you will need to supply a metadata table (GUI will warn if missing). 
-* Choose Fast(megablast) for routine Sanger reads; Comprehensive (blastn) for divergent amplicon reads. Note I do have it set up where if the coverage or percent ID doesn't reach 90% blastn will rerun instead given the nature of megablast algorithm.
+* Choose Fast(megablast) for routine Sanger reads; Comprehensive (blastn) for divergent amplicon reads. Note I do have it set up where if the coverage or percent ID doesn't reach 90% blastn will rerun instead given the nature of megablast algorithm.(Fast = NCBI Megablast—large 28-bp word, tuned for ≥95 % identity hits between nearly identical Sanger traces; Comprehensive = standard blastn—11-bp word, slower but ∼5× more sensitive to <90 % identity or divergent/gapped matches; MicroSeq auto-falls back to blastn whenever the initial Megablast hit covers <90 % of the read or shows <90 % identity). 
 > Current limitation (to be patched): > The Comprehensive (blastn) path is still being refactored; a rare QPainter crash can occur after the run finishes. For production runs keep the default Fast (megablast), which is stable. An updated patch is under review in a separate branch that I am testing for stability and will be shippedin the next release. 
 
 ## Execution What do the buttons do??
