@@ -113,8 +113,8 @@ class Worker(QObject):
 
 # ---- Main Window Constructor 
 class MainWindow(QMainWindow):
-    LOG_BATCH = 100 # lines queued before shedule flush 
-    LOG_FLUSH_CHUNK = 300 # max lines written in one flush - prevents long UI stalls
+    LOG_BATCH = 200 # lines queued before shedule flush 
+    LOG_FLUSH_CHUNK = 500 # max lines written in one flush - prevents long UI stalls
 
     def __init__(self):
         super().__init__()
@@ -288,7 +288,8 @@ class MainWindow(QMainWindow):
         
         self._flush_timer = QTimer(self)
         self._flush_timer.setInterval(150) # limits to ~7 FPS (5-8 sweetspot)
-        self._flush_timer.timeout.connect(self._flush_log_batch)
+        # Call _schedule_flush(), which queues a flush on the evnet loop 
+        self._flush_timer.timeout.connect(self._schedule_flush)
         self._flush_timer.start()
         self._in_flush = False # re-entrancy guard against paaint 
 
@@ -578,33 +579,49 @@ class MainWindow(QMainWindow):
         if len(self._pending_lines) >= self.LOG_BATCH:
             self._schedule_flush()
 
+    # ────────────────────────────────────────────────────────────────
+    # 1) enqueue-helper and scheduler stay as they are
+    # ────────────────────────────────────────────────────────────────
+    @Slot()
     def _schedule_flush(self) -> None:
-        QMetaObject.invokeMethod(
-            self, "_flush_log_batch", Qt.QueuedConnection)
+        """
+        Either the periodic QTimer or the logger calls this.
+        It *schedules* a flush – it never does the flush inline.
+        """
+        if self._pending_lines and not self._in_flush:
+            self._flush_timer.stop()                       # pause the 150 ms ticker
+            QTimer.singleShot(0, self._flush_log_batch)    # run next loop-turn
 
+    # ────────────────────────────────────────────────────────────────
+    # 2) one batch – no nested paints, no recursion
+    # ────────────────────────────────────────────────────────────────
+    @Slot()
     def _flush_log_batch(self) -> None:
-        # Already inside the flush or nothing to flush so just exit
         if self._in_flush or not self._pending_lines:
-            return
-        # Inside the flush 
-        self._in_flush = True 
-        try:
-            # write at most LOG_FLUSH_CHUNK lines → keeps UI responsive
-            chunk, self._pending_lines = (
-               self._pending_lines[:self.LOG_FLUSH_CHUNK],
-               self._pending_lines[self.LOG_FLUSH_CHUNK :],
-            )
-            
-            QMetaObject.invokeMethod(
-                self.log_box,
-                "appendPlainText",
-                Qt.QueuedConnection,
-                Q_ARG(str, "\n".join(chunk)),
-            )
-        finally:
-            # Allow next flush once paintEvent has returned
-            self._in_flush = False
+            return                                         # guard re-entrancy
 
+        self._in_flush = True
+        chunk, self._pending_lines = (
+            self._pending_lines[:self.LOG_FLUSH_CHUNK],
+            self._pending_lines[self.LOG_FLUSH_CHUNK:],
+        )
+        self.log_box.appendPlainText("\n".join(chunk)) # synchronous 
+
+        # unblock after event loop returns -> Paintevent has run 
+        QTimer.singleShot(0, self._end_flush) 
+
+    # ────────────────────────────────────────────────────────────────
+    # 3) run AFTER the QTextEdit repainted – decide what to do next
+    # ────────────────────────────────────────────────────────────────
+    @Slot()
+    def _end_flush(self) -> None:
+        self._in_flush = False
+
+        if self._pending_lines:                            # more data → chain
+            QTimer.singleShot(0, self._flush_log_batch)
+        elif not self._flush_timer.isActive():             # nothing left → resume
+            self._flush_timer.start()
+    
     def _cancel_run(self):
         """Request interruption of the running worker thread."""
         if getattr(self, "_thread", None) and self._thread.isRunning():
@@ -617,15 +634,19 @@ class MainWindow(QMainWindow):
     def _on_job_done(self):
         self._safe_cleanup()
 
-    def _safe_cleanup(self):
-        self._flush_log_batch()
-        if hasattr(self, "_flush_timer"):
-            self._flush_timer.stop() 
+    # ────────────────────────────────────────────────────────────────
+    # 4) clean-up when the worker thread ends – never force a flush
+    # ────────────────────────────────────────────────────────────────
+    def _safe_cleanup(self) -> None:
+        """Called from _on_job_done() in GUI thread."""
+        if self._pending_lines and not self._in_flush:
+            # schedule (don’t force) the very last batch
+            QTimer.singleShot(0, self._flush_log_batch)
+
         if getattr(self, "_thread", None):
             self._thread = None
 
-        self._finalise_ui() # old _done body
-
+        self._finalise_ui()            # original body stays unchanged
 
 
     # Called when the background QThread has fully finished.
@@ -702,6 +723,8 @@ class MainWindow(QMainWindow):
 
         event.accept()
         root = logging.getLogger()
+        if not root.handlers:
+            setup_logging(level=logging.INFO)
         if getattr(self, "_log_handler", None) in root.handlers:
             root.removeHandler(self._log_handler)
             self._log_handler = None
