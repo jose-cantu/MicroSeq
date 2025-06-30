@@ -643,6 +643,9 @@ class MainWindow(QMainWindow):
             # schedule (don’t force) the very last batch
             QTimer.singleShot(0, self._flush_log_batch)
 
+        if hasattr(self, "_flush_timer") and self._flush_timer.isActive():
+            self._flush_timer.stop()
+
         if getattr(self, "_thread", None):
             self._thread = None
 
@@ -728,6 +731,9 @@ class MainWindow(QMainWindow):
         if getattr(self, "_log_handler", None) in root.handlers:
             root.removeHandler(self._log_handler)
             self._log_handler = None
+
+        if hasattr(self, "_flush_timer") and self._flush_timer.isActive():
+            self._flush_timer.stop()
 
 # Application entry point ------------------
 def launch():
