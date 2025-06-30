@@ -60,6 +60,7 @@ I will go through how the tree structure looks and the run...
 └── hits_tax.tsv          # taxonomy-joined results
 ```
 > Note: duplicate FASTA files > `qc/trimmed.fasta` and `reads.fasta` contain the exact same set of QC-passed reads. The first is emitted by the Trim step and kept inside qc/ for provenance; the second is copied to the top-level so downstream tools (assembly, BLAST, etc.) can find a single “canonical” FASTA without digging into sub-folders.
+
 * raw_ab1/ inputs retained for provenance (copies of original ab1 files) will include option to symlink later. 
 * raw_fastq/ FASTQ files produced from the ab1 files before trimming 
 * qc/ per-read stats and trimmed FASTA quality‑control summary files:
