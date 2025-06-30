@@ -15,6 +15,7 @@ import logging
 L = logging.getLogger(__name__)
 
 from pathlib import Path
+import shutil
 import subprocess
 from microseq_tests.utility.utils import load_config, setup_logging 
 
@@ -22,7 +23,10 @@ PathLike = str | Path
 
 def de_novo_assembly(input_fasta: PathLike, output_dir: PathLike, *, threads: int=1, **kwargs, ) -> Path: 
     """
-    Run CAP3 on input_fasta. 
+    Run CAP3 on ``input_fasta``.
+
+    CAP3 itself is single-threaded; the ``threads`` argument is
+    accepted for API compatibility but currently ignored.
 
     Parameters
     input_fasta : str 
@@ -41,7 +45,11 @@ def de_novo_assembly(input_fasta: PathLike, output_dir: PathLike, *, threads: in
     out_dir = Path(output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd = [cap3_exe, str(in_path), "-p", str(threads)] 
+    local_fasta = out_dir / in_path.name
+    if in_path != local_fasta:
+        shutil.copy2(in_path, local_fasta)
+
+    cmd = [cap3_exe, local_fasta.name]
     L.info("RUN CAP3: %s (cwd=%s)", " ".join(cmd), out_dir)
 
     try:
@@ -50,7 +58,7 @@ def de_novo_assembly(input_fasta: PathLike, output_dir: PathLike, *, threads: in
         L.error("CAP3 failed (exit %s):\n%s", exc.returncode, exc.stderr)
         raise 
 
-    contig_path = out_dir / f"{in_path.name}.cap.contigs"
+    contig_path = out_dir / f"{local_fasta.name}.cap.contigs"
     if not contig_path.exists():
         raise FileNotFoundError(contig_path)
 
@@ -64,7 +72,12 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="De-novo assembly via CAP3")
     ap.add_argument("-i", "--input", required=True, help="Trimmed FASTA here!")
     ap.add_argument("-o", "--output", required=True, help="Output directory") 
-    ap.add_argument("--threads", type=int, default=1, help="CPU threads") 
+    ap.add_argument(
+        "--threads",
+        type=int,
+        default=1,
+        help="Ignored: CAP3 is single-threaded (flag kept for compatibility)",
+    )
     args = ap.parse_args() 
     try:
         de_novo_assembly(args.input, args.output, threads=args.threads)

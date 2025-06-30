@@ -407,7 +407,10 @@ microseq postblast    -b hits_tax.tsv -m meta.tsv -o results.biom --json \
 
 *Why two paths?* AB1 chromatograms carry single‑end Sanger qualities that behave differently from generic FASTQ scores; the lightweight BioPython route avoids over‑trimming while still filtering low‑quality tails.
 
-## CAP3 (microseq assembly) 
+## CAP3 (microseq assembly)
+
+CAP3 is inherently single-threaded; the `--threads` flag is accepted for API
+consistency but has no effect.
 
 CAP3 names every output file `<prefix>.cap.<suffix>` where `<prefix>` is the input FASTA without extension.  The key artefacts are:
 
