@@ -590,7 +590,8 @@ class MainWindow(QMainWindow):
         """
         if self._pending_lines and not self._in_flush:
             self._flush_timer.stop()                       # pause the 150 ms ticker
-            QTimer.singleShot(0, self._flush_log_batch)    # run next loop-turn
+            # ensure the flush runs on the GUI thread
+            QTimer.singleShot(0, self, self._flush_log_batch)
 
     # ────────────────────────────────────────────────────────────────
     # 2) one batch – no nested paints, no recursion
@@ -605,10 +606,10 @@ class MainWindow(QMainWindow):
             self._pending_lines[:self.LOG_FLUSH_CHUNK],
             self._pending_lines[self.LOG_FLUSH_CHUNK:],
         )
-        self.log_box.appendPlainText("\n".join(chunk)) # synchronous 
+        self.log_box.appendPlainText("\n".join(chunk))  # synchronous
 
-        # unblock after event loop returns -> Paintevent has run 
-        QTimer.singleShot(0, self._end_flush) 
+        # unblock after event loop returns -> Paintevent has run
+        QTimer.singleShot(0, self, self._end_flush)
 
     # ────────────────────────────────────────────────────────────────
     # 3) run AFTER the QTextEdit repainted – decide what to do next
@@ -618,7 +619,7 @@ class MainWindow(QMainWindow):
         self._in_flush = False
 
         if self._pending_lines:                            # more data → chain
-            QTimer.singleShot(0, self._flush_log_batch)
+            QTimer.singleShot(0, self, self._flush_log_batch)
         elif not self._flush_timer.isActive():             # nothing left → resume
             self._flush_timer.start()
     
@@ -641,7 +642,7 @@ class MainWindow(QMainWindow):
         """Called from _on_job_done() in GUI thread."""
         if self._pending_lines and not self._in_flush:
             # schedule (don’t force) the very last batch
-            QTimer.singleShot(0, self._flush_log_batch)
+            QTimer.singleShot(0, self, self._flush_log_batch)
 
         if hasattr(self, "_flush_timer") and self._flush_timer.isActive():
             self._flush_timer.stop()
