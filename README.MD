@@ -83,15 +83,15 @@ In short: MicroSeq is the only open-source package that ingests raw Sanger or FA
 $ git clone https://github.com/jose-cantu/MicroSeq.git
 $ cd MicroSeq
 
+# Note for MacOS users ONLY you can just use the MacOS installation bash file I have set up from here and it will install all the rest for you. Just follow the prompts I have setup in it such as asking for miniconda and once at the wizard setup stage simply press enter throughout for default steps....
+./install_macos_microseq.sh
+
 # 2  Create & activate Conda environment
 $ conda env create -f config/environment.yml
 $ conda activate MicroSeq
 
 # 3  Editable install (good while developing)
 $ pip install -e .
-
-# 3b macOS users only install Expect for live progress bar 
-brew install expect  # provides 'unbuffer'
 
 # 4  Download reference DBs & configure logging
 $ microseq-setup                 # interactive, 3–5 min first run
