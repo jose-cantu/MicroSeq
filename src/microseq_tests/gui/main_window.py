@@ -6,6 +6,8 @@ L = logging.getLogger(__name__)
 import os
 import inspect
 import platform
+import tracemalloc 
+import atexit
 
 # Pick the first visible backend that has a server.........
 if "WSL_DISTRO_NAME" in os.environ:  # running inside WSL
@@ -118,16 +120,10 @@ class Worker(QObject):
             self._kwargs["on_progress"] = self.progress.emit
 
         try:
-            self.log.emit(f"{self._fn.__name__} started")
             logging.info("%s started", self._fn.__name__)
-            result = self._fn(
-                *self._args,
-                **self._kwargs,
-            )
-            self.log.emit(f"{self._fn.__name__} finished")
-            logging.info("%s finished", self._fn.__name__) 
+            result = self._fn(*self._args, **self._kwargs)
+            logging.info("%s finished", self._fn.__name__)
         except Exception as e:
-            self.log.emit(traceback.format_exc())
             logging.exception("Worker crashed:")
             result = e
         self.finished.emit(result)   # dict | int | Exception
@@ -237,9 +233,16 @@ class MainWindow(QMainWindow):
         # connect to model's signal to auto-scroll to the bottom on new logs
         self.log_model.rowsInserted.connect(
             lambda _parent, _first, last: # _ to mark unused
-                self.log_view.scrollTo(
-                    self.log_model.index(last),
-                    QAbstractItemView.ScrollHint.PositionAtBottom
+                # Safely queue a call to the scrollTo method to run after the current            # event (the paint event) has finished. THis helps in avoiding 
+                # and preventing re-entrancy crashes.
+                QTimer.singleShot(
+                    0,
+                    lambda row=last: # capture the value 
+                       self.log_view.scrollTo(
+                           self.log_model.index(row, 0),
+                           QAbstractItemView.ScrollHint.PositionAtBottom
+                       ) 
+
                 )
         )
 
@@ -394,22 +397,12 @@ class MainWindow(QMainWindow):
             threads=self.threads_spin.value(),
             blast_task=task,
         )
-        t0 = time.time()
-        _last_pct = -1
+        self._t0 = time.time()
+        self._last_pct = -1   
 
-        def _progress_with_eta(pct: int) -> None:
-            nonlocal _last_pct
-            if pct == _last_pct:
-                return
-            _last_pct = pct
-            self.progress.setValue(pct)
-            if pct:
-                eta = (time.time() - t0) * (100 - pct) / pct
-                self.statusBar().showMessage(
-                    f"BLAST {pct}% – ETA {int(eta//60)} m {int(eta%60)} s"
-                )
+        worker.progress.connect(self._progress_slot, type=QtCore.Qt.ConnectionType.QueuedConnection) # UI repaint safe
 
-        worker.progress.connect(_progress_with_eta, type=QtCore.Qt.ConnectionType.QueuedConnection) # UI repaint safe
+        worker.status.connect(self._stage_slot, type=QtCore.Qt.ConnectionType.QueuedConnection) 
         # injecting wrapper + args into Worker; moves into new thread
         thread = QThread()
         worker.moveToThread(thread)
@@ -422,6 +415,8 @@ class MainWindow(QMainWindow):
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater) # let Qt free QThread avoid manually doing it
         thread.finished.connect(self._on_job_done)
+        # debugging thread cleanup 
+        thread.finished.connect(lambda: logging.debug("QThread has finished")) 
 
         # keep references so closeEvent can see them
         self._worker = worker
@@ -438,35 +433,25 @@ class MainWindow(QMainWindow):
 
         worker = Worker(fn, *args, **kw)
         thread = QThread()
+        # Worker here to the thread before connecting signals 
         worker.moveToThread(thread)
 
-        t0 = time.time()
-        _last_pct = -1
 
-        def _stage(msg: str) -> None:
-            self._current_stage = msg
-            self.statusBar().showMessage(msg)
+        # Local functions for the slots ---- 
+        self._t0 = time.time() 
+        self._last_pct = -1 
 
-        def _progress_with_eta(pct: int) -> None:
-            nonlocal _last_pct
-            if pct == _last_pct:
-                return
-            _last_pct = pct
-            self.progress.setValue(pct)
-            if pct:
-                eta = (time.time() - t0) * (100 - pct) / pct
-                self.statusBar().showMessage(
-                    f"{self._current_stage} {pct}% – ETA {int(eta//60)} m {int(eta%60)} s"
-                )
-
-        worker.progress.connect(_progress_with_eta, type=QtCore.Qt.ConnectionType.QueuedConnection)
-        worker.status.connect(_stage, type=QtCore.Qt.ConnectionType.QueuedConnection)
+        # Connect signals to new, thread-safe GUI only @Slot methods 
+        worker.progress.connect(self._progress_slot, type=QtCore.Qt.ConnectionType.QueuedConnection)
+        worker.status.connect(self._stage_slot, type=QtCore.Qt.ConnectionType.QueuedConnection)
         # remember the result object
         worker.finished.connect(self._remember_result, type=QtCore.Qt.ConnectionType.QueuedConnection)
         worker.finished.connect(thread.quit) # ask thread to exit
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self._on_job_done) # run _done when thread is gone
+        thread.finished.connect(self._on_job_done) # run _done when thread is gone 
+        # for debugging thread cleanup
+        thread.finished.connect(lambda: logging.debug("QThread has finished.")) 
 
         self._worker = worker
         self._thread = thread
@@ -548,6 +533,29 @@ class MainWindow(QMainWindow):
         thread.start()
 
     # Helper method using here for batch log signals from worker threads
+    @Slot(str) 
+    def _stage_slot(self, msg: str) -> None: 
+        """Update the status bar text - runs in the GUI thread."""
+        self._current_stage = msg 
+        self.statusBar().showMessage(msg) 
+
+    @Slot(int)
+    def _progress_slot(self, pct: int) -> None:
+        """Update progress bar + ETA - runs in the GUI thread."""
+        if not hasattr(self, "_t0"): # initialize timer on first progress signal
+            self._t0 = time.time() 
+        if pct == getattr(self, "_last_pct", -1):
+            return 
+        self._last_pct = pct 
+        self.progress.setValue(pct) 
+        if pct > 0:
+            eta = (time.time() - self._t0) * (100 - pct) / pct 
+            self.statusBar().showMessage(
+                f"{self._current_stage} {pct}% - ETA "
+                f"{int(eta//60)} m {int(eta%60)} s" 
+            ) 
+
+
     @Slot(object)
     def _remember_result(self, result):
         """Runs in the GUI thread -> safe to touch self.* attributes."""
@@ -583,20 +591,26 @@ class MainWindow(QMainWindow):
     # decide whether the run was a success, update the GUI, and
     # clean up Worker + QThread objects.
     def _finalise_ui(self):
+        """
+        Runs after the worker thread has exited. 
+        All UI mutations are queued with single Shot(0, ..) so they execute only
+        after Qt has finished any pending paint events. 
+        """
         # interpret the saved result --------------------------------
         result = getattr(self, "_last_result", 1)      # default = error
+
+        # --- decide status/message -------------------------------- 
         if isinstance(result, dict):                   # full‑pipeline success
-            rc = 0
-            out = result.get("tax", Path())        # pick any key to show
+            rc, out = 0, result.get("tax", Path())        # pick any key to show
         elif isinstance(result, RuntimeError) and str(result) == "Cancelled":
-            rc = None
-            out = Path()
+            rc, out = None, Path()
         elif isinstance(result, Exception):            # Worker caught an error
-            rc = 1
-            out = Path()
+            rc, out = 1, Path()
+            err = str(result) 
+
             # friendlier message for the "no hits" situation
-            if "no blast hits" in str(result).lower():
-                QMessageBox.information(
+            if "no blast hits" in err.lower(): 
+                dialog_fn = lambda: QMessageBox.information(
                     self, "Nothing to summarise",
                     ("BLAST finished, but no hits met the filters.\n"
                      "You can:\n"
@@ -604,33 +618,41 @@ class MainWindow(QMainWindow):
                      "run again without the BIOM option.")
                 )
             else:
-                QMessageBox.warning(self, "Run failed", str(result))
+                dialog_fn = lambda e=err: QMessageBox.warning(self, 
+                    "Run Failed", e)
+            QTimer.singleShot(0, dialog_fn)
         else:                                          # int from BLAST‑only path
-            rc = int(result)
-            out = Path()
+            rc, out = int(result), Path()
 
         # log + optional dialog -------------------------------------
-        if rc is None:
-            msg = "Cancelled"
-        else:
-            msg = "Success" if rc == 0 else f"Failed (exit {rc})"
-        self.log_model.append(f"● {msg}\n")
+        msg = "Cancelled" if rc is None else ("Success" if rc == 0 else f"Failed (exit {rc})") 
+            
+        QTimer.singleShot(
+            0, lambda m=msg: self.log_model.append(f"● {m}\n")
+        )
 
         if rc == 0 and out:
-            QMessageBox.information(
+            QTimer.singleShot(
+                0,
+                lambda p=out: QMessageBox.information(
                 self,
                 "Pipeline finished",
-                f"Last output file:\n{out}"
+                f"Last output file:\n{p}") 
             )
 
         # re‑enable buttons -----------------------------------------
-        for b in (self.qc_btn, self.full_btn, self.run_btn, self.postblast_btn):
-            b.setEnabled(True)
-        self.cancel_btn.setEnabled(False)
+        def _reenable():
 
-        # safe Qt clean‑up ------------------------------------------
-        self._worker = None
-        self._thread = None
+           for b in (self.qc_btn, self.full_btn, 
+                     self.run_btn, self.postblast_btn):
+               b.setEnabled(True)
+           self.cancel_btn.setEnabled(False)
+
+           # safe Qt clean‑up ------------------------------------------
+           self._worker = None
+           self._thread = None
+
+        QTimer.singleShot(0, _reenable) 
 
     # closeEvent ----------------------------
     def closeEvent(self, event):
@@ -651,9 +673,32 @@ class MainWindow(QMainWindow):
             root.removeHandler(self._log_handler)
             self._log_handler = None
 
+# redirects all Qt internal C++ warnings here for debugging 
+def qt_message_handler(mode, _context, message):
+    """Redirect Qt messages to the Python logging module."""
+    level = {
+        QtCore.Qt.QtMsgType.QtDebugMsg:    logging.DEBUG,
+        QtCore.Qt.QtMsgType.QtInfoMsg:     logging.INFO,
+        QtCore.Qt.QtMsgType.QtWarningMsg:  logging.WARNING,
+        QtCore.Qt.QtMsgType.QtCriticalMsg: logging.ERROR,
+        QtCore.Qt.QtMsgType.QtFatalMsg:    logging.CRITICAL,
+    }.get(mode, logging.CRITICAL)
+    logging.log(level, "Qt: %s", message)
+
+
 # Application entry point ------------------
 def launch():
+    tracemalloc.start()
+
+    @atexit.register 
+    def print_top10():
+        snapshot = tracemalloc.take_snapshot()
+        top = snapshot.statistics("lineno")[:10]
+        logging.info("Top 10 memory allocations:\n%s", "\n".join(map(str, top)))
+
     app = QApplication(sys.argv)
+    # So Qt Warnings show up such as QPainter inside the application log view 
+    QtCore.qInstallMessageHandler(qt_message_handler) 
     win = MainWindow()
     win.show()
     sys.exit(app.exec())
