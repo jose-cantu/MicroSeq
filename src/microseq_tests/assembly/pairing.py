@@ -4,18 +4,18 @@
 Main purpose is to scan a folder full of DNA sequence files which often come in pairs and identify only complete pairs. A complete pair meaning a forward and a reverse file for the same sample. It discards any samples that are missing either the F or the R file. Its meant to be a full registery system to find the correct file regardless of naming convention if forwhatever reason it doesn't then you can add your custom regex to the resitery below. 
 """
 
-from __future__ import annotations
-import re # For regular text expressions (text pattern matching) 
-from pathlib import Path # Cool way of handling file systems 
-import logging # For printing warning messages 
-from collections import defaultdict # Creating special dictionaries dealing with None Values 
-from typing import Callable, Union # For creating specific type hints here...
-from enum import Enum # For creating enumerable, constant values 
+from __future__ import annotations # Postpones evaluation of type annotations (PEP 563) so they are no longer evaluated at function definition time - treated as string instead first 
+import re # For regular expressions (text pattern matching) 
+from pathlib import Path # Handling file systems 
+import logging # Print warning messages 
+from collections import defaultdict # Creating specialized dictionaries dealing with None Values 
+from typing import Callable, Union # FOr creating speicific type hints 
+from enum import Enum # Creating enumerable, constant values 
 
-# Inheriting from 'str' and 'Enum' allows members to be compared directly to strings. For exmaple, DupPolicy.ERROR == "error" will be True. 
+# Inheriting from 'str' and "Enum" allows members to be compared directly to strings. For example, DupPolicy.Error = "error" will be True. 
 class DupPolicy(str, Enum):
     """Defines the policy for handling duplicate files for the same sample/orientation.""" 
-    ERROR = "error" 
+    ERROR = "error"
     KEEP_FIRST = "keep-first"
     KEEP_LAST = "keep-last"
     MERGE = "merge" 
@@ -24,8 +24,7 @@ class DupPolicy(str, Enum):
 Here creating a type alias named Detector It defines the blueprint for any function that takes a string filename and returns a tuple of string, string or none. Making the code easier to read for future me. =) 
 """
 
-Detector = Callable[[str], tuple[str, str | None]] 
-
+Detector = Callable[[str], tuple[str, str | None]] # Calling a function ["string filename" and returning a tuple that has "string sampleID and F/R orientation OR None"  
 
 # ----------- Detectors ---------------------------
 # Pre-compiled regular expressions that will be used to find primer tokens within filenames automatically note I added re.I for case-insensitive. 
@@ -66,8 +65,9 @@ def suffix_detector(name: str):
     """Detects primer tokens at the end of a filename"""
     # Search the filename for the suffix pattern 
     if m := _SUFFIX_RX.search(name):
-        # Extract the token (the primer name) and orientation 
-        orient = m[1], m[1][-1].upper()   
+        # Extract the token (the primer name) and orientation
+        tok = m[1] # example 27F or 1492R 
+        orient = tok[-1].upper() # F or R    
         # The sample ID is everything before the token. Handling both dash and underscore scenarios
         sid = name[:m.start()].rstrip("_-") 
         return sid, orient 
