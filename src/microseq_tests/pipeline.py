@@ -19,13 +19,13 @@ except Exception:  # allow use without PySide
 import shutil
 
 # pull the existing implementation functions
-from microseq_tests.trimming.quality_trim import quality_trim
+from microseq_tests.trimming.quality_trim import  trim_fastq_inputs
 from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq as ab1_to_fastq
 from microseq_tests.trimming.biopy_trim import trim_folder as biopy_trim
 from microseq_tests.trimming.fastq_to_fasta import (
     fastq_folder_to_fasta as fastq_to_fasta,
 )
-from Bio import SeqIO
+
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
@@ -94,27 +94,9 @@ def run_trim(
         biopy_trim(fastq_dir, work / "qc", combined_tsv=summary_tsv)
         trim_dir = work / "passed_qc_fastq"
     else:
-        out_fq = work / "qc" / "trimmed.fastq"
-        quality_trim(input_path, out_fq)
+        input_path = Path(input_path) 
         trim_dir = work / "qc"
-        if summary_tsv:
-            reads = bases = qsum = 0
-            for rec in SeqIO.parse(out_fq, "fastq"):
-                ph = rec.letter_annotations["phred_quality"]
-                reads += 1
-                bases += len(rec)
-                qsum += sum(ph)
-            avg_q = qsum / bases if bases else 0
-            avg_len = bases / reads if reads else 0
-            summary_fp = Path(summary_tsv)
-            summary_fp.parent.mkdir(parents=True, exist_ok=True)
-            write_header = not summary_fp.exists()
-            with open(summary_fp, "a") as comb:
-                if write_header:
-                    comb.write("file\treads\tavg_len\tavg_q\n")
-                comb.write(
-                    f"{Path(input_path).name}\t{reads}\t{avg_len:.1f}\t{avg_q:.2f}\n"
-                )
+        trim_fastq_inputs(input_path, trim_dir, summary_tsv=summary_tsv) 
 
     fastq_to_fasta(trim_dir, work / "qc" / "trimmed.fasta")
     L.info("Trim finished → %s", work / "qc" / "trimmed.fasta")
