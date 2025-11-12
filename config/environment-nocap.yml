@@ -11,6 +11,7 @@ dependencies:
   - python = 3.10
 
   # python libraries imported 
+  - setuptools<81 # keep pkg_resources available until anaconda client migrates will update API to most modern version later on  
   - pyyaml 
   - pytest   # test runner 
   - pyside6     # GUI 
