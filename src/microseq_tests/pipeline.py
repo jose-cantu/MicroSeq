@@ -27,6 +27,7 @@ from microseq_tests.trimming.fastq_to_fasta import (
 )
 
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
+from microseq_tests.assembly.paired_assembly import assemble_pairs 
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
 from microseq_tests.post_blast_analysis import run as postblast_run
@@ -34,6 +35,7 @@ from microseq_tests.post_blast_analysis import run as postblast_run
 __all__ = [
     "run_trim",
     "run_assembly",
+    "run_paired_assembly",
     "run_blast_stage",
     "run_add_tax",
     "run_postblast",
@@ -104,10 +106,16 @@ def run_trim(
 
 
 # ───────────────────────────────────────────────────────── assembly
-def run_assembly(fasta_in: PathLike, out_dir: PathLike) -> int:
-    de_novo_assembly(Path(fasta_in), Path(out_dir))
+def run_assembly(fasta_in: PathLike, out_dir: PathLike, *, threads: int | None = None, **kwargs) -> int:
+    options = dict(kwargs)
+    if threads is not None:
+        options["threads"] = threads 
+    de_novo_assembly(Path(fasta_in), Path(out_dir), **options)
     return 0
 
+def run_paired_assembly(input_dir: PathLike, output_dir: PathLike, **kwargs) -> int:
+    assemble_pairs(Path(input_dir), Path(output_dir), **kwargs)
+    return 0 
 
 # ───────────────────────────────────────────────────────── BLAST
 
