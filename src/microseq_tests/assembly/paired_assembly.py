@@ -93,39 +93,45 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
         # safty check 
         sample_dir.mkdir(parents=True, exist_ok=True) 
         sample_fasta = sample_dir / f"{sid}_paired.fasta" 
-        # grab all F/R 
-        sources = list(_iter_paths(entries["F"])) + list(_iter_paths(entries["R"]))
+        # grab all F/R allowing either mate to be absent 
+        sources: list[Path] = [] 
+        forward = entries.get("F")
+        if forward:
+            sources.extend(_iter_paths(forward))
+        reverse = entries.get("R")
+        if reverse:
+            sources.extend(_iter_paths(reverse))
         # combine each F/R pair 
         _write_combined_fasta(sources, sample_fasta)
         
-           # writing out manual commmand instructions and run it and raise error if failure
-           # here only the file name is needed since I change workding directory to the sample directory its in! 
-           cmd = [cap3_exe, sample_fasta.name] 
-           # extend cap3 options commands
-           if cap3_options:
-               cmd.extend(cap3_options)
-           L.info(" Run CAP3 (paired) %s: %s", sid, " ".join(cmd)) 
-           # now try to run or error and cancel run 
-           try: 
-               subprocess.run(
-                    cmd, # run the command 
-                    check=True, # check if ran complete 
-                    cwd=sample_dir, # change working direcotry 
-                    stderr=subprocess.PIPE, # pipe the error captured in except process 
-                    text=True # return logging in text rather than byte form making it readable 
-                ) 
-           except subprocess.CalledProcessError as exc:
-                L.error(
-                    "CAP3 failed for sample %s (exit %s):\n%s", sid, exc.returncode, exc.stderr
-                )
-                raise # raise this issue and exit 
+        # writing out manual commmand instructions and run it and raise error if failure
+        # here only the file name is needed since I change workding directory to the sample directory its in! 
+        cmd = [cap3_exe, sample_fasta.name] 
+        # extend cap3 options commands
+        if cap3_options:
+            cmd.extend(cap3_options)
+        L.info(" Run CAP3 (paired) %s: %s", sid, " ".join(cmd)) 
+        # now try to run or error and cancel run 
+        try: 
+            subprocess.run(
+                 cmd, # run the command 
+                 check=True, # check if ran complete 
+                 cwd=sample_dir, # change working direcotry 
+                 stderr=subprocess.PIPE, # pipe the error captured in except process 
+                 text=True # return logging in text rather than byte form making it readable 
+             ) 
+        except subprocess.CalledProcessError as exc:
+             L.error(
+                 "CAP3 failed for sample %s (exit %s):\n%s", sid, exc.returncode, exc.stderr
+             )
+             raise # raise this issue and exit 
 
-           contig_path = sample_dir / f"{sample_fasta}.cap.contigs" 
-           if not contig_path.exists():
-                raise FileNotFoundError(contig_path)
+        contig_path = sample_dir / f"{sample_fasta.name}.cap.contigs" 
+        if not contig_path.exists():
+             raise FileNotFoundError(contig_path)
 
-           contig_paths.append(contig_path)
-           L.info("Cap3 paired assembly finished for %s and for contigs: %s", sid, contig_path) 
+        contig_paths.append(contig_path)
+        L.info("Cap3 paired assembly finished for %s and for contigs: %s", sid, contig_path) 
 
     return contig_paths 
 
