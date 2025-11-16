@@ -27,7 +27,8 @@ from microseq_tests.trimming.fastq_to_fasta import (
 )
 
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
-from microseq_tests.assembly.paired_assembly import assemble_pairs 
+from microseq_tests.assembly.paired_assembly import assemble_pairs
+from microseq_tests.assembly.pairing import DupPolicy 
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
 from microseq_tests.post_blast_analysis import run as postblast_run
@@ -113,9 +114,8 @@ def run_assembly(fasta_in: PathLike, out_dir: PathLike, *, threads: int | None =
     de_novo_assembly(Path(fasta_in), Path(out_dir), **options)
     return 0
 
-def run_paired_assembly(input_dir: PathLike, output_dir: PathLike, **kwargs) -> int:
-    assemble_pairs(Path(input_dir), Path(output_dir), **kwargs)
-    return 0 
+def run_paired_assembly(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options=None, fwd_pattern: str | None = None, rev_pattern: str | None = None) -> list[Path]:
+    return assemble_pairs(Path(input_dir), Path(output_dir), dup_policy=dup_policy, cap3_options=cap3_options, fwd_pattern=fwd_pattern, rev_pattern=rev_pattern)
 
 # ───────────────────────────────────────────────────────── BLAST
 
@@ -243,12 +243,17 @@ def run_full_pipeline(
     db_key: str,
     out_dir: Path | None = None,
     *,
+    mode: str = "single", 
     postblast: bool = False,
     identity: int = 97,
     qcov: int = 80,
     max_target_seqs: int = 5,
     threads: int = 4,
     blast_task: str = "megablast", 
+    dup_policy: DupPolicy = DupPolicy.ERROR, 
+    cap3_options=None, 
+    fwd_pattern = str | None = None,
+    rev_pattern = str | None = None, 
     metadata: Path | None = None,
     summary_tsv: Path | None = None,
     on_stage=None,
@@ -275,28 +280,64 @@ def run_full_pipeline(
     on_progress(0)
 
     is_fasta = infile.suffix.lower() in {".fasta", ".fa", ".fna", ".fas"}
+    using_paired = mode == "paired" 
 
     if summary_tsv is None and not is_fasta:
         summary_tsv = out_dir / "qc" / "trim_summary.tsv"
 
     paths = {
-        "trimmed_fastq": None if is_fasta else out_dir / "qc" / "trimmed.fastq",
+        "trimmed_fastq": None if (is_fasta or using_paired) else out_dir / "qc" / "trimmed.fastq",
         "trimmed_fasta": infile if is_fasta else out_dir / "qc" / "trimmed.fasta",
         "fasta": infile if is_fasta else out_dir / "reads.fasta",
         "hits": out_dir / "hits.tsv",
         "tax": out_dir / "hits_tax.tsv",
         "biom": out_dir / "table.biom",
-        "trim_summary": summary_tsv if not is_fasta else None,
+        "trim_summary": summary_tsv if (not is_fasta and not using_paired) else None,
     }
 
-    n_stages = (2 if is_fasta else 4) + int(postblast)
+    if using_paired:
+        # Assembly + BLAST + taxonomy + postblast (optional here if using) 
+        n_stages = 3 + int(postblast) 
+    else:
+        n_stages = (2 if is_fasta else 4) + int(postblast)
     step = 100 // n_stages
     pct = 0
 
     def subprog(off):
         return lambda p: on_progress(off + p * step // 100)
 
-    if not is_fasta:
+    if using_paired:
+        def _merge_fasta_files(files: Sequence[Path], destination: Path) -> None:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with destination.open("w", encoding="utf-8") as fh:
+                for fp in files:
+                    data = Path(fp).read_text(encoding="utf-8")
+                    if not data:
+                        continue
+                    fh.write(data)
+                    if not data.endswith("\n"):
+                        fh.write("\n")
+
+        on_stage("Paired assembly")
+        contig_paths = assemble_pairs(
+            infile,
+            out_dir / "asm",
+            dup_policy=dup_policy,
+            cap3_options=cap3_options,
+            fwd_pattern=fwd_pattern,
+            rev_pattern=rev_pattern,
+        )
+        if not contig_paths:
+            raise ValueError(f"No paired reads detected in {infile}")
+        merged_contigs = out_dir / "asm" / "paired_contigs.fasta"
+        _merge_fasta_files(contig_paths, merged_contigs)
+        paths["fasta"] = merged_contigs
+        paths["trimmed_fasta"] = merged_contigs
+
+        pct += step
+        on_progress(pct)
+
+    elif not is_fasta:
         # 1 – Trim
         on_stage("Trim")
 

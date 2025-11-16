@@ -9,7 +9,7 @@ import re # For regular expressions (text pattern matching)
 from pathlib import Path # Handling file systems 
 import logging # Print warning messages 
 from collections import defaultdict # Creating specialized dictionaries dealing with None Values 
-from typing import Callable, Union # FOr creating speicific type hints 
+from typing import Callable, Sequence, Union # FOr creating speicific type hints 
 from enum import Enum # Creating enumerable, constant values 
 
 # Inheriting from 'str' and "Enum" allows members to be compared directly to strings. For example, DupPolicy.Error = "error" will be True. 
@@ -84,8 +84,40 @@ DETECTORS: list[Detector] = [
     suffix_detector,
 ]
 
+def _strip_token(name: str, token: str) -> str:
+    """Remove token from name and tidy separators/extension."""
+    base = name
+    token_idx = base.upper().find(token.upper())
+    if token_idx >= 0:
+        before = base[:token_idx].rstrip("_-")
+        after = base[token_idx + len(token):].lstrip("_-.")
+        cleaned = f"{before}_{after}" if before and after else before or after
+    else:
+        cleaned = base
+
+    return Path(cleaned).stem
+
+
+def make_pattern_detector(fwd_pattern: str, rev_pattern: str) -> Detector:
+    """Build a detector that searches for custom forward/reverse regex tokens."""
+
+    fwd_rx = re.compile(f"({fwd_pattern})", re.I)
+    rev_rx = re.compile(f"({rev_pattern})", re.I)
+
+    def detector(name: str) -> tuple[str, str | None]:
+        if m := fwd_rx.search(name):
+            token = m[1]
+            return _strip_token(name, token), "F"
+        if m := rev_rx.search(name):
+            token = m[1]
+            return _strip_token(name, token), "R"
+        return Path(name).stem, None
+
+    return detector
+
+
 # --------------- Public Helpers ---------------------------
-def extract_sid_orientation(name: str) -> tuple[str, str | None]: 
+def extract_sid_orientation(name: str, *, detectors: Sequence[Detector] | None = None) -> tuple[str, str | None]: 
     """Try each detector until one recognises a primer token."""
     for det in DETECTORS:
         sid, orient = det(name)
@@ -96,7 +128,8 @@ def extract_sid_orientation(name: str) -> tuple[str, str | None]:
 
 def group_pairs(
     folder: Union[str, Path], 
-    dup_policy: DupPolicy = DupPolicy.ERROR 
+    dup_policy: DupPolicy = DupPolicy.ERROR,
+    *, fwd_pattern: str | None = None, rev_pattern: str | None = None, detectors: Sequence[Detector] | None = None
     ) -> dict[str, dict[str, Union[Path, list[Path]]]]:
     """
     Groups Forward/Reverse reads from a folder into pairs 
@@ -113,6 +146,15 @@ def group_pairs(
    """ 
     pairs: dict[str, dict[str, Union[Path, list[Path]]]] = defaultdict(dict) 
      
+    active_detectors: Sequence[Detector]
+    if detectors is not None:
+        active_detectors = detectors
+    elif fwd_pattern and rev_pattern:
+        active_detectors = [make_pattern_detector(fwd_pattern, rev_pattern), *DETECTORS]
+    else:
+        active_detectors = DETECTORS
+
+
     # Use iterdir() to look at every item in the folder. 
     for p in Path(folder).iterdir():
         # Check the file extension in a case-insensitive way. 
@@ -121,7 +163,7 @@ def group_pairs(
             continue
 
         # Get the sample ID and orientation ('F', 'R', or None)
-        sid, orient = extract_sid_orientation(p.name)
+        sid, orient = extract_sid_orientation(p.name, detectors=active_detectors)
 
         # If no valid orientation was found, skip to the next file. 
         if orient not in ("F", "R"):

@@ -76,7 +76,7 @@ def _write_combined_fasta(sources: Iterable[Path], destination: Path) -> None:
             if not data.endswith("\n"):
                 fout.write("\n") 
 
-def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options: Sequence[str] | None = None 
+def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options: Sequence[str] | None = None, fwd_pattern: str | None = None, rev_pattern: str | None = None  
                    ) -> list[Path]:
     """
     Run CAP3 assemblies for each forward and reverse pair discovered in ``input_dir``. 
@@ -112,7 +112,7 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
     out_dir = Path(output_dir).resolve() 
     out_dir.mkdir(parents=True, exist_ok=True) 
 
-    pairs = group_pairs(in_dir, dup_policy=dup_policy)
+    pairs = group_pairs(in_dir, dup_policy=dup_policy, fwd_pattern=fwd_pattern, rev_pattern=rev_pattern)
     if not pairs:
         L.info("No paired reads detected in input directory: %s", in_dir)
         # Exit out since nothing here to do 
