@@ -31,12 +31,12 @@ from typing import Optional
 import collections
 
 from PySide6.QtCore import (
-    Qt, QObject, QThread, Signal, Slot, QMetaObject, Q_ARG, QSettings, QTimer, QModelIndex
+    QLine, Qt, QObject, QThread, Signal, Slot, QMetaObject, Q_ARG, QSettings, QTimer, QModelIndex
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
     QHBoxLayout, QPushButton, QLabel, QListView, QSpinBox, QMessageBox,
-    QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, QAbstractItemView,
+    QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, QAbstractItemView, QLineEdit 
 )
 from PySide6 import QtCore
 
@@ -174,6 +174,63 @@ class MainWindow(QMainWindow):
         self.hits_spin.setValue(5)
         self.hits_spin.setSuffix(" hits")
 
+        # -------- Assembly Mode ----------------------------------------
+        # createa dropdown menu or combo box widget 
+        self.mode_combo = QComboBox() 
+
+        # add single option to the dropdown, storing single as internal data 
+        self.mode_combo.addItem("Single", userData="single")
+
+        # add the Paired option to dropdown, storing paired as internal data 
+        self.mode_combo.addItem("Paired", userData="paired")
+
+        # Create a single-line text input field for the forward read pattern 
+        self.fwd_pattern_edit = QLineEdit() 
+
+        # Add placeholder as a hint to uder that the field is optional its meant for regex that don't follow patterns I implemented 
+        self.fwd_pattern_edit.setPlaceholderText("Forward regex (optional) use this for cases outside of automatic parsing of F/R")
+
+        # Create a single-line text input field for the reverse read pattern 
+        self.rev_pattern_edit = QLineEdit() 
+
+        # Add placeholder text as a hint to user that the field is optional again for patterns not in the ones I set up via 'help' for common primers used 
+        self.rev_pattern_edit.setPlaceholderText("Reverse regex (optional) use this for cases outside of automatic parsing of F/R")
+
+        # ---- Restore previous choises from settings --------
+
+        # Retrieve previous saved assembly mode from application settings, defaulting to "single" if not found 
+        saved_mode = self.settings.value("assembly_mode", "single")
+
+        # Find the infex of the saved mode in combo box data, ensuring valid index >= 0 is returned 
+        idx = max(0, self.mode_combo.findData(saved_mode))
+
+        # Set dropdown menu to display the saved/default choice 
+        self.mode_combo.setCurrentIndex(idx) 
+
+        # Immediately call function to update the UI based on intial mode selection (example: show/hide reverse pattern field) 
+        self._on_mode_changed(idx) 
+
+        # ------ Connect UI events to functions/settings storage -------- 
+
+        # Connect signal emitted when dropdown index changes to the function handles the change 
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+
+        # Set the text of forward pattern field to the value saved in settings (defaulting to empty string) 
+        self.fwd_pattern_edit.setText(self.settings.value("fwd_pattern", ""))
+
+        # Set the text of reverse pattern field to the value saved in settings (defaulting to empty string) 
+        self.rev_pattern_edit.setText(self.settings.value("rev_pattern", ""))
+
+        # Connect the signal for text edits in the forward field to an anonymous function that saves the new text to settings. 
+        self.fwd_pattern_edit.textEdited.connect(
+            lambda txt: self.settings.setValue("fwd_pattern", txt)
+        )
+
+        # Connect the signal for text edits in the reverse field to an anonymous function that saves the new text to settings 
+        self.rev_pattern_edit.textEdited.connect(
+            lambda txt: self.settings.setValue("rev_pattern", txt)
+        )
+
         # ---- Alignmnet mode box ----------------
         mode_box = QGroupBox("Alignment mode")
         fast_rb = QRadioButton("Fast (megablast)")
@@ -272,6 +329,11 @@ class MainWindow(QMainWindow):
         mid.addWidget(QLabel("Max hits"))
         mid.addWidget(self.hits_spin)
 
+        mid.addWidget(QLabel("Assembly"))
+        mid.addWidget(self.mode_combo)
+        mid.addWidget(self.fwd_pattern_edit)
+        mid.addWidget(self.rev_pattern_edit) 
+
         mid.addWidget(QLabel("Threads"))
         mid.addWidget(self.threads_spin)
 
@@ -316,6 +378,30 @@ class MainWindow(QMainWindow):
         root_logger.addHandler(self._log_handler) # Plug into new root logger
 
     # ---- file picker --------------------------
+    def _on_mode_changed(self, index: int):
+        """
+        This function is the event handler that runs every time the user changes the selection in the 'mode_combo' dropdown menu.
+        """
+        mode = self.mode_combo.itemData(index) 
+        is_paired = mode == "paired" 
+        for edit in (self.fwd_pattern_edit, self.rev_pattern_edit):
+            edit.setVisible(is_paired)
+            edit.setEnabled(is_paired)
+        self.settings.setValue("assembly_mode", mode)
+
+    def _assembly_kwargs(self) -> dict:
+        """
+        This function is meant to be used to gather all assembly configuration data into a dictionary.
+        """ 
+        mode = self.mode_combo.currentData()
+        if mode == "paired":
+            fwd = self.fwd_pattern_edit.text().strip() or None 
+            rev = self.rev_pattern_edit.text().strip() or None 
+        else:
+            fwd = rev = None 
+        return {"mode": mode, "fwd_pattern": fwd, "rev_pattern": rev} 
+
+
     def _choose_infile(self):
         """Select FASTA/FASTQ/AB1 file(s) or a folder of traces."""
         paths, _ = QFileDialog.getOpenFileNames(
@@ -472,6 +558,7 @@ class MainWindow(QMainWindow):
             postblast=self.biom_chk.isChecked(),
             metadata=None,   # Trim → Convert → BLAST → Tax
             blast_task=task,
+            **self._assembly_kwargs()
         )
 
     # ------ Run full pipeline with Post-Blast as well -------------
@@ -497,6 +584,7 @@ class MainWindow(QMainWindow):
             postblast=self.biom_chk.isChecked(), # source of truth decide via checkbox
             metadata=self.meta_path,      # None or Path run the Post-BLAST stage too
             blast_task=task,
+            **self._assembly_kwargs()
         )
 
     # ------ Run stand-alone Post-BLAST ---------------------------------
