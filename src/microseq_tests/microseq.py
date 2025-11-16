@@ -6,9 +6,7 @@ from microseq_tests.utility.progress import stage_bar
 from microseq_tests.utility.merge_hits import merge_hits 
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
-from microseq_tests.pipeline import (
-        run_trim,
-        run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly)
+from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly)
 from microseq_tests.utility.utils import setup_logging, load_config
 from microseq_tests.assembly.pairing import DupPolicy 
 from microseq_tests.blast.run_blast import run_blast
@@ -75,7 +73,8 @@ def main() -> None:
     p_asm.add_argument("-i", "--input", required=True)
     p_asm.add_argument("-o", "--output", required=True) 
     p_asm.add_argument("--mode", choices=["single", "paired"], default="single",
-                       help="Choose between single-end or paired-end run_assembly" ) 
+                       help="Choose between single-end or paired-end run_assembly" )
+    p_asm.add_argument("--dup-policy", choices=[policy.value for policy in DupPolicy], default="error", help="Handling policy for duplicate orientation files during pairing")
 
     # blast 
     db_choices = list(cfg["databases"].keys())    # e.g. here ['gg2', 'silva', 'ncbi16s']

@@ -24,6 +24,42 @@ def _iter_paths(value: Path | list[Path]) -> Iterable[Path]:
     else:
             yield Path(value)  
 
+def _as_path_list(value: Path | list[Path]) -> list[Path]:
+    """Return a list of `path` objects perserving insertion order."""
+    return [Path(p) for p in _iter_paths(value)]
+
+def _build_keep_separate_pairs(forward: list[Path], reverse: list[Path]) -> list[tuple[Path, Path]]:
+    """Produce forward/reverse pairings for the keep-separate policy."""
+    if not forward or not reverse: 
+        raise ValueError("Forward and reverse inputs must not be empty when paring reads.") 
+
+    f_count = len(forward)
+    r_count = len(reverse)
+
+    # If both orientations contains multiple primers, require the counts to align
+    # so that we can preserve primer ordering w/o inventing new orientations 
+    if f_count >1 and r_count > 1 and f_count != r_count:
+        raise ValueError("Mismatched duplicate counts detected while using 'keep-separate' policy:" 
+        f"{f_count} forward vs {r_count} reverse reads." 
+        ) 
+
+    pairs: list[tuple[Path, Path]] = []
+    if f_count == r_count:
+        pairs = list(zip(forward, reverse))
+    elif f_count > r_count:
+        if r_count != 1: 
+            raise ValueError("Unable to align forward duplicates with revcerse reads under 'keep-separate' policy.")
+        pairs = [(f_path, reverse[0]) for f_path in forward]
+    else: # r_count > f_count 
+        if f_count != 1:
+            raise ValueError(
+                "Unable to align reverse duplicates with forward reads under 'keep-separate' policy.")
+        pairs = [(forward[0], r_path) for r_path in reverse] 
+
+    return pairs 
+
+
+
 def _write_combined_fasta(sources: Iterable[Path], destination: Path) -> None: 
     """ Here I will combine multiple FASTA files into 'destination'."""
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -87,51 +123,49 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
     # Will process the ordered sampled paired list one by one 
     for sid in sorted(pairs):
         # Find the location of the orientation based on the file name 
-        entries = pairs[sid] 
-        # create sub directory for each assembly 
-        sample_dir = out_dir / sid 
-        # safty check 
-        sample_dir.mkdir(parents=True, exist_ok=True) 
-        sample_fasta = sample_dir / f"{sid}_paired.fasta" 
-        # grab all F/R allowing either mate to be absent 
-        sources: list[Path] = [] 
-        forward = entries.get("F")
-        if forward:
-            sources.extend(_iter_paths(forward))
-        reverse = entries.get("R")
-        if reverse:
-            sources.extend(_iter_paths(reverse))
-        # combine each F/R pair 
-        _write_combined_fasta(sources, sample_fasta)
-        
-        # writing out manual commmand instructions and run it and raise error if failure
-        # here only the file name is needed since I change workding directory to the sample directory its in! 
-        cmd = [cap3_exe, sample_fasta.name] 
-        # extend cap3 options commands
-        if cap3_options:
-            cmd.extend(cap3_options)
-        L.info(" Run CAP3 (paired) %s: %s", sid, " ".join(cmd)) 
-        # now try to run or error and cancel run 
-        try: 
-            subprocess.run(
-                 cmd, # run the command 
-                 check=True, # check if ran complete 
-                 cwd=sample_dir, # change working direcotry 
-                 stderr=subprocess.PIPE, # pipe the error captured in except process 
-                 text=True # return logging in text rather than byte form making it readable 
-             ) 
-        except subprocess.CalledProcessError as exc:
-             L.error(
-                 "CAP3 failed for sample %s (exit %s):\n%s", sid, exc.returncode, exc.stderr
-             )
-             raise # raise this issue and exit 
+        entries = pairs[sid]
 
-        contig_path = sample_dir / f"{sample_fasta.name}.cap.contigs" 
-        if not contig_path.exists():
-             raise FileNotFoundError(contig_path)
+        tasks: list[tuple[str, list[Path]]] = [] 
+        if dup_policy == DupPolicy.KEEP_SEPARATE:
+            f_sources = _as_path_list(entries["F"])
+            r_sources = _as_path_list(entries["R"])
+            primer_pairs = _build_keep_separate_pairs(f_sources, r_sources)
+            for idx, (fwd, rev) in enumerate(primer_pairs, start=1):
+                sample_key = sid if len(primer_pairs) == 1 else f"{sid}_{idx}"
+                tasks.append((sample_key, [fwd, rev]))
+            else:
+                sources = list(_iter_paths(entries["F"])) + list(_iter_paths(entries["R"]))
+                tasks.append((sid, sources))
 
-        contig_paths.append(contig_path)
-        L.info("Cap3 paired assembly finished for %s and for contigs: %s", sid, contig_path) 
+            for sample_key, sources in tasks: 
+                sample_dir = out_dir / sample_key 
+                sample_dir.mkdir(parents=True, exist_ok=True) 
+                sample_fasta = sample_dir / f"{sample_key}_paired.fasta" 
 
+                _write_combined_fasta(sources, sample_fasta) 
+
+                cmd = [cap3_exe, sample_fasta.name]
+                if cap3_options:
+                    cmd.extend(cap3_options)
+                L.info(" Run CAP3 (apired) %s: %s", sample_key, "".join(cmd)) 
+
+                try:
+                    subprocess.run(
+                        cmd, 
+                        check=True,
+                        cwd=sample_dir,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                except subprocess.CalledProcessError as exc:
+                    L.error( "CAP3 failed for sample %s (exit %s):\n%s", sample_key, exc.returncode, exc.stderr
+                    )
+                    raise # stop the run here on raise 
+                contig_path = sample_dir / f"{sample_key}_paired.fasta.cap.contigs"
+                if not contig_path.exists():
+                    raise FileNotFoundError(contig_path)
+
+                contig_paths.append(contig_path)
+                L.info("Cap3 paired assembly finished for %s and for contigs: %s", sample_key, contig_path) 
+    
     return contig_paths 
-

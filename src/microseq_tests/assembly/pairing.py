@@ -19,6 +19,7 @@ class DupPolicy(str, Enum):
     KEEP_FIRST = "keep-first"
     KEEP_LAST = "keep-last"
     MERGE = "merge" 
+    KEEP_SEPARATE = "keep-separate" 
 
 """
 Here creating a type alias named Detector It defines the blueprint for any function that takes a string filename and returns a tuple of string, string or none. Making the code easier to read for future me. =) 
@@ -156,7 +157,7 @@ def group_pairs(
                 pairs[sid][orient] = p 
 
             # Policy 4: Collect all duplicate paths into a list 
-            elif dup_policy == DupPolicy.MERGE:
+            elif dup_policy in (DupPolicy.MERGE, DupPolicy.KEEP_SEPARATE):
                 # Step 1: Prepare the list. If 'bucket` is already a list, use it 
                 # If 'bucket' (the old stored path) is a single path object, create a new list containing it. 
                 lst = bucket if isinstance(bucket, list) else [bucket] 
