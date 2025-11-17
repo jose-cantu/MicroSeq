@@ -118,8 +118,8 @@ def run_assembly(fasta_in: PathLike, out_dir: PathLike, *, threads: int | None =
     de_novo_assembly(Path(fasta_in), Path(out_dir), **options)
     return 0
 
-def run_paired_assembly(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options=None, fwd_pattern: str | None = None, rev_pattern: str | None = None) -> list[Path]:
-    return assemble_pairs(Path(input_dir), Path(output_dir), dup_policy=dup_policy, cap3_options=cap3_options, fwd_pattern=fwd_pattern, rev_pattern=rev_pattern)
+def run_paired_assembly(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options=None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None,) -> list[Path]:
+    return assemble_pairs(Path(input_dir), Path(output_dir), dup_policy=dup_policy, cap3_options=cap3_options, fwd_pattern=fwd_pattern, rev_pattern=rev_pattern, pairing_report=pairing_report,)
 
 # ───────────────────────────────────────────────────────── BLAST
 
@@ -460,6 +460,10 @@ def run_full_pipeline(
             if not generated_fastas:
                 raise ValueError(f"No FASTA files generated from {fastq_dir}")
             assembly_input = fasta_dir
+        
+
+        pairing_report = out_dir / "qc" / "pairing_report.tsv"
+        pairing_report.parent.mkdir(parents=True, exist_ok=True)
 
         on_stage("Paired assembly")
         contig_paths = assemble_pairs(
@@ -469,6 +473,7 @@ def run_full_pipeline(
             cap3_options=cap3_options,
             fwd_pattern=fwd_pattern,
             rev_pattern=rev_pattern,
+            pairing_report=pairing_report,
         )
         if not contig_paths:
            summary = _summarize_paired_candidates(assembly_input, fwd_pattern, rev_pattern)

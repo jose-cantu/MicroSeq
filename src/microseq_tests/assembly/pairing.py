@@ -108,10 +108,12 @@ def make_pattern_detector(fwd_pattern: str, rev_pattern: str) -> Detector:
     def detector(name: str) -> tuple[str, str | None]:
         if m := fwd_rx.search(name):
             token = m[1]
-            return _strip_token(name, token), "F"
+            sid = name.split(token, 1)[0].rstrip("_-")
+            return sid or Path(name).stem, "F"
         if m := rev_rx.search(name):
             token = m[1]
-            return _strip_token(name, token), "R"
+            sid = name.split(token, 1)[0].rstrip("_-")
+            return sid or Path(name).stem, "R" 
         return Path(name).stem, None
 
     return detector
@@ -129,10 +131,23 @@ def extract_sid_orientation(name: str, *, detectors: Sequence[Detector] | None =
     # Loop exhausted -> no primer recognized 
     return Path(name).stem, None 
 
+def _detect_sid_orientation(
+    name: str, detectors: Sequence[Detector]
+) -> tuple[str, str | None, str | None]:
+    """Return (sid, orientation, detector_name) for the first detector that matches."""
+
+    for det in detectors:
+        sid, orient = det(name)
+        if orient in ("F", "R"):
+            det_name = getattr(det, "__name__", det.__class__.__name__)
+            return sid, orient, det_name
+
+    return Path(name).stem, None, None
+
 def group_pairs(
     folder: Union[str, Path], 
     dup_policy: DupPolicy = DupPolicy.ERROR,
-    *, fwd_pattern: str | None = None, rev_pattern: str | None = None, detectors: Sequence[Detector] | None = None
+    *, fwd_pattern: str | None = None, rev_pattern: str | None = None, detectors: Sequence[Detector] | None = None, return_metadata: bool = False,
     ) -> dict[str, dict[str, Union[Path, list[Path]]]]:
     """
     Groups Forward/Reverse reads from a folder into pairs 
@@ -147,7 +162,8 @@ def group_pairs(
     'R': Path('/path/to/file_R.fasta')
   },
    """ 
-    pairs: dict[str, dict[str, Union[Path, list[Path]]]] = defaultdict(dict) 
+    pairs: dict[str, dict[str, Union[Path, list[Path]]]] = defaultdict(dict)
+    meta: dict[str, dict[str, Union[str, list[str]]]] = defaultdict(dict)
      
     active_detectors: Sequence[Detector]
     if detectors is not None:
@@ -157,11 +173,13 @@ def group_pairs(
     else:
         active_detectors = DETECTORS
 
-    def _store_entry(sid: str, orient: str, path: Path) -> None:
+    def _store_entry(sid: str, orient: str, path: Path, detector_name: str | None) -> None:
         bucket = pairs[sid].get(orient)
+        meta_bucket = meta[sid].get(orient)
 
         if bucket is None:
             pairs[sid][orient] = path
+            meta[sid][orient] = detector_name or "unknown"
             return
 
         if dup_policy == DupPolicy.ERROR:
@@ -174,12 +192,16 @@ def group_pairs(
         if dup_policy == DupPolicy.KEEP_LAST:
             logging.warning("Duplicate %s/%s overwriting previous entry %s due to 'keep-last' policy.", sid, orient, bucket)
             pairs[sid][orient] = path
+            meta[sid][orient] = detector_name or "unknown"
             return
 
         if dup_policy in (DupPolicy.MERGE, DupPolicy.KEEP_SEPARATE):
             lst = bucket if isinstance(bucket, list) else [bucket]
             lst.append(path)
             pairs[sid][orient] = lst
+            meta_lst = meta_bucket if isinstance(meta_bucket, list) else [meta_bucket]
+            meta_lst.append(detector_name or "unknown")
+            meta[sid][orient] = meta_lst
 
     path = Path(folder)
     fasta_exts = {".fasta", ".fa", ".fna"}
@@ -193,7 +215,7 @@ def group_pairs(
         tmp_dir.mkdir(parents=True, exist_ok=True)
 
         for record in SeqIO.parse(path, "fasta"):
-            sid, orient = extract_sid_orientation(record.id, detectors=active_detectors)
+            sid, orient, det_name = _detect_sid_orientation(record.id, active_detectors) 
             if orient not in ("F", "R"):
                 continue
 
@@ -202,7 +224,7 @@ def group_pairs(
             safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", record.id)
             rec_path = tmp_dir / f"{safe_id}_{rec_idx}.fasta"
             SeqIO.write([record], rec_path, "fasta")
-            _store_entry(sid, orient, rec_path)
+            _store_entry(sid, orient, rec_path, det_name)
 
     elif path.is_dir():
         for p in path.iterdir():
@@ -218,9 +240,16 @@ def group_pairs(
             if orient not in ("F", "R"):
                 continue
 
-            _store_entry(sid, orient, p)
+            _store_entry(sid, orient, p, det_name)
     else:
         raise ValueError(f"Input path must be a FASTA file or directory: {path}")
 
-        # Finally filtering pairs keeping sample IDs ('s') have "F' and "R' keys 
-    return {s: d for s, d in pairs.items() if {"F", "R"} <= d.keys()}
+        # Finally filtering pairs keeping sample IDs ('s') have "F' and "R' keys
+    paired_only = {s: d for s, d in pairs.items() if {"F", "R"} <= d.keys()}
+    meta_only = {s: meta[s] for s in paired_only}
+
+    if return_metadata:
+        return paired_only, meta_only
+
+    return paired_only
+

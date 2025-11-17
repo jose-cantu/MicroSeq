@@ -76,7 +76,50 @@ def _write_combined_fasta(sources: Iterable[Path], destination: Path) -> None:
             if not data.endswith("\n"):
                 fout.write("\n") 
 
-def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options: Sequence[str] | None = None, fwd_pattern: str | None = None, rev_pattern: str | None = None  
+def _write_pairing_report(pairs: dict, meta: dict, destination: Path) -> None:
+    """Persist a TSV showing how pairs were matched and which detector fired."""
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("w", encoding="utf-8") as fh:
+        fh.write("sid\tF_path\tR_path\tdetector\n")
+
+        for sid in sorted(pairs):
+            entries = pairs[sid]
+            meta_entry = meta.get(sid, {})
+
+            f_paths = _as_path_list(entries["F"])
+            r_paths = _as_path_list(entries["R"])
+
+            def _format_det(value: str | list[str] | None, orient: str) -> str | None:
+                if value is None:
+                    return None
+                if isinstance(value, list):
+                    return f"{orient}:" + ";".join(value)
+                return f"{orient}:{value}"
+
+            detectors = " | ".join(
+                filter(
+                    None,
+                    (
+                        _format_det(meta_entry.get("F"), "F"),
+                        _format_det(meta_entry.get("R"), "R"),
+                    ),
+                )
+            )
+
+            fh.write(
+                "\t".join(
+                    [
+                        sid,
+                        ";".join(str(p) for p in f_paths),
+                        ";".join(str(p) for p in r_paths),
+                        detectors,
+                    ]
+                )
+                + "\n"
+            )
+
+def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options: Sequence[str] | None = None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None 
                    ) -> list[Path]:
     """
     Run CAP3 assemblies for each forward and reverse pair discovered in ``input_dir``. 
@@ -112,7 +155,24 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
     out_dir = Path(output_dir).resolve() 
     out_dir.mkdir(parents=True, exist_ok=True) 
 
-    pairs = group_pairs(in_dir, dup_policy=dup_policy, fwd_pattern=fwd_pattern, rev_pattern=rev_pattern)
+    if pairing_report is not None:
+        pairs, meta = group_pairs(
+            in_dir,
+            dup_policy=dup_policy,
+            fwd_pattern=fwd_pattern,
+            rev_pattern=rev_pattern,
+            return_metadata=True,
+        )
+        _write_pairing_report(pairs, meta, Path(pairing_report))
+    else:
+        pairs = group_pairs(
+            in_dir,
+            dup_policy=dup_policy,
+            fwd_pattern=fwd_pattern,
+            rev_pattern=rev_pattern,
+        )
+        meta = {}
+
     if not pairs:
         L.info("No paired reads detected in input path: %s", in_dir)
         # Exit out since nothing here to do 
