@@ -7,6 +7,7 @@ Return an int exit-code (0 = success) & raise on fatal errors.
 from __future__ import annotations
 from pathlib import Path
 from typing import Union, Sequence
+from Bio import SeqIO 
 import pandas as pd 
 import logging
 try:
@@ -297,7 +298,7 @@ def run_full_pipeline(
 
     if using_paired:
         # Assembly + BLAST + taxonomy + postblast (optional here if using) 
-        n_stages = 3 + int(postblast) 
+        n_stages = (3 if is_fasta else 5) + int(postblast)   
     else:
         n_stages = (2 if is_fasta else 4) + int(postblast)
     step = 100 // n_stages
@@ -317,10 +318,47 @@ def run_full_pipeline(
                     fh.write(data)
                     if not data.endswith("\n"):
                         fh.write("\n")
+        
+        def _fastq_to_paired_fastas(source_dir: Path, dest_dir: Path) -> list[Path]:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            written: list[Path] = []
+            for fq in sorted(source_dir.rglob("*.fastq")):
+                records = list(SeqIO.parse(fq, "fastq"))
+                if not records:
+                    continue
+                out_fp = dest_dir / f"{fq.stem}.fasta"
+                SeqIO.write(records, out_fp, "fasta")
+                written.append(out_fp)
+            return written
+
+        assembly_input = infile
+        if not is_fasta:
+            on_stage("Trim")
+            run_trim(infile, out_dir, sanger=True, summary_tsv=summary_tsv)
+            if thr and thr.isInterruptionRequested():
+                raise RuntimeError("Cancelled")
+            pct += step
+            on_progress(pct)
+
+            on_stage("Convert")
+            fastq_dir = out_dir / "passed_qc_fastq"
+            if not any(fastq_dir.glob("*.fastq")):
+                fastq_dir = out_dir / "qc"
+            run_fastq_to_fasta(fastq_dir, paths["trimmed_fasta"])
+            if thr and thr.isInterruptionRequested():
+                raise RuntimeError("Cancelled")
+            pct += step
+            on_progress(pct)
+
+            fasta_dir = out_dir / "qc" / "paired_fasta"
+            generated_fastas = _fastq_to_paired_fastas(fastq_dir, fasta_dir)
+            if not generated_fastas:
+                raise ValueError(f"No FASTA files generated from {fastq_dir}")
+            assembly_input = fasta_dir
 
         on_stage("Paired assembly")
         contig_paths = assemble_pairs(
-            infile,
+            assembly_input, 
             out_dir / "asm",
             dup_policy=dup_policy,
             cap3_options=cap3_options,
@@ -328,7 +366,7 @@ def run_full_pipeline(
             rev_pattern=rev_pattern,
         )
         if not contig_paths:
-            raise ValueError(f"No paired reads detected in {infile}")
+            raise ValueError(f"No paired reads detected in {assembly_input}")
         merged_contigs = out_dir / "asm" / "paired_contigs.fasta"
         _merge_fasta_files(contig_paths, merged_contigs)
         paths["fasta"] = merged_contigs
