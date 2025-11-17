@@ -6,6 +6,8 @@ Return an int exit-code (0 = success) & raise on fatal errors.
 
 from __future__ import annotations
 from pathlib import Path
+from collections import Counter, defaultdict
+import re 
 from typing import Union, Sequence
 from Bio import SeqIO 
 import pandas as pd 
@@ -29,7 +31,8 @@ from microseq_tests.trimming.fastq_to_fasta import (
 
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
 from microseq_tests.assembly.paired_assembly import assemble_pairs
-from microseq_tests.assembly.pairing import DupPolicy 
+from microseq_tests.assembly.pairing import  (
+        DETECTORS, DupPolicy, extract_sid_orientation, make_pattern_detector) 
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
 from microseq_tests.post_blast_analysis import run as postblast_run
@@ -238,6 +241,94 @@ def run_postblast(
 from pathlib import Path
 from microseq_tests.utility.utils import load_config, expand_db_path
 
+def _summarize_paired_candidates(
+    directory: Path, fwd_pattern: str | None, rev_pattern: str | None
+) -> str:
+    """Return a human-readable summary of how many forward/reverse reads were detected.
+
+    This is used to make the paired-assembly error actionable by reporting what the
+    pairing logic was able to recognise inside the generated FASTA directory.
+    """
+
+    detectors = list(DETECTORS)
+    if fwd_pattern and rev_pattern:
+        detectors = [make_pattern_detector(fwd_pattern, rev_pattern), *detectors]
+
+    counts: Counter[str] = Counter()
+    sample_orients: dict[str, set[str]] = defaultdict(set)
+    unknown: list[str] = []
+
+    for fp in sorted(directory.glob("*.fasta")):
+        sid, orient = extract_sid_orientation(fp.name, detectors=detectors)
+        if orient in ("F", "R"):
+            counts[orient] += 1
+            sample_orients[sid].add(orient)
+            continue
+
+        counts["unknown"] += 1
+        if len(unknown) < 5:
+            unknown.append(fp.name)
+
+    missing = sorted(sid for sid, orients in sample_orients.items() if len(orients) == 1)
+
+    parts = [
+        f"detected {counts['F']} forward and {counts['R']} reverse reads",
+        f"{counts['unknown']} files without F/R tokens",
+    ]
+
+    if missing:
+        parts.append("samples missing a mate: " + ", ".join(missing[:5]))
+        if len(missing) > 5:
+            parts[-1] += ", ..."
+
+    if unknown:
+        parts.append("example unrecognised filenames: " + ", ".join(unknown))
+
+    if fwd_pattern and rev_pattern:
+        parts.append(
+            f"custom patterns in use (forward: {fwd_pattern!r}, reverse: {rev_pattern!r})"
+        )
+
+    return "; ".join(parts)
+
+def _suggest_pairing_patterns(directory: Path) -> str: 
+    """ Suggest custom --fwd-pattern/--rev-pattern examples based on filesnames."""
+    token_rx = re.compile(r"([A-Za-z0-9]+[FR])", re.I)
+    fwd_tokens: Counter[str] = Counter() 
+    rev_tokens: Counter[str] = Counter() 
+    names: list[str] = [] 
+
+    for fp in sorted(directory.glob("*.fasta")):
+        names.append(fp.name)
+        for tok in token_rx.findall(fp.name):
+            tok = tok.upper()
+            if tok.endswith("F"):
+                fwd_tokens[tok] += 1 
+            elif tok.endswith("R"):
+                rev_tokens[tok] += 1 
+
+    def _common(counter: Counter[str]) -> str | None:
+        return counter.most_common(1)[0][0] if counter else None 
+
+    fwd = _common(fwd_tokens)
+    rev = _common(rev_tokens) 
+
+    suggestions: list[str] = [] 
+    if fwd or rev:
+        suggestions.append(
+            "try explicit patterns such as --fwd-pattern "
+            f"'{fwd or 'FORWARD_TOKEN'}' --rev-pattern '{rev or 'REVERSE_TOKEN'}'" 
+        ) 
+
+    if names:
+        rename_hint = (
+            "or rename files to include clear primer tokens (e.g., sample_" 
+            f"{fwd or '27F'} / sample_{rev or '1492R'});" 
+            " examples seen: " + ", ".join(names[:3])
+        )
+        suggestions.append(rename_hint)
+
+    return " ".join(suggestions) 
 
 def run_full_pipeline(
     infile: Path,
@@ -366,7 +457,13 @@ def run_full_pipeline(
             rev_pattern=rev_pattern,
         )
         if not contig_paths:
-            raise ValueError(f"No paired reads detected in {assembly_input}")
+           summary = _summarize_paired_candidates(assembly_input, fwd_pattern, rev_pattern)
+           suggestions = _suggest_pairing_patterns(assembly_input)
+           raise ValueError(
+                f"No paired reads detected in {assembly_input}; {summary}. "
+                "If your primer names differ, provide --fwd-pattern/--rev-pattern."
+                "f{suggestions}"
+            )  
         merged_contigs = out_dir / "asm" / "paired_contigs.fasta"
         _merge_fasta_files(contig_paths, merged_contigs)
         paths["fasta"] = merged_contigs
