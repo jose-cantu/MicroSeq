@@ -476,7 +476,7 @@ def run_full_pipeline(
            raise ValueError(
                 f"No paired reads detected in {assembly_input}; {summary}. "
                 "If your primer names differ, provide --fwd-pattern/--rev-pattern."
-                "f{suggestions}"
+                f" {suggestions}"
             )  
         merged_contigs = out_dir / "asm" / "paired_contigs.fasta"
         _merge_fasta_files(contig_paths, merged_contigs)

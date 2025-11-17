@@ -40,6 +40,18 @@ def test_extract_sid_orientation_basic():
     assert extract_sid_orientation("A3_27F_x.fasta") == ("A3", "F")
     assert extract_sid_orientation("A3-1492R.fa") == ("A3", "R") 
 
+def test_extract_sid_orientation_honors_custom_detectors():
+    """Custom detectors passed in should take precedence over the defaults."""
+
+    def custom(name: str) -> tuple[str, str | None]:
+        if "custom-token" in name:
+            return "sid-custom", "F"
+        return Path(name).stem, None
+
+    assert extract_sid_orientation(
+        "sample_custom-token_read.fasta", detectors=[custom]
+    ) == ("sid-custom", "F")
+
 def test_group_pairs_error_on_dups(tmp_path: Path):
     """
     Verifies that duplicate forward reads raise an error under the strict 

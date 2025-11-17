@@ -120,7 +120,9 @@ def make_pattern_detector(fwd_pattern: str, rev_pattern: str) -> Detector:
 # --------------- Public Helpers ---------------------------
 def extract_sid_orientation(name: str, *, detectors: Sequence[Detector] | None = None) -> tuple[str, str | None]: 
     """Try each detector until one recognises a primer token."""
-    for det in DETECTORS:
+    active_detectors = detectors or DETECTORS
+
+    for det in active_detectors: 
         sid, orient = det(name)
         if orient in ("F", "R"):
             return sid, orient
