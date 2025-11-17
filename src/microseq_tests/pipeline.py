@@ -313,20 +313,34 @@ def _suggest_pairing_patterns(directory: Path) -> str:
     fwd = _common(fwd_tokens)
     rev = _common(rev_tokens) 
 
-    suggestions: list[str] = [] 
+    suggestions: list[str] = []
+    # Concrete regex examples based on the most common tokens MicroSeq detected.
     if fwd or rev:
         suggestions.append(
-            "try explicit patterns such as --fwd-pattern "
+                "Example flag: --fwd-pattern "
             f"'{fwd or 'FORWARD_TOKEN'}' --rev-pattern '{rev or 'REVERSE_TOKEN'}'" 
         ) 
+        suggestions.append(
+            "Regex variant (case-insensitive): "
+            f"--fwd-pattern '(?i){fwd or '27F'}' --rev-pattern '(?i){rev or '1492R'}'"
+        )
+
+    # Offer rename guidance using the detected tokens and the first few filenames as context.
 
     if names:
         rename_hint = (
-            "or rename files to include clear primer tokens (e.g., sample_" 
-            f"{fwd or '27F'} / sample_{rev or '1492R'});" 
-            " examples seen: " + ", ".join(names[:3])
+            "Rename option: include primer tokens in filenames so MicroSeq can auto-detect "
+            f"mates (e.g., sample_{fwd or '27F'}.fasta / sample_{rev or '1492R'}.fasta); "
+            "examples seen: " + ", ".join(names[:3])
         )
         suggestions.append(rename_hint)
+
+    if not suggestions:
+        # Fallback message when no obvious tokens are present.
+        suggestions.append(
+            "No primer-like tokens detected; rename files to include forward/reverse labels "
+            "(e.g., sample_27F / sample_1492R) or pass --fwd-pattern/--rev-pattern explicitly."
+        )
 
     return " ".join(suggestions) 
 
