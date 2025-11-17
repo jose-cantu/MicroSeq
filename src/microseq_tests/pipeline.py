@@ -413,17 +413,24 @@ def run_full_pipeline(
         return lambda p: on_progress(off + p * step // 100)
 
     if using_paired:
-        def _merge_fasta_files(files: Sequence[Path], destination: Path) -> None:
+        def _merge_cap3_contigs(files: Sequence[Path], destination: Path, map_tsv = Path) -> None:
             destination.parent.mkdir(parents=True, exist_ok=True)
-            with destination.open("w", encoding="utf-8") as fh:
-                for fp in files:
-                    data = Path(fp).read_text(encoding="utf-8")
-                    if not data:
-                        continue
-                    fh.write(data)
-                    if not data.endswith("\n"):
-                        fh.write("\n")
-        
+            
+
+            with destination.open("w", encoding="utf-8") as out, map_tsv.open(
+                    "w", encoding="utf-8" 
+            ) as manifest:
+                   manifest.write("qseqid\tsample\n")
+                
+                   for fp in files:
+                      sid = Path(fp).parent.name
+                      for idx, rec in enumerate(SeqIO.parse(fp, "fasta"), 1):
+                          rec.id = f"{sid}_c{idx}"
+                          rec.name = rec.id
+                          rec.description = ""
+                          SeqIO.write(rec, out, "fasta")
+                          manifest.write(f"{rec.id}\t{sid}\n")
+                   
         def _fastq_to_paired_fastas(source_dir: Path, dest_dir: Path) -> list[Path]:
             dest_dir.mkdir(parents=True, exist_ok=True)
             written: list[Path] = []
@@ -484,7 +491,8 @@ def run_full_pipeline(
                 f" {suggestions}"
             )  
         merged_contigs = out_dir / "asm" / "paired_contigs.fasta"
-        _merge_fasta_files(contig_paths, merged_contigs)
+        contig_map = out_dir / "asm" / "contig_map.tsv"
+        _merge_cap3_contigs(contig_paths, merged_contigs)
         paths["fasta"] = merged_contigs
         paths["trimmed_fasta"] = merged_contigs
 
@@ -542,6 +550,18 @@ def run_full_pipeline(
         raise RuntimeError("Cancelled")
     pct += step
     on_progress(pct)
+
+    if using_paired:
+        contig_map = out_dir / "asm" / "contig_map.tsv"
+        try:
+            if contig_map.exists():
+                tax_df = pd.read_csv(paths["tax"], sep="\t")
+                map_df = pd.read_csv(contig_map, sep="\t")
+                if "sample" not in tax_df.columns:
+                    tax_df = tax_df.merge(map_df, on="qseqid", how="left")
+                    tax_df.to_csv(paths["tax"], sep="\t", index=False)
+        except Exception as exc:
+            L.warning("Failed to merge contig map into taxonomy table: %s", exc)
 
     # 5 – Optional post-BLAST
     if postblast:
