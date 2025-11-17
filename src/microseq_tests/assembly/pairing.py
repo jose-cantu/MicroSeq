@@ -10,7 +10,8 @@ from pathlib import Path # Handling file systems
 import logging # Print warning messages 
 from collections import defaultdict # Creating specialized dictionaries dealing with None Values 
 from typing import Callable, Sequence, Union # FOr creating speicific type hints 
-from enum import Enum # Creating enumerable, constant values 
+from enum import Enum # Creating enumerable, constant values
+from Bio import SeqIO 
 
 # Inheriting from 'str' and "Enum" allows members to be compared directly to strings. For example, DupPolicy.Error = "error" will be True. 
 class DupPolicy(str, Enum):
@@ -154,58 +155,70 @@ def group_pairs(
     else:
         active_detectors = DETECTORS
 
+    def _store_entry(sid: str, orient: str, path: Path) -> None:
+        bucket = pairs[sid].get(orient)
 
-    # Use iterdir() to look at every item in the folder. 
-    for p in Path(folder).iterdir():
-        # Check the file extension in a case-insensitive way. 
-        # If it's not a recognized FASTA extension, skip to the next file. 
-        if p.suffix.lower() not in {".fasta", ".fa", ".fna"}:
-            continue
+        if bucket is None:
+            pairs[sid][orient] = path
+            return
 
-        # Get the sample ID and orientation ('F', 'R', or None)
-        sid, orient = extract_sid_orientation(p.name, detectors=active_detectors)
+        if dup_policy == DupPolicy.ERROR:
+            raise ValueError(f"Duplicate {orient} read for sample {sid}: found {path} but {bucket} already exists.")
 
-        # If no valid orientation was found, skip to the next file. 
-        if orient not in ("F", "R"):
-            continue 
+        if dup_policy == DupPolicy.KEEP_FIRST:
+            logging.warning("Duplicate %s/%s ignored due to 'keep-first' policy: %s", sid, orient, path)
+            return
 
-        # This here is a get or set operation. It looks for 'pairs[sid][orient]
-        # If slot exists, it returns its value (bucket) 
-        # If slot not exists, sets to None and returns None. 
-        # Prevents KeyError and initialized the slot in one step. 
-        bucket = pairs[sid].get(orient)  
+        if dup_policy == DupPolicy.KEEP_LAST:
+            logging.warning("Duplicate %s/%s overwriting previous entry %s due to 'keep-last' policy.", sid, orient, bucket)
+            pairs[sid][orient] = path
+            return
 
-        # If buck is 'None', it means this is the first time 
-        # For this combination sampleID and orientation. 
-        if bucket is None: 
-            # store the file path in its designated slot. 
-            pairs[sid][orient] = p 
-        else:
-            # A file for this sample/orientation already exists, so we have a duplicate in place. Now is the time for user-selected policy. 
+        if dup_policy in (DupPolicy.MERGE, DupPolicy.KEEP_SEPARATE):
+            lst = bucket if isinstance(bucket, list) else [bucket]
+            lst.append(path)
+            pairs[sid][orient] = lst
 
-            # Policy 1: Raise an error and stop the program MicroSeq. Safe 
-            # Default 
-            if dup_policy == DupPolicy.ERROR:
-                raise ValueError(f"Duplicate {orient} read for sample {sid}: found {p} but {bucket} already exists.") 
+    path = Path(folder)
+    fasta_exts = {".fasta", ".fa", ".fna"}
 
+    if path.is_file():
+        if path.suffix.lower() not in fasta_exts:
+            raise ValueError(f"Unsupported FASTA input: {path}")
+  
+        record_counts: dict[tuple[str, str], int] = defaultdict(int)
+        tmp_dir = path.parent / f".{path.stem}_paired_records"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
 
-            # Policy 2: Log a warning but make no changes, keep first only 
-            elif dup_policy == DupPolicy.KEEP_FIRST:
-                logging.warning("Duplicate %s/%s ignored due to 'keep-first' policy: %s", sid, orient, p) 
+        for record in SeqIO.parse(path, "fasta"):
+            sid, orient = extract_sid_orientation(record.id, detectors=active_detectors)
+            if orient not in ("F", "R"):
+                continue
 
-            # Policy 3: Log a warning and overwrite the old path with the new one 
-            elif dup_policy == DupPolicy.KEEP_LAST:
-                logging.warning("Duplicate %s/%s overwriting previous entry %s due to 'keep-last' policy.", sid, orient, bucket) 
-                pairs[sid][orient] = p 
+            record_counts[(sid, orient)] += 1
+            rec_idx = record_counts[(sid, orient)]
+            safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", record.id)
+            rec_path = tmp_dir / f"{safe_id}_{rec_idx}.fasta"
+            SeqIO.write([record], rec_path, "fasta")
+            _store_entry(sid, orient, rec_path)
 
-            # Policy 4: Collect all duplicate paths into a list 
-            elif dup_policy in (DupPolicy.MERGE, DupPolicy.KEEP_SEPARATE):
-                # Step 1: Prepare the list. If 'bucket` is already a list, use it 
-                # If 'bucket' (the old stored path) is a single path object, create a new list containing it. 
-                lst = bucket if isinstance(bucket, list) else [bucket] 
-                # Append the path of the new duplicate file to the list 
-                lst.append(p)
-                # Put the updated list back into the dictionary 
-                pairs[sid][orient] = lst 
-    # Finally filtering pairs keeping sample IDs ('s') have "F' and "R' keys 
+    elif path.is_dir():
+        for p in path.iterdir():
+            # Check the file extension in a case-insensitive way.
+            # If it's not a recognized FASTA extension, skip to the next file.
+            if p.suffix.lower() not in fasta_exts:
+                continue
+
+            # Get the sample ID and orientation ('F', 'R', or None)
+            sid, orient = extract_sid_orientation(p.name, detectors=active_detectors)
+
+            # If no valid orientation was found, skip to the next file.
+            if orient not in ("F", "R"):
+                continue
+
+            _store_entry(sid, orient, p)
+    else:
+        raise ValueError(f"Input path must be a FASTA file or directory: {path}")
+
+        # Finally filtering pairs keeping sample IDs ('s') have "F' and "R' keys 
     return {s: d for s, d in pairs.items() if {"F", "R"} <= d.keys()}

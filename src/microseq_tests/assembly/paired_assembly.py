@@ -114,7 +114,7 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
 
     pairs = group_pairs(in_dir, dup_policy=dup_policy, fwd_pattern=fwd_pattern, rev_pattern=rev_pattern)
     if not pairs:
-        L.info("No paired reads detected in input directory: %s", in_dir)
+        L.info("No paired reads detected in input path: %s", in_dir)
         # Exit out since nothing here to do 
         return [] 
     
