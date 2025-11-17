@@ -193,39 +193,42 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
             for idx, (fwd, rev) in enumerate(primer_pairs, start=1):
                 sample_key = sid if len(primer_pairs) == 1 else f"{sid}_{idx}"
                 tasks.append((sample_key, [fwd, rev]))
-            else:
-                sources = list(_iter_paths(entries["F"])) + list(_iter_paths(entries["R"]))
-                tasks.append((sid, sources))
+        else:
+            sources = list(_iter_paths(entries["F"])) + list(_iter_paths(entries["R"]))
+            tasks.append((sid, sources))
 
-            for sample_key, sources in tasks: 
-                sample_dir = out_dir / sample_key 
-                sample_dir.mkdir(parents=True, exist_ok=True) 
-                sample_fasta = sample_dir / f"{sample_key}_paired.fasta" 
+        if not tasks:
+            raise RuntimeError("pairing produced no tasks")
 
-                _write_combined_fasta(sources, sample_fasta) 
+        for sample_key, sources in tasks: 
+            sample_dir = out_dir / sample_key 
+            sample_dir.mkdir(parents=True, exist_ok=True) 
+            sample_fasta = sample_dir / f"{sample_key}_paired.fasta" 
 
-                cmd = [cap3_exe, sample_fasta.name]
-                if cap3_options:
-                    cmd.extend(cap3_options)
-                L.info(" Run CAP3 (apired) %s: %s", sample_key, "".join(cmd)) 
+            _write_combined_fasta(sources, sample_fasta) 
 
-                try:
-                    subprocess.run(
-                        cmd, 
-                        check=True,
-                        cwd=sample_dir,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                    )
-                except subprocess.CalledProcessError as exc:
-                    L.error( "CAP3 failed for sample %s (exit %s):\n%s", sample_key, exc.returncode, exc.stderr
-                    )
-                    raise # stop the run here on raise 
-                contig_path = sample_dir / f"{sample_key}_paired.fasta.cap.contigs"
-                if not contig_path.exists():
-                    raise FileNotFoundError(contig_path)
+            cmd = [cap3_exe, sample_fasta.name]
+            if cap3_options:
+                cmd.extend(cap3_options)
+            L.info("Run CAP3 (apired) %s: %s", sample_key, " ".join(cmd)) 
 
-                contig_paths.append(contig_path)
-                L.info("Cap3 paired assembly finished for %s and for contigs: %s", sample_key, contig_path) 
+            try:
+                subprocess.run(
+                    cmd, 
+                    check=True,
+                    cwd=sample_dir,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                L.error("CAP3 failed for sample %s (exit %s):\n%s", sample_key, exc.returncode, exc.stderr
+                )
+                raise # stop the run here on raise 
+            contig_path = sample_dir / f"{sample_key}_paired.fasta.cap.contigs"
+            if not contig_path.exists():
+                raise FileNotFoundError(contig_path)
+
+            contig_paths.append(contig_path)
+            L.info("Cap3 paired assembly finished for %s and for contigs: %s", sample_key, contig_path) 
     
     return contig_paths 

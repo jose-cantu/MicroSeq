@@ -234,7 +234,7 @@ def group_pairs(
                 continue
 
             # Get the sample ID and orientation ('F', 'R', or None)
-            sid, orient = extract_sid_orientation(p.name, detectors=active_detectors)
+            sid, orient, det_name = _detect_sid_orientation(p.name, detectors=active_detectors)
 
             # If no valid orientation was found, skip to the next file.
             if orient not in ("F", "R"):
