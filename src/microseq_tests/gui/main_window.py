@@ -54,8 +54,9 @@ from microseq_tests.pipeline import (
     run_postblast,
     run_full_pipeline,
     _summarize_paired_candidates,
-    _suggest_pairing_patterns 
+    _suggest_pairing_patterns
 )
+from microseq_tests.assembly.pairing import DupPolicy 
 from microseq_tests.utility.utils import setup_logging, load_config
 
 
@@ -216,6 +217,11 @@ class MainWindow(QMainWindow):
         self.enforce_well_chk = QCheckBox("Enforce same plate well (A1-H12)")
 
         self.enforce_well_chk.setToolTip("Only pair forward/reverse reads when the same well plate code (e.g. B10)")
+        
+        self.dup_policy_lbl = QLabel("Duplicate Policy")
+        self.dup_policy_combo = QComboBox() 
+        for policy in DupPolicy:
+            self.dup_policy_combo.addItem(policy.value, userData=policy) 
 
         self.advanced_regex_chk = QCheckBox("Show regex override")
         self.fwd_regex_edit = QLineEdit() 
@@ -271,6 +277,10 @@ class MainWindow(QMainWindow):
         # Set intial state of enfore_same_well checkbox default to False 
         self.enforce_well_chk.setChecked(self.settings.value("enforce_same_well", False, type=bool))
         
+        saved_dup_policy = DupPolicy(self.settings.value("dup_policy", DupPolicy.ERROR.value))
+        dup_idx = max(0, self.dup_policy_combo.findData(saved_dup_policy))
+        self.dup_policy_combo.setCurrentIndex(dup_idx)
+
         # ------ connecting user action event handlers -----------------
         # For when users change selection in drop down menu 
         self.primer_set_combo.currentIndexChanged.connect(self._on_primer_set_changed)
@@ -280,6 +290,10 @@ class MainWindow(QMainWindow):
         self.enforce_well_chk.toggled.connect(
             lambda checked: self.settings.setValue("enforce_same_well", checked)
         )
+        
+        self.dup_policy_combo.currentIndexChanged.connect(
+            lambda idx: self.settings.setValue("dup_policy", self.dup_policy_combo.itemData(idx).value)
+        ) 
 
         # Connect the signal for text edits in the forward field to an anonymous function that saves the new text to settings. 
         self.fwd_pattern_edit.textEdited.connect(
@@ -426,6 +440,8 @@ class MainWindow(QMainWindow):
         pairing.addWidget(self.rev_pattern_edit)
         pairing.addWidget(self.detect_tokens_btn)
         pairing.addWidget(self.preview_pairs_btn)
+        pairing.addWidget(self.dup_policy_lbl)
+        pairing.addWidget(self.dup_policy_combo) 
         pairing.addWidget(self.enforce_well_chk)
         pairing.addWidget(self.advanced_regex_chk)
         pairing.addWidget(self.fwd_regex_edit)
@@ -471,6 +487,8 @@ class MainWindow(QMainWindow):
             self.primer_set_combo,
             self.detect_tokens_btn,
             self.preview_pairs_btn,
+            self.dup_policy_lbl,
+            self.dup_policy_combo,
             self.advanced_regex_chk,
             self.fwd_regex_edit, 
             self.rev_regex_edit,
@@ -495,6 +513,7 @@ class MainWindow(QMainWindow):
             "fwd_pattern": fwd,
             "rev_pattern": rev, 
             "enforce_same_well": self.enforce_well_chk.isChecked(),
+            "dup_policy": self.dup_policy_combo.currentData() 
         }
     
     def _tokens_to_regex(self, text: str) -> str | None:
