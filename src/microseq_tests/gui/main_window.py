@@ -576,7 +576,7 @@ class MainWindow(QMainWindow):
         if not fwd_tokens and not rev_tokens:
             QMessageBox.information(
                 self,
-                "No tokens found"
+                "No tokens found",
                 "No primer-like forward/reverse tokens were detected in the filenames."
             )
             return 
@@ -598,7 +598,7 @@ class MainWindow(QMainWindow):
         ) 
 
     def _scan_tokens(self, directory: Path) -> tuple[list[str], list[str]]:
-        token_rx = re.compile(r"([A-Za-z0-9] + [FR])", re.I)
+        token_rx = re.compile(r"([A-Za-z0-9]+[FR])", re.I)
         fwd_counter: collections.Counter[str] = collections.Counter()
         rev_counter: collections.Counter[str] = collections.Counter() 
 
