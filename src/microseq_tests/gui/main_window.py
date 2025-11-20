@@ -292,9 +292,11 @@ class MainWindow(QMainWindow):
         )
         
         self.dup_policy_combo.currentIndexChanged.connect(
-            lambda idx: self.settings.setValue("dup_policy", self.dup_policy_combo.itemData(idx).value)
+            lambda idx: self.settings.setValue(
+                "dup_policy", 
+                getattr(data := self.dup_policy_combo.itemData(idx), "value", data),
+            ) 
         ) 
-
         # Connect the signal for text edits in the forward field to an anonymous function that saves the new text to settings. 
         self.fwd_pattern_edit.textEdited.connect(
             lambda txt: self._on_token_edited("fwd_tokens", txt)
@@ -302,7 +304,7 @@ class MainWindow(QMainWindow):
 
         # Connect the signal for text edits in the reverse field to an anonymous function that saves the new text to settings 
         self.rev_pattern_edit.textEdited.connect(
-            lambda txt: self.on_token_edited("rev_tokens", txt)
+            lambda txt: self._on_token_edited("rev_tokens", txt)
         )
 
         self.fwd_regex_edit.textEdited.connect(
@@ -413,8 +415,6 @@ class MainWindow(QMainWindow):
 
         mid.addWidget(QLabel("Assembly"))
         mid.addWidget(self.mode_combo)
-        mid.addWidget(self.fwd_pattern_edit)
-        mid.addWidget(self.rev_pattern_edit) 
 
         mid.addWidget(QLabel("Threads"))
         mid.addWidget(self.threads_spin)
