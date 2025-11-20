@@ -286,7 +286,7 @@ class MainWindow(QMainWindow):
         self.primer_set_combo.currentIndexChanged.connect(self._on_primer_set_changed)
         self.detect_tokens_btn.clicked.connect(self._detect_tokens)
         self.preview_pairs_btn.clicked.connect(self._preview_pairs)
-        self.advanced_regex_chk.toggle.connect(self._toggle_advanced_regex)
+        self.advanced_regex_chk.toggled.connect(self._toggle_advanced_regex)
         self.enforce_well_chk.toggled.connect(
             lambda checked: self.settings.setValue("enforce_same_well", checked)
         )

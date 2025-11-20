@@ -253,6 +253,8 @@ def group_pairs(
         tmp_dir = path.parent / f".{path.stem}_paired_records"
         tmp_dir.mkdir(parents=True, exist_ok=True)
 
+        missing_well: list[str] = [] 
+
         for record in SeqIO.parse(path, "fasta"):
             sid, orient, det_name = _detect_sid_orientation(record.id, active_detectors) 
             if orient not in ("F", "R"):
@@ -269,9 +271,7 @@ def group_pairs(
             rec_path = tmp_dir / f"{safe_id}_{rec_idx}.fasta"
             SeqIO.write([record], rec_path, "fasta")
             key = _pair_key(sid, well, enforce_same_well) 
-            _store_entry(sid, orient, rec_path, det_name, well)
-    
-    missing_well: list[str] = []
+            _store_entry(key,sid, orient, rec_path, det_name, well)
 
     if path.is_dir(): 
         for p in path.iterdir():
