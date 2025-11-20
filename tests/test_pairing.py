@@ -26,7 +26,8 @@ from microseq_tests.assembly import paired_assembly
 from microseq_tests.assembly.pairing import (
         DupPolicy,
         extract_sid_orientation,
-        group_pairs 
+        group_pairs,
+        _extract_well
 ) 
 
 CLI = ["python", "-m", "microseq_tests.microseq"] 
@@ -71,7 +72,7 @@ def test_group_pairs_enforce_well_requires_match(tmp_path: Path):
     (tmp_path / "sample_27F_A01.fasta").write_text(">x\nA\n", encoding="utf-8")
     (tmp_path / "sample_27F_A01.fasta").write_text(">x\nA\n", encoding="utf-8")
 
-    pairs = group_pairs(tmp_path, enforce_same_well=true)
+    pairs = group_pairs(tmp_path, enforce_same_well=True)
 
     assert pairs == {}
 
@@ -83,6 +84,13 @@ def test_group_pairs_report_missing_wells(tmp_path: Path):
 
     assert pairs == {}
     assert meta.get("_missing_well", {}).get("files")
+
+def test_extract_well_validates_plate_range():
+    assert _extract_well("sample_A1.fastq") == "A01"
+    assert _extract_well("sample_h12.fastq") == "H12"
+    assert _extract_well("sample_I01.fastq") is None
+    assert _extract_well("sample_A13.fastq") is None
+
 
 def test_assemble_pairs_creates_contigs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Running assemble_pairs should surface CAP3 artefacts for each sample."""
