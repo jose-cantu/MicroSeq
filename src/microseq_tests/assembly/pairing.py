@@ -36,7 +36,8 @@ _MID_RX = re.compile(r"[_\-]([A-Za-z0-9]+[FR])[_\-]", re.I)
 # _PREFIX_RX Finds a word like "27F_" or "1492R-" at the very start of filename.
 _PREFIX_RX = re.compile(r"^([A-Za-z0-9]+[FR])[_\-]", re.I) 
 # _SUFFIX_RX Finds a word like "_27F.fasta" or "-1492R.fasta" at the end of a filename 
-_SUFFIX_RX = re.compile(r"[_\-]([A-Za-z0-9]+[FR])\.[^.]+$", re.I)  
+_SUFFIX_RX = re.compile(r"[_\-]([A-Za-z0-9]+[FR])\.[^.]+$", re.I) 
+_WELL_RX = re.compile(r"(?i)\b([A-H](?:0?[1-9])|1[0-2]))\b") 
 
 def mid_token_detector(name: str):
     """Detects primer tokens in the middle of a filename."""
@@ -118,6 +119,29 @@ def make_pattern_detector(fwd_pattern: str, rev_pattern: str) -> Detector:
 
     return detector
 
+def _extract_well(name: str, *, pattern: str | re.Pattern[str] | None = None) -> str | None: 
+    """ Return a normalized plate well code (example "A07") if present."""
+
+    if pattern is None:
+        rx = _WELL_RX
+    elif isinstance(pattern, str):
+        rx = re.compile(pattern, re.I)
+    else:
+        rx = pattern 
+
+    if m := rx.search(name):
+        raw = m[1]
+        letter, num = raw[0].upper(), int(raw[1:])
+        return f"{letter}{num:02d}"
+
+    return None 
+
+def _pair_key(sid: str, well: str | None, enforce_same_well: bool) -> str: 
+    """Derive the key used to bucket forward/reverse reads."""
+
+    if enforce_same_well and well:
+        return well 
+    return sid 
 
 # --------------- Public Helpers ---------------------------
 def extract_sid_orientation(name: str, *, detectors: Sequence[Detector] | None = None) -> tuple[str, str | None]: 
@@ -147,7 +171,7 @@ def _detect_sid_orientation(
 def group_pairs(
     folder: Union[str, Path], 
     dup_policy: DupPolicy = DupPolicy.ERROR,
-    *, fwd_pattern: str | None = None, rev_pattern: str | None = None, detectors: Sequence[Detector] | None = None, return_metadata: bool = False,
+    *, fwd_pattern: str | None = None, rev_pattern: str | None = None, detectors: Sequence[Detector] | None = None, return_metadata: bool = False, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None
     ) -> dict[str, dict[str, Union[Path, list[Path]]]]:
     """
     Groups Forward/Reverse reads from a folder into pairs 
@@ -173,13 +197,17 @@ def group_pairs(
     else:
         active_detectors = DETECTORS
 
-    def _store_entry(sid: str, orient: str, path: Path, detector_name: str | None) -> None:
+    well_rx = _WELL_RX if well_pattern is None else well_pattern 
+
+    def _store_entry(key: str, sid: str, orient: str, path: Path, detector_name: str | None, well: str | None) -> None:
         bucket = pairs[sid].get(orient)
         meta_bucket = meta[sid].get(orient)
 
         if bucket is None:
-            pairs[sid][orient] = path
-            meta[sid][orient] = detector_name or "unknown"
+            pairs[key][orient] = path
+            meta[key][orient] = detector_name or "unknown"
+            if well:
+                meta[key][f"well_{orient}"] = well 
             return
 
         if dup_policy == DupPolicy.ERROR:
@@ -191,17 +219,28 @@ def group_pairs(
 
         if dup_policy == DupPolicy.KEEP_LAST:
             logging.warning("Duplicate %s/%s overwriting previous entry %s due to 'keep-last' policy.", sid, orient, bucket)
-            pairs[sid][orient] = path
-            meta[sid][orient] = detector_name or "unknown"
+            pairs[key][orient] = path
+            meta[key][orient] = detector_name or "unknown"
+            if well:
+                meta[key][f"well_{orient}"] = well 
             return
 
         if dup_policy in (DupPolicy.MERGE, DupPolicy.KEEP_SEPARATE):
             lst = bucket if isinstance(bucket, list) else [bucket]
             lst.append(path)
-            pairs[sid][orient] = lst
+            pairs[key][orient] = lst
             meta_lst = meta_bucket if isinstance(meta_bucket, list) else [meta_bucket]
             meta_lst.append(detector_name or "unknown")
-            meta[sid][orient] = meta_lst
+            meta[key][orient] = meta_lst
+            if well:
+                wells = meta[key].get(f"well_{orient}")
+                if wells is None:
+                    meta[key][f"well_{orient}"] = [well] 
+                elif isinstance(wells, list):
+                    wells.append(well)
+                else:
+                    meta[key][f"well_{orient}"] = [wells, wells] 
+
 
     path = Path(folder)
     fasta_exts = {".fasta", ".fa", ".fna"}
@@ -218,15 +257,23 @@ def group_pairs(
             sid, orient, det_name = _detect_sid_orientation(record.id, active_detectors) 
             if orient not in ("F", "R"):
                 continue
+            # if well is missing doc it 
+            well = _extract_well(record.id, pattern=well_rx) if enforce_same_well else None 
+            if enforce_same_well and not well:
+                missing_well.append(record.id)
+                continue 
 
             record_counts[(sid, orient)] += 1
             rec_idx = record_counts[(sid, orient)]
             safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", record.id)
             rec_path = tmp_dir / f"{safe_id}_{rec_idx}.fasta"
             SeqIO.write([record], rec_path, "fasta")
-            _store_entry(sid, orient, rec_path, det_name)
+            key = _pair_key(sid, well, enforce_same_well) 
+            _store_entry(sid, orient, rec_path, det_name, well)
+    
+    missing_well: list[str] = []
 
-    elif path.is_dir():
+    if path.is_dir(): 
         for p in path.iterdir():
             # Check the file extension in a case-insensitive way.
             # If it's not a recognized FASTA extension, skip to the next file.
@@ -240,13 +287,21 @@ def group_pairs(
             if orient not in ("F", "R"):
                 continue
 
-            _store_entry(sid, orient, p, det_name)
+            well = _extract_well(p.name, pattern=well_rx) if enforce_same_well else None 
+            if enforce_same_well and not well: 
+                missing_well.append(p.name)
+                continue 
+
+            key = _pair_key(sid, well, enforce_same_well)
+            _store_entry(key, sid, orient, p, det_name, well) 
     else:
         raise ValueError(f"Input path must be a FASTA file or directory: {path}")
 
         # Finally filtering pairs keeping sample IDs ('s') have "F' and "R' keys
     paired_only = {s: d for s, d in pairs.items() if {"F", "R"} <= d.keys()}
     meta_only = {s: meta[s] for s in paired_only}
+    if enforce_same_well and missing_well:
+        meta_only["_missing_well"] = {"files": missing_well}
 
     if return_metadata:
         return paired_only, meta_only

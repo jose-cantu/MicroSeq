@@ -77,6 +77,8 @@ def main() -> None:
     p_asm.add_argument("--dup-policy", choices=[policy.value for policy in DupPolicy], default="error", help="Handling policy for duplicate orientation files during pairing")
     p_asm.add_argument("--fwd-pattern", default="27F|8F|515F|F", help="Regex pattern used to detect forward primer tokens in filenames (paired mode)")
     p_asm.add_argument("--rev-pattern", default="1492R|806R|926R|R", help="Regex pattern used to detect reverse primer tokens in filenames (paired mode)") 
+    p_asm.add_argument("--enforce-well", action="store_true", help="Require forward/reverse reads to share a plate well code (A1-H12) before pairing")
+    p_asm.add_argument("--well-pattern", help="Optional custom regex to detect wells (default matches A1-H12)") 
 
     # blast 
     db_choices = list(cfg["databases"].keys())    # e.g. here ['gg2', 'silva', 'ncbi16s']
@@ -241,7 +243,9 @@ def main() -> None:
                 args.output,
                 dup_policy=DupPolicy(args.dup_policy),
                 fwd_pattern=args.fwd_pattern,
-                rev_pattern=args.rev_pattern, 
+                rev_pattern=args.rev_pattern,
+                enforce_same_well=args.enforce_well,
+                well_pattern=args.well_pattern
             )
         else:
             run_assembly(args.input, args.output, threads=args.threads) 

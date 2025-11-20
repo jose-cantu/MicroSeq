@@ -1,0 +1,12 @@
+No file of quality values (.qual) is found
+No file of constraints (.con) is found.
+No overlap is found in the given 3' clipping range for read 4__1492R
+  3' clipping ranges for overlaps: 144  
+Number of overlaps saved: 1
+ComputeOverlap done
+IdentifyChimeras done
+Number of overlaps removed: 1
+RemovePoorOverlaps done
+ASSEM done
+ComputDistForContigs done
+PresentLayout done

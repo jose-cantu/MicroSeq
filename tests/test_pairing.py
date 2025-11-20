@@ -67,6 +67,23 @@ def test_group_pairs_error_on_dups(tmp_path: Path):
         group_pairs(tmp_path, dup_policy=DupPolicy.ERROR)
 
 
+def test_group_pairs_enforce_well_requires_match(tmp_path: Path):
+    (tmp_path / "sample_27F_A01.fasta").write_text(">x\nA\n", encoding="utf-8")
+    (tmp_path / "sample_27F_A01.fasta").write_text(">x\nA\n", encoding="utf-8")
+
+    pairs = group_pairs(tmp_path, enforce_same_well=true)
+
+    assert pairs == {}
+
+def test_group_pairs_report_missing_wells(tmp_path: Path):
+    (tmp_path / "sample_27F.fasta").write_text(">x\nA\n", encoding="utf-8")
+    (tmp_path / "sample_1492R.fasta").write_text(">x\nA\n", encoding="utf-8")
+    
+    pairs, meta = group_pairs(tmp_path, enforce_same_well=True, return_metadata=True)
+
+    assert pairs == {}
+    assert meta.get("_missing_well", {}).get("files")
+
 def test_assemble_pairs_creates_contigs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Running assemble_pairs should surface CAP3 artefacts for each sample."""
 

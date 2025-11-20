@@ -9,6 +9,7 @@ from os import PathLike
 import subprocess 
 from pathlib import Path 
 from typing import Iterable, Sequence
+import re 
 
 from microseq_tests.utility.utils import load_config 
 
@@ -89,13 +90,31 @@ def _write_pairing_report(pairs: dict, meta: dict, destination: Path) -> None:
 
             f_paths = _as_path_list(entries["F"])
             r_paths = _as_path_list(entries["R"])
+            
+            # function for formatting wells in well plate returns a string or none  
+            def _format_well(value: str | list[str] | None) -> str | None:
+                if value is None:
+                    return None
+                if isinstance(value, list):
+                    return ";".join(value)
+                return value 
 
             def _format_det(value: str | list[str] | None, orient: str) -> str | None:
                 if value is None:
                     return None
                 if isinstance(value, list):
-                    return f"{orient}:" + ";".join(value)
-                return f"{orient}:{value}"
+                   # If it is a list, format a string starting with the orientation, followed by a colon
+                   # Then the list of elements joined via semicolons 
+                   det_txt = f"{orient}:" + ";".join(value)
+                   # If the value is not None and not a list (a string) 
+                else:
+                    # Format a string starting with the orientation, followed by a colon, and a string value. 
+                    det_txt = f"{orient}:{value}"
+                # Retrieve a related metadata entry using the 'orient' parameter using `_format_well` to ensure consistent formatting
+                well_txt = _format_well(meta_entry.get(f"well_{orient}"))
+                # Check if well_txt has a value 
+                # If so, append well information to det_txt, otherwise return det_txt
+                return f"{det_txt} (well {well_txt})" if well_txt else det_txt
 
             detectors = " | ".join(
                 filter(
@@ -119,7 +138,7 @@ def _write_pairing_report(pairs: dict, meta: dict, destination: Path) -> None:
                 + "\n"
             )
 
-def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options: Sequence[str] | None = None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None 
+def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options: Sequence[str] | None = None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None  
                    ) -> list[Path]:
     """
     Run CAP3 assemblies for each forward and reverse pair discovered in ``input_dir``. 
@@ -162,6 +181,8 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
             fwd_pattern=fwd_pattern,
             rev_pattern=rev_pattern,
             return_metadata=True,
+            enforce_same_well=enforce_same_well,
+            well_pattern=well_pattern 
         )
         _write_pairing_report(pairs, meta, Path(pairing_report))
     else:
@@ -170,6 +191,8 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
             dup_policy=dup_policy,
             fwd_pattern=fwd_pattern,
             rev_pattern=rev_pattern,
+            enforce_same_well=enforce_same_well,
+            well_pattern=well_pattern 
         )
         meta = {}
 

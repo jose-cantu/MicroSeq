@@ -8,6 +8,7 @@ import inspect
 import platform
 import tracemalloc 
 import atexit
+import re 
 
 # Pick the first visible backend that has a server.........
 if "WSL_DISTRO_NAME" in os.environ:  # running inside WSL
@@ -30,6 +31,13 @@ from pathlib import Path
 from typing import Optional
 import collections
 
+PRIMER_SETS: dict[str, tuple[list[str], list[str]]] = {
+    "16S (27F/1492R)": (["27F"], ["1492R"]), 
+    "16S (8F/1492R)": (["8F"], ["1492R"]),
+    "16S V4 (515F/806R)": (["515F"], ["806R"]),
+    "Custom": ([], [])
+}
+
 from PySide6.QtCore import (
     QLine, Qt, QObject, QThread, Signal, Slot, QMetaObject, Q_ARG, QSettings, QTimer, QModelIndex
 )
@@ -45,6 +53,8 @@ from microseq_tests.pipeline import (
     run_blast_stage,
     run_postblast,
     run_full_pipeline,
+    _summarize_paired_candidates,
+    _suggest_pairing_patterns 
 )
 from microseq_tests.utility.utils import setup_logging, load_config
 
@@ -140,7 +150,7 @@ class MainWindow(QMainWindow):
         # widgets --------------------------------------------------------
         self.fasta_lbl = QLabel("Input: —")
         browse_btn = QPushButton("Browse..")
-        browse_btn.setToolTip("Select FASTA/FASTQ/AB1 file(s) or a folder")
+        browse_btn.setToolTip("Select FASTA/FASTQ/AB1 file(s) or a folder {Hint: Press cancel to select a folder}")
         browse_btn.clicked.connect(self._choose_infile)
 
         # BLAST hits TSV picker
@@ -184,17 +194,38 @@ class MainWindow(QMainWindow):
         # add the Paired option to dropdown, storing paired as internal data 
         self.mode_combo.addItem("Paired", userData="paired")
 
-        # Create a single-line text input field for the forward read pattern 
-        self.fwd_pattern_edit = QLineEdit() 
+        self.primer_set_combo = QComboBox()
+        for label in PRIMER_SETS: 
+            self.primer_set_combo.addItem(label)
 
-        # Add placeholder as a hint to uder that the field is optional its meant for regex that don't follow patterns I implemented 
-        self.fwd_pattern_edit.setPlaceholderText("Forward regex (optional) use this for cases outside of automatic parsing of F/R")
+        # Create a single-line text input field for the forward read tokens 
+        self.fwd_pattern_edit = QLineEdit()
+        self.fwd_pattern_edit.setPlaceholderText("Forward tokens (comma-separated, e.g. 27F,8F,515F)")
 
-        # Create a single-line text input field for the reverse read pattern 
-        self.rev_pattern_edit = QLineEdit() 
+        # Create a single-line text input field for the reverse read tokens 
+        self.rev_pattern_edit = QLineEdit()
+        self.rev_pattern_edit.setPlaceholderText("Reverse tokens (comma-separated, e.g. 1492R, 806R)")
 
-        # Add placeholder text as a hint to user that the field is optional again for patterns not in the ones I set up via 'help' for common primers used 
-        self.rev_pattern_edit.setPlaceholderText("Reverse regex (optional) use this for cases outside of automatic parsing of F/R")
+        self.detect_tokens_btn = QPushButton("Detect tokens")
+
+        self.detect_tokens_btn.setToolTip("Scan selected files/folders for forward/reverse tokens")
+
+        self.preview_pairs_btn = QPushButton("Detect tokens")
+        self.preview_pairs_btn.setToolTip("Summarize detected forward/reverse reads w/o running pipeline")
+
+        self.enforce_well_chk = QCheckBox("Enforce same plate well (A1-H12)")
+
+        self.enforce_well_chk.setToolTip("Only pair forward/reverse reads when the same well plate code (e.g. B10)")
+
+        self.advanced_regex_chk = QCheckBox("Show regex override")
+        self.fwd_regex_edit = QLineEdit() 
+        self.fwd_regex_edit.setPlaceholderText("Forward regex override (for advanced users who know regex)")
+        self.rev_regex_edit = QLineEdit()
+        self.rev_regex_edit.setPlaceholderText("Reverse regex override (for advanced users who know regex)")
+        for edit in (self.fwd_regex_edit, self.rev_regex_edit):
+            edit.setVisible(False)
+            edit.setEnabled(False)
+        self.advanced_regex_chk.setVisible(False) # Only shown in paired mode 
 
         # ---- Restore previous choises from settings --------
 
@@ -214,22 +245,59 @@ class MainWindow(QMainWindow):
 
         # Connect signal emitted when dropdown index changes to the function handles the change 
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        
+        # Save the setting by default 27F and 1482R default to these if not set 
+        saved_set = self.settings.value("primer_set", "16S (27F/1492R)")
+        
+        # Find position of saved primer set in dropdown menu `primer_set_combo` 
+        idx = max(0, self.primer_set_combo.findText(saved_set))
+        # updates visual display to show set that is saved from drop down menu 
+        self.primer_set_combo.setCurrentIndex(idx)
 
-        # Set the text of forward pattern field to the value saved in settings (defaulting to empty string) 
-        self.fwd_pattern_edit.setText(self.settings.value("fwd_pattern", ""))
+        # Populate the token fields from settings or primer results from what saved 
+        saved_fwd_tokens = self.settings.value("fwd_tokens", "")
+        saved_rev_tokens = self.settings.value("rev_tokens", "") 
+        default_fwd, default_rev = PRIMER_SETS.get(saved_set, PRIMER_SETS["16S (27F/1492R)"])
 
-        # Set the text of reverse pattern field to the value saved in settings (defaulting to empty string) 
-        self.rev_pattern_edit.setText(self.settings.value("rev_pattern", ""))
+        # retrieve any custom regexes the user may have used from the previous run forward/reverse 
+        self.fwd_pattern_edit.setText(saved_fwd_tokens or ", ".join(default_fwd))
+        self.rev_pattern_edit.setText(saved_rev_tokens or ", ".join(default_rev))
+
+        saved_fwd_regex = self.settings.value("fwd_regex", "")
+        saved_rev_regex = self.settings.value("rev_regex", "") 
+        self.fwd_regex_edit.setText(saved_fwd_regex)
+        self.rev_regex_edit.setText(saved_rev_regex)
+        
+        # Set intial state of enfore_same_well checkbox default to False 
+        self.enforce_well_chk.setChecked(self.settings.value("enforce_same_well", False, type=bool))
+        
+        # ------ connecting user action event handlers -----------------
+        # For when users change selection in drop down menu 
+        self.primer_set_combo.currentIndexChanged.connect(self._on_primer_set_changed)
+        self.detect_tokens_btn.clicked.connect(self._detect_tokens)
+        self.preview_pairs_btn.clicked.connect(self._preview_pairs)
+        self.advanced_regex_chk.toggle.connect(self._toggle_advanced_regex)
+        self.enforce_well_chk.toggled.connect(
+            lambda checked: self.settings.setValue("enforce_same_well", checked)
+        )
 
         # Connect the signal for text edits in the forward field to an anonymous function that saves the new text to settings. 
         self.fwd_pattern_edit.textEdited.connect(
-            lambda txt: self.settings.setValue("fwd_pattern", txt)
+            lambda txt: self._on_token_edited("fwd_tokens", txt)
         )
 
         # Connect the signal for text edits in the reverse field to an anonymous function that saves the new text to settings 
         self.rev_pattern_edit.textEdited.connect(
-            lambda txt: self.settings.setValue("rev_pattern", txt)
+            lambda txt: self.on_token_edited("rev_tokens", txt)
         )
+
+        self.fwd_regex_edit.textEdited.connect(
+            lambda txt: self.settings.setValue("fwd_regex", txt)
+        )
+
+        self.rev_regex_edit.textEdited.connect(
+            lambda txt: self.settings.setValue("rev_regex", txt)
+        ) 
 
         # ---- Alignmnet mode box ----------------
         mode_box = QGroupBox("Alignment mode")
@@ -351,10 +419,23 @@ class MainWindow(QMainWindow):
         mid.addWidget(self.cancel_btn)
         mid.addWidget(self.run_btn)
 
+        pairing = QHBoxLayout()
+        pairing.addWidget(QLabel("Primer set"))
+        pairing.addWidget(self.primer_set_combo)
+        pairing.addWidget(self.fwd_pattern_edit)
+        pairing.addWidget(self.rev_pattern_edit)
+        pairing.addWidget(self.detect_tokens_btn)
+        pairing.addWidget(self.preview_pairs_btn)
+        pairing.addWidget(self.enforce_well_chk)
+        pairing.addWidget(self.advanced_regex_chk)
+        pairing.addWidget(self.fwd_regex_edit)
+        pairing.addWidget(self.rev_regex_edit) 
+
         # vertical stack picker row, settings row, then logpane expands
         outer = QVBoxLayout()
         outer.addLayout(top)
         outer.addLayout(mid)
+        outer.addLayout(pairing) 
         outer.addWidget(self.log_view)
 
         # Embed composite layout as the window's central widget
@@ -383,10 +464,21 @@ class MainWindow(QMainWindow):
         This function is the event handler that runs every time the user changes the selection in the 'mode_combo' dropdown menu.
         """
         mode = self.mode_combo.itemData(index) 
-        is_paired = mode == "paired" 
-        for edit in (self.fwd_pattern_edit, self.rev_pattern_edit):
-            edit.setVisible(is_paired)
-            edit.setEnabled(is_paired)
+        is_paired = mode == "paired"
+        for widget in (
+            self.fwd_pattern_edit,
+            self.rev_pattern_edit,
+            self.primer_set_combo,
+            self.detect_tokens_btn,
+            self.preview_pairs_btn,
+            self.advanced_regex_chk,
+            self.fwd_regex_edit, 
+            self.rev_regex_edit,
+            self.enforce_well_chk
+        ):
+            widget.setVisible(is_paired)
+            widget.setEnabled(is_paired)
+        self._sync_primer_controls_visibility() 
         self.settings.setValue("assembly_mode", mode)
 
     def _assembly_kwargs(self) -> dict:
@@ -395,12 +487,139 @@ class MainWindow(QMainWindow):
         """ 
         mode = self.mode_combo.currentData()
         if mode == "paired":
-            fwd = self.fwd_pattern_edit.text().strip() or None 
-            rev = self.rev_pattern_edit.text().strip() or None 
+            fwd, rev = self._current_patterns()
         else:
             fwd = rev = None 
-        return {"mode": mode, "fwd_pattern": fwd, "rev_pattern": rev} 
+        return {
+            "mode": mode, 
+            "fwd_pattern": fwd,
+            "rev_pattern": rev, 
+            "enforce_same_well": self.enforce_well_chk.isChecked(),
+        }
+    
+    def _tokens_to_regex(self, text: str) -> str | None:
+        tokens = [t.strip() for t in text.split(",") if t.strip()]
+        if not tokens:
+            return None 
+        escaped = [re.escape(tok) for tok in tokens] 
+        return "|".join(escaped)
 
+    def _current_patterns(self) -> tuple[str | None, str | None]:
+        if self.advanced_regex_chk.isChecked():
+            fwd = self.fwd_regex_edit.text().strip or None 
+            rev = self.rev_regex_edit.text().strip or None 
+        else:
+            fwd = self._tokens_to_regex(self.fwd_pattern_edit.text())
+            rev = self._tokens_to_regex(self.rev_pattern_edit.text())
+        return fwd, rev 
+
+    def _on_primer_set_changed(self, index: int):
+        label = self.primer_set_combo.itemText(index)
+        self.settings.setValue("primer_set", label)
+        fwd_tokens, rev_tokens = PRIMER_SETS.get(label, ([], []))
+        if fwd_tokens:
+            self.fwd_pattern_edit.setText(", ".join(fwd_tokens))
+        if rev_tokens:
+            self.rev_pattern_edit.setText(", ".join(rev_tokens))
+
+        self._sync_primer_controls_visibility() 
+
+    def _sync_primer_controls_visibility(self):
+        is_paired = self.mode_combo.currentData() == "paired"
+        self.advanced_regex_chk.setVisible(is_paired)
+        if not is_paired or not self.advanced_regex_chk.isChecked():
+            for edit in (self.fwd_regex_edit, self.rev_regex_edit):
+                edit.setVisible(False)
+                edit.setEnabled(False) 
+
+    def _toggle_advanced_regex(self, checked: bool):
+        for edit in (self.fwd_regex_edit, self.rev_regex_edit):
+            edit.setVisible(checked)
+            edit.setEnabled(checked)
+
+    def _on_token_edited(self, key: str, text: str):
+        self.settings.setValue(key, text)
+        if text:
+            custom_idx = self.primer_set_combo.findText("Custom")
+            if custom_idx >= 0:
+                self.primer_set_combo.blockSignals(True)
+                self.primer_set_combo.setCurrentIndex(custom_idx)
+                self.settings.setValue("primer_set", "Custom")
+                self.primer_set_combo.blockSignals(False) 
+
+    def _detect_tokens(self):
+        if not self._infile:
+            QMessageBox.warning(self, "No input", "Choose a file or folder first please.") 
+            return 
+        directory = self._infile if self._infile.is_dir() else self._infile.parent
+        fwd_tokens, rev_tokens = self._scan_tokens(directory)
+
+        if not fwd_tokens and not rev_tokens:
+            QMessageBox.information(
+                self,
+                "No tokens found"
+                "No primer-like forward/reverse tokens were detected in the filenames."
+            )
+            return 
+        
+        if fwd_tokens:
+            joined = ", ".join(fwd_tokens)
+            self.fwd_pattern_edit.setText(joined)
+            self._on_token_edited("fwd_tokens", joined)
+        if rev_tokens:
+            joined = ", ".join(rev_tokens)
+            self.rev_pattern_edit.setText(joined)
+            self._on_token_edited("rev_tokens", joined)
+
+        QMessageBox.information(
+            self,
+            "Primers/tokens detected",
+            f"Forward primers/tokens: {', '.join(fwd_tokens) or '-'}\n"
+            f"Reverse primers/tokens: {', '.join(rev_tokens) or '-'}\n"
+        ) 
+
+    def _scan_tokens(self, directory: Path) -> tuple[list[str], list[str]]:
+        token_rx = re.compile(r"([A-Za-z0-9] + [FR])", re.I)
+        fwd_counter: collections.Counter[str] = collections.Counter()
+        rev_counter: collections.Counter[str] = collections.Counter() 
+
+        for suffix in ("*.fasta", "*.fastq", "*.ab1"):
+            for fp in sorted(directory.rglob(suffix)):
+                for tok in token_rx.findall(fp.name):
+                    tok = tok.upper()
+                    if tok.endswith("F"):
+                        fwd_counter[tok] += 1 
+                    elif tok.endswith("R"):
+                        rev_counter[tok] += 1 
+
+        def _top(counter: collections.Counter[str]) -> list[str]:
+            return [tok for tok, _ in counter.most_common(5)] 
+
+        return _top(fwd_counter), _top(rev_counter) 
+
+    def _preview_pairs(self):
+        if self.mode_combo.currentData() != "paired":
+            QMessageBox.information(self, "Not paired", "Preview is only available in paired mode.")
+            return 
+
+        if not self._infile:
+            QMessageBox.warning(self, "No input", "Choose a file or folder first for set of inputs.")
+            return 
+
+        directory = self._infile if self._infile.is_dir() else self._infile.parent 
+        fwd, rev = self._current_patterns()
+        summary = _summarize_paired_candidates(
+            directory,
+            fwd,
+            rev,
+            enforce_same_well=self.enforce_well_chk.isChecked()
+        )
+        suggestions = _suggest_pairing_patterns(directory)
+        QMessageBox.information(
+            self,
+            "Pairing Preview",
+            f"{summary}.\n\nSuggestions: {suggestions}"
+        ) 
 
     def _choose_infile(self):
         """Select FASTA/FASTQ/AB1 file(s) or a folder of traces."""

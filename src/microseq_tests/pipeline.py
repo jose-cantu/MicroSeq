@@ -32,7 +32,7 @@ from microseq_tests.trimming.fastq_to_fasta import (
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
 from microseq_tests.assembly.paired_assembly import assemble_pairs
 from microseq_tests.assembly.pairing import  (
-        DETECTORS, DupPolicy, extract_sid_orientation, make_pattern_detector) 
+        DETECTORS, DupPolicy, _extract_well, extract_sid_orientation, make_pattern_detector) 
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
 from microseq_tests.post_blast_analysis import run as postblast_run
@@ -118,8 +118,8 @@ def run_assembly(fasta_in: PathLike, out_dir: PathLike, *, threads: int | None =
     de_novo_assembly(Path(fasta_in), Path(out_dir), **options)
     return 0
 
-def run_paired_assembly(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options=None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None,) -> list[Path]:
-    return assemble_pairs(Path(input_dir), Path(output_dir), dup_policy=dup_policy, cap3_options=cap3_options, fwd_pattern=fwd_pattern, rev_pattern=rev_pattern, pairing_report=pairing_report,)
+def run_paired_assembly(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options=None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None) -> list[Path]:
+    return assemble_pairs(Path(input_dir), Path(output_dir), dup_policy=dup_policy, cap3_options=cap3_options, fwd_pattern=fwd_pattern, rev_pattern=rev_pattern, pairing_report=pairing_report, enforce_same_well=enforce_same_well, well_pattern=well_pattern )
 
 # ───────────────────────────────────────────────────────── BLAST
 
@@ -242,7 +242,7 @@ from pathlib import Path
 from microseq_tests.utility.utils import load_config, expand_db_path
 
 def _summarize_paired_candidates(
-    directory: Path, fwd_pattern: str | None, rev_pattern: str | None
+        directory: Path, fwd_pattern: str | None, rev_pattern: str | None, *, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None
 ) -> str:
     """Return a human-readable summary of how many forward/reverse reads were detected.
 
@@ -257,12 +257,21 @@ def _summarize_paired_candidates(
     counts: Counter[str] = Counter()
     sample_orients: dict[str, set[str]] = defaultdict(set)
     unknown: list[str] = []
+    sid_wells: dict[str, set[str]] = defaultdict(set)
+    missing_well: set[str] = set() 
 
     for fp in sorted(directory.glob("*.fasta")):
         sid, orient = extract_sid_orientation(fp.name, detectors=detectors)
+        well = _extract_well(fp.name, pattern=well_pattern) if enforce_same_well else None 
+        key = sid if not enforce_same_well else (well or sid) 
         if orient in ("F", "R"):
             counts[orient] += 1
-            sample_orients[sid].add(orient)
+            sample_orients[key].add(orient)
+            if enforce_same_well:
+                if well:
+                    sid_wells[sid].add(orient)
+                else:
+                    missing_well.add(fp.name) 
             continue
 
         counts["unknown"] += 1
@@ -288,6 +297,17 @@ def _summarize_paired_candidates(
         parts.append(
             f"custom patterns in use (forward: {fwd_pattern!r}, reverse: {rev_pattern!r})"
         )
+    
+    if enforce_same_well:
+        if missing_well:
+            preview = ", ".join(sorted(missing_well)[:3])
+            suffix = "..." if len(missing_well) > 3 else "" 
+            parts.append(f"{len(missing_well)} files missing plate well codes (e.g., {preview}{suffix}")
+        multi_well = sorted(sid for sid, wells in sid_wells.items() if len(wells) > 1)
+        if multi_well:
+           preview = ", ".join(multi_well[:3])
+           suffix = "..." if len(multi_well) > 3 else ""
+           parts.append(f"sample IDs spanning multiple wells: {preview}{suffix}")
 
     return "; ".join(parts)
 
@@ -359,7 +379,9 @@ def run_full_pipeline(
     dup_policy: DupPolicy = DupPolicy.ERROR, 
     cap3_options=None, 
     fwd_pattern: str | None = None,
-    rev_pattern: str | None = None, 
+    rev_pattern: str | None = None,
+    enforce_same_well: bool = False,
+    well_pattern: str | re.Pattern[str] | None = None, 
     metadata: Path | None = None,
     summary_tsv: Path | None = None,
     on_stage=None,
@@ -481,9 +503,11 @@ def run_full_pipeline(
             fwd_pattern=fwd_pattern,
             rev_pattern=rev_pattern,
             pairing_report=pairing_report,
+            enforce_same_well=enforce_same_well,
+            well_pattern=well_pattern 
         )
         if not contig_paths:
-           summary = _summarize_paired_candidates(assembly_input, fwd_pattern, rev_pattern)
+           summary = _summarize_paired_candidates(assembly_input, fwd_pattern, rev_pattern, enforce_same_well=enforce_same_well, well_pattern=well_pattern)
            suggestions = _suggest_pairing_patterns(assembly_input)
            raise ValueError(
                 f"No paired reads detected in {assembly_input}; {summary}. "
