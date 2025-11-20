@@ -207,12 +207,12 @@ class MainWindow(QMainWindow):
         self.rev_pattern_edit = QLineEdit()
         self.rev_pattern_edit.setPlaceholderText("Reverse tokens (comma-separated, e.g. 1492R, 806R)")
 
-        self.detect_tokens_btn = QPushButton("Detect tokens")
+        self.detect_tokens_btn = QPushButton("Auto-detect Primers")
 
-        self.detect_tokens_btn.setToolTip("Scan selected files/folders for forward/reverse tokens")
+        self.detect_tokens_btn.setToolTip("Scan selected files/folders for forward/reverse primers")
 
-        self.preview_pairs_btn = QPushButton("Detect tokens")
-        self.preview_pairs_btn.setToolTip("Summarize detected forward/reverse reads w/o running pipeline")
+        self.preview_pairs_btn = QPushButton("Preview Pairs")
+        self.preview_pairs_btn.setToolTip("Summarize detected forward/reverse reads w/o running pipeline in a dry run")
 
         self.enforce_well_chk = QCheckBox("Enforce same plate well (A1-H12)")
 
