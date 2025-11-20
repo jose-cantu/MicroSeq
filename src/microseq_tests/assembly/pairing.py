@@ -200,8 +200,8 @@ def group_pairs(
     well_rx = _WELL_RX if well_pattern is None else well_pattern 
 
     def _store_entry(key: str, sid: str, orient: str, path: Path, detector_name: str | None, well: str | None) -> None:
-        bucket = pairs[sid].get(orient)
-        meta_bucket = meta[sid].get(orient)
+        bucket = pairs[key].get(orient)
+        meta_bucket = meta[key].get(orient)
 
         if bucket is None:
             pairs[key][orient] = path
@@ -239,11 +239,13 @@ def group_pairs(
                 elif isinstance(wells, list):
                     wells.append(well)
                 else:
-                    meta[key][f"well_{orient}"] = [wells, wells] 
+                    meta[key][f"well_{orient}"] = [wells, well] 
 
 
     path = Path(folder)
     fasta_exts = {".fasta", ".fa", ".fna"}
+
+    missing_well: list[str] = []
 
     if path.is_file():
         if path.suffix.lower() not in fasta_exts:
@@ -252,8 +254,6 @@ def group_pairs(
         record_counts: dict[tuple[str, str], int] = defaultdict(int)
         tmp_dir = path.parent / f".{path.stem}_paired_records"
         tmp_dir.mkdir(parents=True, exist_ok=True)
-
-        missing_well: list[str] = [] 
 
         for record in SeqIO.parse(path, "fasta"):
             sid, orient, det_name = _detect_sid_orientation(record.id, active_detectors) 
