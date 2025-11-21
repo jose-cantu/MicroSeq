@@ -60,8 +60,28 @@ def test_cli_passes_identity(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 2. Tail-pipeline sanity check
+# 2. Taxonomy join preserves IDs 
 # ---------------------------------------------------------------------------
+
+def test_taxonomy_join_keeps_qseqid(tmp_path):
+    hits = tmp_path / "hits.tsv"
+    hits.write_text(
+        "qseqid\tsseqid\tpident\tevalue\tbitscore\n"
+        "S1\tGG2_0001\t99.0\t1e-10\t200\n"
+    )
+
+    tax = tmp_path / "taxonomy.tsv"
+    tax.write_text("sseqid\ttaxonomy\nGG2_0001\tk__Bacteria\n")
+
+    hits_tax = tmp_path / "hits_tax.tsv"
+    run_taxonomy_join(hits, tax, hits_tax)
+
+    df = pd.read_csv(hits_tax, sep="\t")
+    assert {"qseqid", "sample_id"}.issubset(df.columns)
+    assert df.loc[0, "qseqid"] == df.loc[0, "sample_id"] == "S1"
+
+# ---------------------------------------------------------------------------
+# 3. Tail-pipeline sanity check
 
 @pytest.mark.parametrize("identity", [97.0, 95.0])
 def test_end_to_end_tail(identity, tmp_path):

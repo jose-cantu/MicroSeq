@@ -1,0 +1,11 @@
+No file of quality values (.qual) is found
+No file of constraints (.con) is found.
+Number of overlaps saved: 1
+ComputeOverlap done
+IdentifyChimeras done
+Overlap 14__1492R+ and 14__27F-  P  lengths of diffs and sims: upper left 95  lower right 87  middle 485
+Number of overlaps removed: 1
+RemovePoorOverlaps done
+ASSEM done
+ComputDistForContigs done
+PresentLayout done

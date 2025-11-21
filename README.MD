@@ -39,13 +39,13 @@ You can also just select docs view and it will take you to the landing page for 
 MicroSeq began as an open-source replacement for the narrow slice of Geneious Prime we relied on turning raw Sanger chromatograms into taxonomically annotated sequences but has grown into the only FLOSS pipeline that goes from AB1 or FASTQ input to a BIOM/OTU table in one reproducible run.
 
 * **Dual input.** Accepts raw `.ab1` traces or demultiplexed FASTQ amplicons.
-* **Contig aware (planned v1.1).** When more than one read belongs to an isolate, MicroSeq will automatically assemble them with CAP3, boosting consensus quality. In the current version run `microseq assembly` first.
+* **Paired contig assembly (CAP3).** When forward/reverse files exist per sample, run `microseq assembly --mode paired` to auto-pair reads (and its customizable via arguments `--fwd-pattern`/`--rev-pattern`) and assemble contigs with CAP3 before BLAST. 
 * **GreenGenes 2, SILVA, or NCBI one switch.** `--db gg2|silva|ncbi` works in both CLI and GUI; MicroSeq is currently the only tool that ships a GreenGenes 2–indexed classifier.
 * **Immediate downstream compatibility.** `microseq postblast` writes BLAST results directly to BIOM (or flat CSV) so the same file can feed QIIME‑2, phyloseq, or scikit‑bio without hand conversion.
 * **Bench-to-cluster consistency.** A single YAML config runs unchanged on a laptop or under Slurm; thread and memory limits are flags, not hard-coded paths.
 * **Permissive licence.** MIT/LGPL so the lab can redistribute binaries internally without negotiating commercial terms.
 
-In short: MicroSeq is the only open-source package that ingests raw Sanger or FASTQ reads, classifies them against GreenGenes 2, SILVA, or NCBI in one step, and emits a BIOM table all under a scriptable CLI with an optional GUI for bench scientists. Automatic contig assembly is scheduled for version 1.1.
+In short: MicroSeq is the only open-source package that ingests raw Sanger or FASTQ reads, classifies them against GreenGenes 2, SILVA, or NCBI in one step, and emits a BIOM table all under a scriptable CLI with a GUI for bench scientists.  Paired contig assembly is available today via `microseq assembly --mode paired`.
 
 ---
 
@@ -422,6 +422,18 @@ CAP3 names every output file `<prefix>.cap.<suffix>` where `<prefix>` is the inp
 | `singlets.qual`    | `sample.cap.singlets.qual` | Phred scores for the singlets.                                                                                                         |
 | `info`             | `sample.cap.info`          | Assembly log: contig IDs, lengths, coverage, clipped read coordinates, N50 summary.                                                    |
 | `ace` *(optional)* | `sample.cap.ace`           | ACE format view of the assembly; generated when MicroSeq calls CAP3 with `-a`. Importable into Consed/GAP5/Tablet for visual curation. |
+
+**Paired mode:** supply a folder containing per-sample forward/reverse FASTA files and let MicroSeq discover primer tokens. Custom regex detectors can be provided when naming deviates from defaults:
+
+```bash
+microseq assembly --mode paired \
+  -i data/paired_reads/ \
+  -o data/paired_asm \
+  --fwd-pattern "27F|8F|515F|F" \
+  --rev-pattern "1492R|806R|926R|R"
+```
+
+The same paired logic is available in the end-to-end pipeline via `run_full_pipeline(..., mode="paired")`; GUI support will follow in a subsequent update.
 
 **How MicroSeq uses them**
 

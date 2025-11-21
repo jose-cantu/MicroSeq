@@ -6,11 +6,9 @@ from microseq_tests.utility.progress import stage_bar
 from microseq_tests.utility.merge_hits import merge_hits 
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
-from microseq_tests.pipeline import (
-        run_trim,
-        run_ab1_to_fastq, run_fastq_to_fasta,)
-from microseq_tests.utility.utils import setup_logging, load_config 
-from microseq_tests.assembly.de_novo_assembly import de_novo_assembly 
+from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly)
+from microseq_tests.utility.utils import setup_logging, load_config
+from microseq_tests.assembly.pairing import DupPolicy 
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.post_blast_analysis import run as postblast_run 
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
@@ -74,6 +72,13 @@ def main() -> None:
     p_asm = sp.add_parser("assembly", help="De novo assembly via CAP3")
     p_asm.add_argument("-i", "--input", required=True)
     p_asm.add_argument("-o", "--output", required=True) 
+    p_asm.add_argument("--mode", choices=["single", "paired"], default="single",
+                       help="Choose between single-end or paired-end run_assembly" )
+    p_asm.add_argument("--dup-policy", choices=[policy.value for policy in DupPolicy], default="error", help="Handling policy for duplicate orientation files during pairing")
+    p_asm.add_argument("--fwd-pattern", default="27F|8F|515F|F", help="Regex pattern used to detect forward primer tokens in filenames (paired mode)")
+    p_asm.add_argument("--rev-pattern", default="1492R|806R|926R|R", help="Regex pattern used to detect reverse primer tokens in filenames (paired mode)") 
+    p_asm.add_argument("--enforce-well", action="store_true", help="Require forward/reverse reads to share a plate well code (A1-H12) before pairing")
+    p_asm.add_argument("--well-pattern", help="Optional custom regex to detect wells (default matches A1-H12)") 
 
     # blast 
     db_choices = list(cfg["databases"].keys())    # e.g. here ['gg2', 'silva', 'ncbi16s']
@@ -232,10 +237,18 @@ def main() -> None:
 
 
     elif args.cmd == "assembly":
-        de_novo_assembly(workdir / "qc" / "trimmed.fasta",
-                         workdir / "asm",
-                         threads=args.threads,
-                         )
+        if args.mode == "paired":
+            run_paired_assembly(
+                args.input,
+                args.output,
+                dup_policy=DupPolicy(args.dup_policy),
+                fwd_pattern=args.fwd_pattern,
+                rev_pattern=args.rev_pattern,
+                enforce_same_well=args.enforce_well,
+                well_pattern=args.well_pattern
+            )
+        else:
+            run_assembly(args.input, args.output, threads=args.threads) 
 
     elif args.cmd == "blast":
         total = sum(1 for _ in SeqIO.parse(args.input, "fasta"))

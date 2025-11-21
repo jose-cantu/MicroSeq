@@ -1,0 +1,12 @@
+No file of quality values (.qual) is found
+No file of constraints (.con) is found.
+Number of overlaps saved: 1
+ComputeOverlap done
+IdentifyChimeras done
+Number of overlaps removed: 0
+RemovePoorOverlaps done
+ASSEM done
+ComputDistForContigs done
+PresentLayout done
+Clip 26__1492R left clip: 1, right clip: 1067,  length: 1067,  right size 0
+Clip 26__27F left clip: 1, right clip: 996,  length: 1055,  right size 59
