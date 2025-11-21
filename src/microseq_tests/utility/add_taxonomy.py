@@ -35,9 +35,15 @@ def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path, fill_speci
     hits = pd.read_csv(
             normalise_tsv(hits_fp),
             sep=sep,
-            engine="python", # auto-deatect header row 
+            engine="python", # auto-detect header row 
             dtype=str, 
-            ).rename(columns={"qseqid": "sample_id"})
+            )
+
+    # Keep both qseqid (for downstream merges) and sample_id for postblast
+    if "qseqid" in hits.columns and "sample_id" not in hits.columns:
+        hits.insert(hits.columns.get_loc("qseqid") + 1, "sample_id", hits["qseqid"])
+    elif "sample_id" in hits.columns and "qseqid" not in hits.columns:
+        hits.insert(0, "qseqid", hits["sample_id"])
    # canonicalize the subject ID so it can match the taxonomy table for each of the databases 
     hits["sseqid"] = ( 
        hits["sseqid"].astype(str)

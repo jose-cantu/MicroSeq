@@ -583,8 +583,17 @@ def run_full_pipeline(
             if contig_map.exists():
                 tax_df = pd.read_csv(paths["tax"], sep="\t")
                 map_df = pd.read_csv(contig_map, sep="\t")
-                if "sample" not in tax_df.columns:
-                    tax_df = tax_df.merge(map_df, on="qseqid", how="left")
+                
+                merge_key = None
+                if "qseqid" in tax_df.columns:
+                    merge_key = "qseqid"
+                elif "sample_id" in tax_df.columns:
+                    merge_key = "sample_id"
+                    map_df = map_df.rename(columns={"qseqid": "sample_id"})
+
+                if merge_key and "sample" not in tax_df.columns:
+                    tax_df = tax_df.merge(map_df, on=merge_key, how="left") 
+
                     tax_df.to_csv(paths["tax"], sep="\t", index=False)
         except Exception as exc:
             L.warning("Failed to merge contig map into taxonomy table: %s", exc)
