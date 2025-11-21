@@ -7,6 +7,8 @@ import os
 import inspect
 import platform
 import tracemalloc 
+import tempfile 
+import shutil 
 import atexit
 import re 
 
@@ -459,7 +461,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
         # state and logging connection
-        self._infile: Optional[Path] = None
+        self._infiles: list[Path] = []
+        self._input_path: Optional[Path] = None 
+        self._input_staging: Optional[tempfile.TemporaryDirectory[str]] = None 
         self.hits_path: Optional[Path] = None
         self.meta_path: Optional[Path] = None
         self._current_stage: str = ""
@@ -567,10 +571,11 @@ class MainWindow(QMainWindow):
                 self.primer_set_combo.blockSignals(False) 
 
     def _detect_tokens(self):
-        if not self._infile:
-            QMessageBox.warning(self, "No input", "Choose a file or folder first please.") 
+        if not self._input_path:
+            QMessageBox.warning(self, "No input", "Choose a file or folder first please.")
             return 
-        directory = self._infile if self._infile.is_dir() else self._infile.parent
+        directory = self._input_path if self._input_path.is_dir() else self._input_path.parent
+
         fwd_tokens, rev_tokens = self._scan_tokens(directory)
 
         if not fwd_tokens and not rev_tokens:
@@ -621,11 +626,11 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Not paired", "Preview is only available in paired mode.")
             return 
 
-        if not self._infile:
+        if not self._input_path:
             QMessageBox.warning(self, "No input", "Choose a file or folder first for set of inputs.")
             return 
 
-        directory = self._infile if self._infile.is_dir() else self._infile.parent 
+        directory = self._input_path if self._input_path.is_dir() else self._input_path.parent 
         fwd, rev = self._current_patterns()
         summary = _summarize_paired_candidates(
             directory,
@@ -638,10 +643,37 @@ class MainWindow(QMainWindow):
             self,
             "Pairing Preview",
             f"{summary}.\n\nSuggestions: {suggestions}"
-        ) 
+        )
+
+    def _cleanup_input_staging(self) -> None:
+        if self._input_staging:
+            self._input_staging.cleanup()
+            self._input_staging = None 
+        self._input_path = None 
+
+    def _stage_selected_files(self) -> None:
+        if not self._infiles:
+            self._cleanup_input_staging()
+            return 
+
+        if len(self._infiles) == 1:
+            self._cleanup_input_staging()
+            self._input_path = self._infiles[0]
+            return 
+
+        self._cleanup_input_staging()
+        self._input_staging = tempfile.TemporaryDirectory(prefix="microseq_gui_inputs_")
+        staging_dir = Path(self._input_staging.name)
+        for idx, fp in enumerate(self._infiles, 1):
+            dest = staging_dir / fp.name 
+            if dest.exists():
+                dest = staging_dir / f"{fp.stem}_{idx}{fp.suffix}"
+            shutil.copy(fp, dest)
+        self._input_path = staging_dir 
 
     def _choose_infile(self):
         """Select FASTA/FASTQ/AB1 file(s) or a folder of traces."""
+        self._infiles = [] 
         paths, _ = QFileDialog.getOpenFileNames(
             self,
             "Select FASTA/FASTQ/AB1 file(s)",
@@ -654,17 +686,21 @@ class MainWindow(QMainWindow):
                 self, "Select input folder", str(Path.home())
             )
             if dir_path:
-                self._infile = Path(dir_path)
+                self._infiles = [Path(dir_path)]
         else:
             # multi-file selection is allowed but only the first file is used
-            self._infile = Path(paths[0])
+            self._infiles = [Path(p) for p in paths]
+        
+        self._stage_selected_files() 
 
-        if self._infile:
+        if self._input_path:
             label = (
-                f"Input folder: {self._infile.name}"
-                if self._infile.is_dir()
-                else f"Input file: {self._infile.name}"
-            )
+                f"Input files: {len(self._infiles)} selected"
+                if self._input_path.is_dir() and len(self._infiles) > 1 
+                else f"Input folder: {self._input_path.name}"
+                if self._input_path.is_dir()
+                else f"Input file: {self._input_path.name}"
+            ) 
             self.fasta_lbl.setText(label)
             # clean any previous metadata selection
             self.meta_path = None
@@ -694,7 +730,7 @@ class MainWindow(QMainWindow):
     # ---- Blast Stage Demo ------------------------------
     # guarding against accidental click
     def _launch_blast(self):
-        if not self._infile:
+        if not self._input_path:
             QMessageBox.warning(self, "No input", "Choose a file or folder first.")
             return
 
@@ -702,17 +738,17 @@ class MainWindow(QMainWindow):
         task = self.settings.value("blast_task", "megablast")
 
         # derive output file beside input; disables button; logs starts
-        hits_path = self._infile.with_suffix(".hits.tsv")
+        hits_path = self._input_path.with_suffix(".hits.tsv")
 
         self.run_btn.setEnabled(False)
         self.postblast_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
-        self.log_model.append(f"\n▶ BLAST {self._infile.name} -> {hits_path.name}")
+        self.log_model.append(f"\n▶ BLAST {self._input_path.name} -> {hits_path.name}")
 
         # worker and thread wiring -------------------
         worker = Worker(
             run_blast_stage,
-            self._infile,
+            self._input_path,
             self.db_box.currentText(), # default DB key selection
             hits_path,
             identity=self.id_spin.value(),
@@ -784,13 +820,13 @@ class MainWindow(QMainWindow):
 
     # -------- Trim -> Convert -> BLAST -> Taxonomy ---------------
     def _launch_qc(self):
-        if not self._infile:
+        if not self._input_path:
             QMessageBox.warning(self, "No input", "Choose a file or folder first.")
             return
         task = self.settings.value("blast_task", "megablast")
         self._launch(
             run_full_pipeline,
-            self._infile,
+            self._input_path,
             self.db_box.currentText(),
             threads=self.threads_spin.value(),
             postblast=self.biom_chk.isChecked(),
@@ -801,7 +837,7 @@ class MainWindow(QMainWindow):
 
     # ------ Run full pipeline with Post-Blast as well -------------
     def _launch_full(self):
-        if not self._infile:
+        if not self._input_path:
             QMessageBox.warning(self, "No input", "Choose a file or folder first.")
             return
         # if user asked for BIOM but hasn't chosen metadata, abort early
@@ -816,7 +852,7 @@ class MainWindow(QMainWindow):
         task = self.settings.value("blast_task", "megablast")
         self._launch(
             run_full_pipeline,
-            self._infile,
+            self._input_path,
             self.db_box.currentText(),
             threads=self.threads_spin.value(),
             postblast=self.biom_chk.isChecked(), # source of truth decide via checkbox
@@ -993,6 +1029,7 @@ class MainWindow(QMainWindow):
                 event.ignore()                         # keep window open
                 self.log_model.append("Waiting for BLAST thread to finish…")
                 return
+        self._cleanup_input_staging() 
         event.accept()
         root = logging.getLogger()
         if self._log_handler and self._log_handler in root.handlers:

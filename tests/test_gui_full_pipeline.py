@@ -27,7 +27,8 @@ def test_full_button_progress(qtbot, monkeypatch, tmp_path):
     # set a dummy input file
     dummy = tmp_path / "dummy.fastq"
     dummy.write_text("@r1\nACGT\n+\n!!!!\n")
-    win._infile = dummy
+    win._infile = [dummy]
+    win._stage_selected_files() 
 
 
     qtbot.mouseClick(win.full_btn, Qt.LeftButton)
