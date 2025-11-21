@@ -88,6 +88,8 @@ def test_group_pairs_report_missing_wells(tmp_path: Path):
 def test_extract_well_validates_plate_range():
     assert _extract_well("sample_A1.fastq") == "A01"
     assert _extract_well("sample_h12.fastq") == "H12"
+    assert _extract_well("sample_-B07.fastq") == "B07" 
+    assert _extract_well("sample__A10.fastq") == "A10" 
     assert _extract_well("sample_I01.fastq") is None
     assert _extract_well("sample_A13.fastq") is None
 

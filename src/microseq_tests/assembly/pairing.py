@@ -36,8 +36,10 @@ _MID_RX = re.compile(r"[_\-]([A-Za-z0-9]+[FR])[_\-]", re.I)
 # _PREFIX_RX Finds a word like "27F_" or "1492R-" at the very start of filename.
 _PREFIX_RX = re.compile(r"^([A-Za-z0-9]+[FR])[_\-]", re.I) 
 # _SUFFIX_RX Finds a word like "_27F.fasta" or "-1492R.fasta" at the end of a filename 
-_SUFFIX_RX = re.compile(r"[_\-]([A-Za-z0-9]+[FR])\.[^.]+$", re.I) 
-_WELL_RX = re.compile(r"(?i)\b([A-H](?:0?[1-9]|1[0-2]))\b") 
+_SUFFIX_RX = re.compile(r"[_\-]([A-Za-z0-9]+[FR])\.[^.]+$", re.I)
+# Match plate positions (A01-H12) that may sit next to dashes/underscores 
+# rather than relying on word boundaries 
+_WELL_RX = re.compile(r"(?i)(?<![A-Z0-9])([A-H](?:0?[1-9]|1[0-2]))(?![A-Z0-9])") 
 
 def mid_token_detector(name: str):
     """Detects primer tokens in the middle of a filename."""
