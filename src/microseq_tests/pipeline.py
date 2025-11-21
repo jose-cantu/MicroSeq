@@ -35,6 +35,7 @@ from microseq_tests.assembly.pairing import  (
         DETECTORS, DupPolicy, _extract_well, extract_sid_orientation, make_pattern_detector) 
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
+from microseq_tests.utility.utils import load_config, expand_db_path 
 from microseq_tests.post_blast_analysis import run as postblast_run
 
 __all__ = [
@@ -256,27 +257,28 @@ def _summarize_paired_candidates(
 
     counts: Counter[str] = Counter()
     sample_orients: dict[str, set[str]] = defaultdict(set)
-    unknown: list[str] = []
+    unknown: list[str] = [] 
     sid_wells: dict[str, set[str]] = defaultdict(set)
     missing_well: set[str] = set() 
 
-    for fp in sorted(directory.glob("*.fasta")):
-        sid, orient = extract_sid_orientation(fp.name, detectors=detectors)
-        well = _extract_well(fp.name, pattern=well_pattern) if enforce_same_well else None 
-        key = sid if not enforce_same_well else (well or sid) 
-        if orient in ("F", "R"):
-            counts[orient] += 1
-            sample_orients[key].add(orient)
-            if enforce_same_well:
-                if well:
-                    sid_wells[sid].add(orient)
-                else:
-                    missing_well.add(fp.name) 
-            continue
+    for suffix in ("*.fasta", "*.fastq", "*.ab1", "*.seq"):
+        for fp in sorted(directory.rglob(suffix)):
+            sid, orient = extract_sid_orientation(fp.name, detectors=detectors)
+            well = _extract_well(fp.name, pattern=well_pattern) if enforce_same_well else None
+            key = sid if not enforce_same_well else (well or sid)
+            if orient in ("F", "R"):
+                counts[orient] += 1
+                sample_orients[key].add(orient)
+                if enforce_same_well:
+                    if well:
+                        sid_wells[sid].add(orient)
+                    else:
+                        missing_well.add(fp.name)
+                continue
 
-        counts["unknown"] += 1
-        if len(unknown) < 5:
-            unknown.append(fp.name)
+            counts["unknown"] += 1
+            if len(unknown) < 5:
+                unknown.append(fp.name)
 
     missing = sorted(sid for sid, orients in sample_orients.items() if len(orients) == 1)
 

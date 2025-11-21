@@ -602,7 +602,7 @@ class MainWindow(QMainWindow):
         fwd_counter: collections.Counter[str] = collections.Counter()
         rev_counter: collections.Counter[str] = collections.Counter() 
 
-        for suffix in ("*.fasta", "*.fastq", "*.ab1"):
+        for suffix in ("*.fasta", "*.fastq", "*.ab1", "*seq"):
             for fp in sorted(directory.rglob(suffix)):
                 for tok in token_rx.findall(fp.name):
                     tok = tok.upper()
