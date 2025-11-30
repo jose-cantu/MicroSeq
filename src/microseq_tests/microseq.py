@@ -6,7 +6,7 @@ from microseq_tests.utility.progress import stage_bar
 from microseq_tests.utility.merge_hits import merge_hits 
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
-from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly)
+from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, _summarize_paired_candidates, _suggest_pairing_patterns)
 from microseq_tests.utility.utils import setup_logging, load_config
 from microseq_tests.assembly.pairing import DupPolicy 
 from microseq_tests.blast.run_blast import run_blast
@@ -78,7 +78,8 @@ def main() -> None:
     p_asm.add_argument("--fwd-pattern", default="27F|8F|515F|F", help="Regex pattern used to detect forward primer tokens in filenames (paired mode)")
     p_asm.add_argument("--rev-pattern", default="1492R|806R|926R|R", help="Regex pattern used to detect reverse primer tokens in filenames (paired mode)") 
     p_asm.add_argument("--enforce-well", action="store_true", help="Require forward/reverse reads to share a plate well code (A1-H12) before pairing")
-    p_asm.add_argument("--well-pattern", help="Optional custom regex to detect wells (default matches A1-H12)") 
+    p_asm.add_argument("--well-pattern", help="Optional custom regex to detect wells (default matches A1-H12)")
+    p_asm.add_argument("--preview-pairs", action="store_true", help="Summarizing pairing candidates instead of running paired assembly") 
 
     # blast 
     db_choices = list(cfg["databases"].keys())    # e.g. here ['gg2', 'silva', 'ncbi16s']
@@ -237,7 +238,22 @@ def main() -> None:
 
 
     elif args.cmd == "assembly":
+        if args.preview_pairs and args.mode != "paired":
+            ap.error("--preview-pairs requires --mode=paired")
         if args.mode == "paired":
+            if args.preview_pairs:
+                summary = _summarize_paired_candidates(
+                    pathlib.Path(args.input),
+                    args.fwd_pattern,
+                    args.rev_pattern,
+                    enforce_same_well=args.enforce_well,
+                    well_pattern=args.well_pattern,
+                ) 
+                suggestions = _suggest_pairing_patterns(pathlib.Path(args.input))
+                print(summary)
+                if suggestions: 
+                    print(suggestions)
+                return 
             run_paired_assembly(
                 args.input,
                 args.output,
