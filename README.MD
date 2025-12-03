@@ -39,7 +39,7 @@ You can also just select docs view and it will take you to the landing page for 
 MicroSeq began as an open-source replacement for the narrow slice of Geneious Prime we relied on turning raw Sanger chromatograms into taxonomically annotated sequences but has grown into the only FLOSS pipeline that goes from AB1 or FASTQ input to a BIOM/OTU table in one reproducible run.
 
 * **Dual input.** Accepts raw `.ab1` traces or demultiplexed FASTQ amplicons.
-* **Paired contig assembly (CAP3).** When forward/reverse files exist per sample, run `microseq assembly --mode paired` to auto-pair reads (and its customizable via arguments `--fwd-pattern`/`--rev-pattern`) and assemble contigs with CAP3 before BLAST. 
+* **Paired contig assembly (CAP3).** When forward/reverse files exist per sample, run `microseq assembly --mode paired` to auto-pair reads  (customizable via `--fwd-pattern` / `--rev-pattern`), enforce plate wells, pick duplicate policies (error/keep-first/keep-last/merge/keep-separate), and emit per-sample contigs + a `contig_map.tsv` manifest before BLAST. GUI support now includes primer presets, advanced regex entry, well enforcement, duplicate policies, and a pairing preview dialog box. 
 * **GreenGenes 2, SILVA, or NCBI one switch.** `--db gg2|silva|ncbi` works in both CLI and GUI; MicroSeq is currently the only tool that ships a GreenGenes 2–indexed classifier.
 * **Immediate downstream compatibility.** `microseq postblast` writes BLAST results directly to BIOM (or flat CSV) so the same file can feed QIIME‑2, phyloseq, or scikit‑bio without hand conversion.
 * **Bench-to-cluster consistency.** A single YAML config runs unchanged on a laptop or under Slurm; thread and memory limits are flags, not hard-coded paths.
@@ -433,7 +433,11 @@ microseq assembly --mode paired \
   --rev-pattern "1492R|806R|926R|R"
 ```
 
-The same paired logic is available in the end-to-end pipeline via `run_full_pipeline(..., mode="paired")`; GUI support will follow in a subsequent update.
+The same paired logic is available in the end-to-end pipeline via `run_full_pipeline(..., mode="paired")`; The GUI now supports single vs paired assembly, primer presets, advanced regex overrides, duplicate policy selection, well enforcement, and a pairing preview that summarizes detected primer tokens and missing mates/pairs before running CAP3. 
+
+** Paired assembly quick tutorial**
+
+Note: See the [Paired Cap3 Assembly Tutorial](docs/paired_assembly.md) for a full walkthrough and real-world scenarios (plate-based paired mode vs single-mode). 
 
 **How MicroSeq uses them**
 
