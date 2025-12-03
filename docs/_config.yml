@@ -4,7 +4,8 @@ description: "Tookit docs GUI & CLI"
 theme: minima 
 header_pages:
   - index.md
-  - gui_usage.md 
+  - gui_usage.md
+  - paired_assembly.md 
 
 
 
