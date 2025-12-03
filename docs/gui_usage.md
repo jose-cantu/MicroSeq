@@ -33,7 +33,7 @@ Well enformcement off              Requries A1-H12 plate well labeling so when e
 * Choose Fast(megablast) for routine Sanger reads; Comprehensive (blastn) for divergent amplicon reads. Note I do have it set up where if the coverage or percent ID doesn't reach 90% blastn will rerun instead given the nature of megablast algorithm.(Fast = NCBI Megablast large 28-bp word, tuned for ≥95 % identity hits between nearly identical Sanger traces; Comprehensive = standard blastn 11-bp word, slower but ∼5× more sensitive to <90 % identity or divergent/gapped matches; MicroSeq auto-falls back to blastn whenever the initial Megablast hit covers <90 % of the read or shows <90 % identity).
 * Primer token detection is available via the primer-set dropdown. Toggle **Advanced regex** when you want to enter explicit forward/reverse regex patterns instead of presets.
 * **Duplicate policy** lets you decide whether duplicate orientations error, keep first/last, merge, or keep separate (runs CAP3 per duplicate). The last selection is persisted between sessions.
-* **Enforce well codes** requires A1–H12 plate tokens in filenames; files with missing or mismatched wells are skipped but reported.
+* **Enforce well codes** requires A1-H12 plate tokens in filenames; files with missing or mismatched wells are skipped but reported.
 
 ## Execution What do the buttons do??
 
@@ -54,9 +54,9 @@ Think of the paired-assembly widgets as a control panel that flips a handful of 
 | Switch | Where to set it | Behaviour |
 | --- | --- | --- |
 | Assembly mode | **Assembly** dropdown (**Single** vs **Paired**) | Paired mode reveals primer/pairing controls and enables the **Preview pairs** flow; single mode hides them and runs CAP3 without pairing. |
-| Primer set preset | **Primer set** dropdown (e.g., `16S (27F/1492R)`, `ITS (ITS1/ITS4)`, `Custom`) | Prefills forward/reverse token fields and persists the choice via QSettings. Changing tokens by hand flips the preset to **Custom**. |
+| Primer set preset | **Primer set** dropdown (e.g., `16S (27F/1492R)`,`Custom`) | Prefills forward/reverse token fields and persists the choice via QSettings. Changing tokens by hand flips the preset to **Custom**. |
 | Token vs regex override | **Advanced regex** checkbox | Unchecked uses token fields (`27F, 515F` → `27F|515F`); checked exposes regex fields that bypass tokens entirely so you can enter expressions like `(?i)(27f|8f)` . |
-| Enforce same well | **Enforce well codes** checkbox | When enabled, pairing requires both directions to share the same plate position (A1–H12 by default). |
+| Enforce same well | **Enforce well codes** checkbox | When enabled, pairing requires both directions to share the same plate position (A1-H12 by default). |
 | Auto-detected vs manual tokens | **Detect tokens** button vs typing vs presets | Detection scans filenames for `F`/`R` tokens (e.g., `10__27F.ab1`) and fills the token fields; manual edits and presets drive pairing if you do not run detection. |
 
 ### Scenario 1 | preset primers, paired mode, quick preview
