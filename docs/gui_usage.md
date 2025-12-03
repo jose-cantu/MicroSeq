@@ -130,5 +130,41 @@ reverse_orientation_only_ab1_demo_run_microseq/
 * hits.tsv `microseq blast` output 
 * hits_tax.tsv This file has the taxonomy needed to interpret the blast results by adding the taxonomy column using `microseq add_taxonomy` 
 
+## Example of a Paired AB1 Run (full pipeline with CAP3 assembly)
 
+Below is a real paired-mode walkthrough using the demo data in `tests/paired_ab1_demo_run/`. It assumes filenames already encode primer tokens (e.g., `27F`/`1492R`) and plate wells, so the pairing preview finds mates without extra regex tweaks.
 
+1. Click **Browse...**, select the `tests/paired_ab1_demo_run/10292025_1080497/` folder (or any file inside it), and switch **Assembly** to **Paired**.
+2. Keep the preset **16S (27F/1492R)** tokens, leave **Enforce well codes** off (sample ID matching is enough here), and choose the **GG2** database.
+3. Click **Full pipeline**. MicroSeq will stage the AB1s, run QC/trim, pair and assemble with CAP3, then BLAST the contigs against GG2.
+
+Expected outputs are written to `tests/paired_ab1_demo_run/10292025_1080497_microseq/`:
+
+```
+10292025_1080497_microseq/
+├── raw_ab1/                 # copies of the original chromatograms
+├── raw_fastq/               # AB1→FASTQ before trimming
+├── qc/
+│   ├── *_avg_qual.txt       # per-read length and avg Phred
+│   ├── trim_summary.tsv     # combined QC metrics across reads
+│   ├── pairing_report.tsv   # which forward/reverse files paired (includes well codes if enforced)
+│   └── paired_fasta/        # per-read trimmed FASTA files before CAP3
+├── passed_qc_fastq/         # individual FASTQs that passed QC (per primer direction)
+├── failed_qc_fastq/         # any reads failing QC
+├── asm/
+│   ├── <sample_id>/
+│   │   ├── *_paired.fasta           # CAP3 contigs for that sample
+│   │   ├── *_paired.fasta.cap.*     # CAP3 provenance (contigs, qual, links, ace)
+│   │   └── *_paired.fasta.cap.singlets # reads that did not assemble into a contig
+│   ├── contig_map.tsv        # input→contig traceability (which FASTQ/FASTA formed each contig)
+│   └── paired_contigs.fasta  # all per-sample contigs concatenated
+├── hits.tsv                  # BLAST results on assembled contigs
+├── hits_tax.tsv              # taxonomy-joined results
+└── reads.fasta               # canonical FASTA of QC-passed reads (pre-assembly)
+```
+
+Key files to highlight in the GUI doc:
+
+* `qc/pairing_report.tsv` shows which forward/reverse files paired, along with any missing mates or well conflicts.
+* `asm/*_paired.fasta.cap.singlets` is expected from CAP3; it lists input reads that could not be merged into a contig at the overlap/identity thresholds.
+* `asm/contig_map.tsv` links each contig back to the input reads used, which is helpful when auditing assemblies or troubleshooting mismatched pairs.

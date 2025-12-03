@@ -101,5 +101,104 @@ Outputs include `results/plateA_cap3/<sample>/contig_map.tsv` plus CAP3 contigs 
 
 Single mode either does forward/reverse and simply runs CAP3 on the merged FASTA; use this when you know each file is already single-direction only.
 
-## Real World Example to Pilot and test run yourself 
+## Real World Example to Pilot and test run yourself
+
+### Paired assembly example in tests directory
+
+So using the CLI you can do the same thing that was done in the demo example of the GUI of the Full Pipeline run which will be done in four steps below. 
+This keeps outputs in the same `tests/paired_ab1_demo_run/10292025_1080497_microseq/` tree the GUI uses to keep it consistent. Note you can easily just put this in bash script if you wish just changed it for your purposes. I have preferences for using dup policy being error given the settings i have for it. 
+
+```bash
+# set paths first 
+# Here we will be input and output 
+INPUT=tests/paired_ab1_demo_run/10292025_1080497 
+OUTPUT=tests/paired_ab1_demo_run/10292025_1080497_microseq 
+
+# step 1) QC + Trim Sanger traces 
+microseq trim -i "$INPUT" --sanger --workdir "$OUT" 
+
+# Step 2) Pair + assembly with CAP3 
+microseq assembly --mode paired \
+   -i "$OUTPUT/qc/paired_fasta" \
+   -o "$OUTPUT/asm" 
+   --dup-policy error 
+
+# Step 3) Blast assembled contigs against Greengenes2 
+microseq blast -i "$OUTPUT/asm/paired_contigs.fasta" -d gg2 -o "$OUTPUT/hits.tsv"
+
+# Step 4) Join taxonomy 
+microseq add_taxonomy -i "$OUTPUT/hits.tsv" -d gg2 -o "$OUTPUT/hits_tax.tsv"
+```
+
+Notes:
+
+* Step 1 writes `qc/pairing_report.tsv`, per-read quality stats, and trimmed FASTAS. `--sanger` triggers AB1-> FASTQ path. 
+* Step 2 reuses the trimmed forward/reverse FASTAS under `qc/paired_fastas/` so CAP3 sees quality-filtered reads; from there adjust `dup-policy` if you need anther option based on your situation. 
+* Step 3/4 match the GUI's **Full Pipeline** path CAP3 -> BLAST -> Taxonony. I will reference using `microseq postblast` in a separate tutorial doc on how to use it and its uses cases. This is if you want a BIOM/CSV table from `hits_tax.tsv`.  
+
+For now I will also keep the single file mode example under here. I will reference it in a separate file just for the CLI at a certain point should I feel it necessary. 
+
+### Single mode ab1 example using the test directory dataset 
+
+For the single direction ab1 demo run using the CLI so cd to `tests/reverse_orientation_only_ab1_demo_run/`, the CLI sequence below mirors what is being run in the GUI when single mode full pipeline example is being used from the GUI tutorial. 
+
+```bash
+# set paths here 
+INPUT=tests/reverse_orientation_only_ab1_demo_run
+OUTPUT=tests/reverse_orientation_only_ab1_demo_run_microseq 
+
+# step 1) QC + trim Sanger traces 
+microseq trim -i "$INPUT" --sanger --workdir "$OUTPUT" 
+
+# step 2) Single Mode treat this as an optional step the best practice is to not use CAP3 for non paired reads..... I may remove this this the GUI version when single is used skips CAP3 altogether and is there as a highlighter only to understand they are using single orientation only. 
+microseq assembly --mode single \
+   -i "$OUTPUT/reads.fasta" \
+   -o "$OUTPUT/asm" 
+
+# step 3) Blast QC-passed reads 
+microseq blast -i "$OUTPUT/reads.fasta" -d gg2 -o "$OUTPUT/hits.tsv" 
+
+# Step 4) Join Taxonomy 
+microseq add_taxonomy -i "$OUTPUT/hits.tsv" -d gg2 -o "$OUTPUT/hits_tax.tsv"
+```
+
+Some Notes to consider:
+
+* Step 1 produces the same layout the GUI writes so you have `raw_ab1/`, `raw_fastq/`, `passed_qc_fastq/`, `failed_qc_fastq/`, `qc/trim_summary.tsv`, and `reads.fasta` (the canonical merged FASTA used by later steps). 
+* Step 2 is honestly optional at this point I don't bother using it in the GUI and go straight to readings my reads.fasta that's already QC-passed. So feel free to skips it.
+* Step 3 matches the GUI **Full Pipeline** for single mode (BLAST + Taxonomy on the QC passed reads) unless you chose CAP3 for whatever reason. 
+
+## Frequently Asked Questions 
+
+### What happens to forward/reverse reads in single mode? 
+
+`microseq assembly --mode single` skips the pairing detector entirely. Any reads you give it including mixed forward/reverse orientations are treated as independent sequences and passed stright to CAP3 as as single pool; so no `pairing_report.tsv` is emitted for example. If you need pairing orientation awareness matching then use the well and paired mode commands instead so MicroSeq can build explicit F/R pairs before assembly. 
+
+### How can I make sure that the files are auto-paired correctly? 
+
+MicroSeq buckets files by sample ID after stripping the primer tokens. With the default dectectors I have setup (or you can use the custom `--fwd-pattern/--rev-pattern`), names like `KD001_27F.*` and `KD001_1492R.*` form a pair because of the shared prefix `KD001` remains once the tokens are removed. In contrast, `KD001_27F*` and `KD004_1492R` stay separate because their prefixes differ. MicroSeq does not attempt to cross-numnber pairs its unreliable.
+
+Lets consider a mock scenario below:
+
+**Mock-Scenario For My Reader**
+
+* Forward reads: `KD001_27F`, `KD002_27F`, `KD003_27F`
+* Reverse reads: `KD004_1492R`, `KD005_1492R`, `KD006_1492R`
+
+These do not auto-pair because the prefixes (`KD001` vs `KD004`) don’t match. Rename to shared sample IDs (e.g., `KD001_27F` with `KD001_1492R`) so MicroSeq can align them. If your primer labels differ from the defaults, point `--fwd-pattern/--rev-pattern` at your tokens (for example, `--fwd-pattern "27F" --rev-pattern "1492R"`).
+
+**Primer token position examples (all auto-pair because the sample ID matches)** 
+
+* Primer in the middle: `KD001_27F_A01.ab1` ↔ `KD001_1492R_B01.ab1`
+* Primer in the front: `27F_KD001_A01.ab1` ↔ `1492R_KD001_B01.ab1` 
+* Primer in the end:   `KD001_A01_27F.ab1` ↔ `KD001_B01_1492R.ab1`
+
+The default detectors cover the front/middle/end placements; use custom regex if your primer token labeling differs. Remember all of this hinges on the shared sample ID which in this case is `KD001`.
+
+This means MicroSeq also strips well tokens (`A01-H12`) from sample IDs even when primer tokens sit at the front or end of the filename, so 27F_KD001_A01.ab1` and `KD001_B01_1492R.ab1` still resolve to the shared sample ID `KD001` with well enforcement turned off. 
+
+Well codes only influence pairing when `--enforce-well` is enabled: files must then share both the sample ID **and** the same plate position (e.g., `A01`). Leave well enforcement off when sample IDs are already unique and wells are irrelevant; turn it on for plate exports where cross-well swaps would be problematic. 
+
+
+
 

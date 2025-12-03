@@ -40,6 +40,8 @@ _SUFFIX_RX = re.compile(r"[_\-]([A-Za-z0-9]+[FR])\.[^.]+$", re.I)
 # Match plate positions (A01-H12) that may sit next to dashes/underscores 
 # rather than relying on word boundaries 
 _WELL_RX = re.compile(r"(?i)(?<![A-Z0-9])([A-H](?:0?[1-9]|1[0-2]))(?![A-Z0-9])") 
+# Match an isolated well token (A01-H12) when splitting on separators. 
+_WELL_TOKEN_RK = re.compile(r"(?i)^[A-H](?:0?[1-9]|1[0-2])$") 
 
 def mid_token_detector(name: str):
     """Detects primer tokens in the middle of a filename."""
@@ -136,7 +138,15 @@ def _extract_well(name: str, *, pattern: str | re.Pattern[str] | None = None) ->
         letter, num = raw[0].upper(), int(raw[1:])
         return f"{letter}{num:02d}"
 
-    return None 
+    return None
+
+def _strip_well_token(sid: str, *, pattern: re.Pattern[str] = _WELL_TOKEN_RK) -> str:
+    """Remove standalone well positions (A01-H12) from sample IDs when pairing.""" 
+
+    parts = re.split(r"[_-]+", sid)
+    kept = [p for p in parts if not pattern.fullmatch(p)] 
+    cleaned = "_".join(filter(None, kept))
+    return cleaned or sid 
 
 def _pair_key(sid: str, well: str | None, enforce_same_well: bool) -> str: 
     """Derive the key used to bucket forward/reverse reads."""
@@ -259,7 +269,9 @@ def group_pairs(
 
         for record in SeqIO.parse(path, "fasta"):
             sid, orient, det_name = _detect_sid_orientation(record.id, active_detectors) 
-            if orient not in ("F", "R"):
+            if orient in ("F", "R") and not enforce_same_well:
+                sid = _strip_well_token(sid)
+            if orient not in ("F", "R"): 
                 continue
             # if well is missing doc it 
             well = _extract_well(record.id, pattern=well_rx) if enforce_same_well else None 
@@ -284,6 +296,8 @@ def group_pairs(
 
             # Get the sample ID and orientation ('F', 'R', or None)
             sid, orient, det_name = _detect_sid_orientation(p.name, detectors=active_detectors)
+            if orient in ("F", "R") and not enforce_same_well:
+                sid = _strip_well_token(sid)
 
             # If no valid orientation was found, skip to the next file.
             if orient not in ("F", "R"):
