@@ -30,3 +30,4 @@ dependencies:
   - trimmomatic    # adds trimmomatic to $CONDA_PREFIX/bin  
   - blast          # installs blastn, makeblastdb, etc. 
   - cap3           # assembler tool used here for sanger seq files  
+  - vsearch        # open-source clustering/denoising and chimera check replicate collapse helper (GPLv3 binary) 

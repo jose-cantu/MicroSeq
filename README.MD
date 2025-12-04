@@ -57,6 +57,7 @@ In short: MicroSeq is the only open-source package that ingests raw Sanger or FA
   * AB1 → FASTQ (`microseq ab1-to-fastq`)
   * FASTQ QC (Phred, length, adapters) with Trimmomatic / BioPython (`microseq trim`).
 * **De‑novo assembly** using *CAP3* (`microseq assembly`).
+* **Chimera/replicate collapse** via vsearch {Planned will release and update once this feature is fully finished}. Clustering/centroid is better done via vsearch before/after CAP3 depending on whether you are collapsing technical replicates or creating cross sample OTUs. 
 * **Taxonomic classification**
 
   * BLAST+ search (**FASTA** or **FASTQ** input) (`microseq blast`)
@@ -482,6 +483,7 @@ Bug reports & feature requests are welcome! Please open an issue first to discus
 
 *Code* is released under the MIT License (see `LICENSES/MIT.txt`).
 The GUI bundles PySide6 / Qt 6, licensed under LGPL v3 (see `LICENSES/Qt_LGPLv3.txt`).
+The Conda environment downloads `vsearch`, distributed under GPL v3 (see `LICENSES/VSEARCH_GPLv3.txt`; source: https://github.com/torognes/vsearch). Redistributing a MicroSeq environment or installer that bundles the `vsearch` binary must comply with the GPL.
 
 If you use MicroSeq in a publication, please cite me! =) 
 
