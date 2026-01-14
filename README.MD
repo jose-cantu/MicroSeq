@@ -75,10 +75,8 @@ In short: MicroSeq is the only open-source package that ingests raw Sanger or FA
   **Full pipeline** buttons to execute the entire workflow (trim -> BLAST ->
   taxonomy -> optional BIOM generation) with a single click.
 
-> Note: Expected errors (EE/MEE) are reported as telemetry for long Sanger reads and should be interpreted in a length-aware way. Prefer EE per kb (avg_mee_per_kb) and the d> erived Phred-equivalent score (qeff) as QC flags rather than strict hard gates. As a starting heuristic, consider reviewing/inspecting traces (and possibly resequencing) w> hen avg_mee_per_kb is > 5 after trimming, especially if species-level BLAST calls are near your identity cutoff or the top-hit margin is small.
-> You can also enforce retention with `--min-reads-kept` on `microseq trim`
-> to fail files that lose too many reads during QC.
-> MicroSeq now assigns a `mee_qc_label` based on avg_mee_per_kb: `clean` (≤2), `watch` (2–5), and `review` (>5).
+> Note: Expected errors (EE/MEE) are reported as telemetry for long Sanger reads and should be interpreted in a length-aware way. Prefer EE per kb (avg_mee_per_kb) and the derived Phred-equivalent score (qeff) as QC flags rather than strict hard gates. As a starting heuristic, consider reviewing/inspecting traces (and possibly resequencing) w hen avg_mee_per_kb is > 5 after trimming, especially if species-level BLAST calls are near your identity cutoff or the top-hit margin is small.
+> MicroSeq now assigns a `mee_qc_label` based on avg_mee_per_kb: `clean` (≤2), `watch` (2–5), and `review` (>5). This is simply meant as an extra QC heuristic only. Extra details in how this is used is in the docs. 
 
 Approximate mapping between mean Phred (or qeff) and EE per kb (length-normalized):
 
