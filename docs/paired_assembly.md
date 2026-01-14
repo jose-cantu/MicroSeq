@@ -132,7 +132,7 @@ microseq add_taxonomy -i "$OUTPUT/hits.tsv" -d gg2 -o "$OUTPUT/hits_tax.tsv"
 
 Notes:
 
-* Step 1 writes `qc/pairing_report.tsv`, per-read quality stats, and trimmed FASTAS. `--sanger` triggers AB1-> FASTQ path. 
+* Step 1 writes `qc/pairing_report.tsv`, per-read quality stats, length, avg Phred, MEE, and trimmed FASTAS. `--sanger` triggers AB1-> FASTQ path. 
 * Step 2 reuses the trimmed forward/reverse FASTAS under `qc/paired_fastas/` so CAP3 sees quality-filtered reads; from there adjust `dup-policy` if you need anther option based on your situation. 
 * Step 3/4 match the GUI's **Full Pipeline** path CAP3 -> BLAST -> Taxonony. I will reference using `microseq postblast` in a separate tutorial doc on how to use it and its uses cases. This is if you want a BIOM/CSV table from `hits_tax.tsv`.  
 
@@ -164,7 +164,7 @@ microseq add_taxonomy -i "$OUTPUT/hits.tsv" -d gg2 -o "$OUTPUT/hits_tax.tsv"
 
 Some Notes to consider:
 
-* Step 1 produces the same layout the GUI writes so you have `raw_ab1/`, `raw_fastq/`, `passed_qc_fastq/`, `failed_qc_fastq/`, `qc/trim_summary.tsv`, and `reads.fasta` (the canonical merged FASTA used by later steps). 
+* Step 1 produces the same layout the GUI writes so you have `raw_ab1/`, `raw_fastq/`, `passed_qc_fastq/`, `failed_qc_fastq/`, `qc/trim_summary.tsv`, which now includes avg MEE, avg MEE per kb, and qeff/label summaries, and `reads.fasta` (the canonical merged FASTA used by later steps). 
 * Step 2 is honestly optional at this point I don't bother using it in the GUI and go straight to readings my reads.fasta that's already QC-passed. So feel free to skips it.
 * Step 3 matches the GUI **Full Pipeline** for single mode (BLAST + Taxonomy on the QC passed reads) unless you chose CAP3 for whatever reason. 
 

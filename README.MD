@@ -54,8 +54,8 @@ In short: MicroSeq is the only open-source package that ingests raw Sanger or FA
 * **One‑liner installer** (`microseq‑setup`) – downloads & indexes **Greengenes 2**, **SILVA 138.1**, and **NCBI 16S** databases; writes a ready‑to‑go `config.yaml` and shell exports.
 * **Quality‑control & trimming**
 
-  * AB1 → FASTQ (`microseq ab1-to-fastq`)
-  * FASTQ QC (Phred, length, adapters) with Trimmomatic / BioPython (`microseq trim`).
+  * AB1 -> FASTQ (`microseq ab1-to-fastq`)
+  * FASTQ QC (Phred, length, expected errors, adapters) with Trimmomatic / BioPython (`microseq trim`).
 * **De‑novo assembly** using *CAP3* (`microseq assembly`).
 * **Chimera/replicate collapse** via vsearch {Planned will release and update once this feature is fully finished}. Clustering/centroid is better done via vsearch before/after CAP3 depending on whether you are collapsing technical replicates or creating cross sample OTUs. 
 * **Taxonomic classification**
@@ -71,9 +71,23 @@ In short: MicroSeq is the only open-source package that ingests raw Sanger or FA
 * **Portable**  – pure‑Python (≥3.10) + external binaries already in Conda env (BLAST+, TaxonKit, CAP3).
 * **GUI preview** (`microseq-gui`) – drag‑and‑drop queue, live log pane, progress
   bar with ETA.  Running QC or the full pipeline now writes
-  `qc/trim_summary.tsv` automatically. The window provides **Run QC** and
-  **Full pipeline** buttons to execute the entire workflow (trim → BLAST →
-  taxonomy → optional BIOM generation) with a single click.
+  `qc/trim_summary.tsv` automatically. It includes avg Phred, avg expected errors, and avg MEE per kb, and qeff/label summaries. The window provides **Run QC** and
+  **Full pipeline** buttons to execute the entire workflow (trim -> BLAST ->
+  taxonomy -> optional BIOM generation) with a single click.
+
+> Note: Expected errors (EE/MEE) are reported as telemetry for long Sanger reads and should be interpreted in a length-aware way. Prefer EE per kb (avg_mee_per_kb) and the d> erived Phred-equivalent score (qeff) as QC flags rather than strict hard gates. As a starting heuristic, consider reviewing/inspecting traces (and possibly resequencing) w> hen avg_mee_per_kb is > 5 after trimming, especially if species-level BLAST calls are near your identity cutoff or the top-hit margin is small.
+> You can also enforce retention with `--min-reads-kept` on `microseq trim`
+> to fail files that lose too many reads during QC.
+> MicroSeq now assigns a `mee_qc_label` based on avg_mee_per_kb: `clean` (≤2), `watch` (2–5), and `review` (>5).
+
+Approximate mapping between mean Phred (or qeff) and EE per kb (length-normalized):
+
+| Mean Q | EE per kb (approx) |
+| --- | --- |
+| 30 | 1 |
+| 27 | 2 |
+| 23 | 5 |
+| 20 |10 | 
 
 ---
 
@@ -357,7 +371,7 @@ This step also writes `<output>_blast_provenance.csv`, `<output>_taxonomy_only.c
 | **First‑time setup on a fresh laptop**                                                  | `git clone … && conda env create … && conda activate MicroSeq && pip install -e . && microseq-setup --quiet` |
 | **Update to the latest patch or new feature**          | `git pull && pip install -e .` |
 | **Convert ABI traces + QC + assemble + classify**                                       | See AB1 trace workflow in Examples.                                                                                       |
-| **Optimise BLAST cut‑offs for 96‑well plate**   **Keep in mind, these are estimates!**  | `microseq blast --relaxed --export-sweeper … → microseq suggest-cutoffs … 530 → microseq filter-hits`                     |
+| **Optimise BLAST cut‑offs for 96‑well plate**   **Keep in mind, these are estimates!**  | `microseq blast --relaxed --export-sweeper … -> microseq suggest-cutoffs … 530 -> microseq filter-hits`                     |
 | **Batch merge hits from three runs**                                                    | `microseq merge-hits -i run*/blast/hits.tsv -o merged.tsv`                                                                |
 | **HPC Slurm job**                                                                       | Pre‑export `MICROSEQ_LOG_DIR=$SCRATCH/logs` and `MICROSEQ_SESSION_ID=$SLURM_JOB_ID`; use `--workdir $SLURM_TMPDIR` in each step.                                 |
 
@@ -404,7 +418,7 @@ microseq postblast    -b hits_tax.tsv -m meta.tsv -o results.biom --json \
 | Mode              | Trigger                                                                     | Toolchain                                               | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------------- | --------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **General FASTQ** | input is `.fastq` and `--no-sanger` *(default)*                             | **Trimmomatic SE** (`SLIDINGWINDOW:5:20`, `MINLEN:200`) | Reads whose 5‑bp window drops below Q20 or end < 200 bp are discarded; survivors go to `workdir/qc/trimmed.fastq`.                                                                                                                                                                                                                                                                                                                                                    |
-| **Sanger traces** | one or more `.ab1` chromatograms **or** any FASTQ processed with `--sanger` | **BioPython + MicroSeq**                                | 1. **AB1 → FASTQ** (`ab1_to_fastq.py`) – one FASTQ per trace.<br>2. **Dynamic sliding‑window trim** (5 bp window, Q ≥ 20) per read.<br>3. Per‑read Phred, length & per‑file averages → `*_avg_qual.txt`.<br>4. File passes if avg Q ≥ 20 → `passed_qc_fastq/`; otherwise goes to `failed_qc_fastq/` with its stats.<br>5. Combined TSV summarises file‑level metrics.<br>6. **Passed FASTQs merged** into `workdir/qc/trimmed.fasta` for downstream assembly & BLAST. |
+| **Sanger traces** | one or more `.ab1` chromatograms **or** any FASTQ processed with `--sanger` | **BioPython + MicroSeq**                                | 1. **AB1 -> FASTQ** (`ab1_to_fastq.py`) – one FASTQ per trace.<br>2. **Dynamic sliding‑window trim** (5 bp window, Q ≥ 20) per read.<br>3. Per‑read Phred, length & per‑file averages -> `*_avg_qual.txt`.<br>4. File passes if avg Q ≥ 20 -> `passed_qc_fastq/`; otherwise goes to `failed_qc_fastq/` with its stats.<br>5. Combined TSV summarises file‑level metrics.<br>6. **Passed FASTQs merged** into `workdir/qc/trimmed.fasta` for downstream assembly & BLAST. |
 
 *Why two paths?* AB1 chromatograms carry single‑end Sanger qualities that behave differently from generic FASTQ scores; the lightweight BioPython route avoids over‑trimming while still filtering low‑quality tails.
 
@@ -442,7 +456,7 @@ Note: See the [Paired Cap3 Assembly Tutorial](docs/paired_assembly.md) for a ful
 
 **How MicroSeq uses them**
 
-1. Copies `*.contigs` → `asm/contigs.fasta` for downstream BLAST. `*.singlets` remain in `workdir/asm/` should you wish to analyse them separately.
+1. Copies `*.contigs` -> `asm/contigs.fasta` for downstream BLAST. `*.singlets` remain in `workdir/asm/` should you wish to analyse them separately.
 2. Parses `*.info` to log assembly statistics (number of contigs, N50, max length).
 3. Leaves all original CAP3 files in `workdir/asm/` so you can inspect quality or visualise in external tools.
 

@@ -6,7 +6,7 @@ from Bio import SeqIO
 import logging 
 from importlib import import_module
 
-from microseq_tests.trimming.expected_errors import expected_errors  
+from microseq_tests.trimming.expected_errors import expected_errors, qeff_from_mee_per_kb 
 
 L = logging.getLogger(__name__)
 
@@ -92,12 +92,6 @@ def _trim_all(
                 continue
             ph = trimmed.letter_annotations["phred_quality"]
             mee = expected_errors(ph)
-            if mee_min_len is not None and len(trimmed) < mee_min_len:
-                dropped += 1 
-                continue 
-            if mee_max is not None and mee > mee_max:
-                dropped_mee += 1
-                continue 
             reads += 1
             bases += len(trimmed)
             qsum  += sum(ph)
@@ -107,10 +101,9 @@ def _trim_all(
         avg_q   = qsum  / bases if bases else 0
         avg_len = bases / reads if reads else 0
         avg_mee = mee_sum / reads if reads else 0 
-        dropped_total = dropped_len + dropped_mee 
-        drop_fraction = (
-            dropped_total / (dropped_total + reads) if (dropped_total + reads) else 0 
-        ) 
+        avg_mee_per_kb = (1000 * mee_sum / bases) if bases else 0 
+        avg_qeff = qeff_from_mee_per_kb(avg_mee_per_kb)
+        mee_qc_label = _mee_qc_label(avg_mee_per_kb)
         
         # per-read stats
         with open(stats_path, "w") as fh:
@@ -120,13 +113,7 @@ def _trim_all(
                 fh.write(f"{r.id}\t{len(r)}\t{sum(ph)/len(ph):.2f}\t{mee:.3f}\n")
                 
         # pass / fail per file
-        fails_retention = False 
-        if min_reads_kept is not None and reads < min_reads_kept: 
-            fails_retention = True 
-        if max_drop_fraction is not None and drop_fraction > max_drop_fraction:
-            fails_retention = True 
-
-        if avg_q < file_q_threshold or fails_retention: 
+        if avg_q < file_q_threshold: 
             (failed_dir / fq.name).write_bytes(fq.read_bytes())
             (failed_dir / stats_path.name).write_bytes(stats_path.read_bytes())
             L.info("[FAIL] %s  (avgQ %.2f)", fq.name, avg_q)
@@ -135,7 +122,7 @@ def _trim_all(
             L.info("[PASS] %s -> %s (avgQ %.2f)", fq.name, trimmed_path, avg_q)
             if comb:
                 comb.write(f"{fq.name}\t{reads}\t{avg_len:.1f}\t{avg_q:.2f}\t{avg_mee:.3f}\t"
-                f"{dropped_len}\t{dropped_mee}\n" 
+                f"{avg_mee_per_kb:.3f}\t{avg_qeff:.2f}\t{mee_qc_label}\n" 
             )
                 
         _tick_safe(bar) # exactly one tick per FASTQ  
@@ -182,7 +169,7 @@ def trim_folder(
     if combined_tsv:
         comb = open(combined_tsv, "a")
         if comb.tell() == 0:                   # new file -> header
-            comb.write("file\treads\tavg_len\tavg_q\tavg_mee\tdropped_len\tdropped_mee\n")
+            comb.write("file\treads\tavg_len\tavg_q\tavg_mee\tavg_mee_per_kb\tavg_qeff\tmee_qc_label\n")
             
     fastqs = sorted(input_dir.glob("*.fastq"))
     
@@ -223,4 +210,11 @@ def trim_folder(
             bar.close()
             
     if comb:
-        comb.close() 
+        comb.close()
+
+def _mee_qc_label(avg_mee_per_kb: float) -> str:
+    if avg_mee_per_kb <= 2:
+        return "clean"
+    if avg_mee_per_kb <= 5:
+        return "watch"
+    return "review"

@@ -110,7 +110,7 @@ reverse_orientation_only_ab1_demo_run_microseq/
 ├── failed_qc_fastq/
 ├── qc/
 │   ├── *_avg_qual.txt    # Individual output metric avg Q for each sequence 
-│   ├── trim_summary.tsv  # Summary output metrics for avg Q for each file combined
+│   ├── trim_summary.tsv  # Summary output metrics for avg Q, avg MEE, dropped len/MEE for each file combined
 │   └── trimmed.fasta     # Placed here for providence - same file as reads.fasta
 ├── reads.fasta           # merged QC-passed reads
 ├── hits.tsv              # BLAST results
@@ -121,14 +121,58 @@ reverse_orientation_only_ab1_demo_run_microseq/
 * raw_ab1/ inputs retained for provenance (copies of original ab1 files) will include option to symlink later. 
 * raw_fastq/ FASTQ files produced from the ab1 files before trimming 
 * qc/ per-read stats and trimmed FASTA quality‑control summary files:
-  - *_avg_qual.txt is the per‑read length and Phred averages.
-  - trim_summary.tsv is the combined metrics for all files.
+  - *_avg_qual.txt is the per‑read length, Phred average, and expected error (MEE) value.
+  - trim_summary.tsv is the combined metrics for all files, including ave MEE, avg MEE per kb, and qeff/label summaries.
   - trimmed.fasta is the final FASTA used for assembly or BLAST that you can manually hand off to NCBI website for example.
+  - MEE is reported as telemetry; for long Sanger reads use avg MEE per kb as a length‑aware signal (e.g., flag samples when avg_mee_per_kb > 5–10 after trimming). 
+  - CLI users can enforce retention with `--min-reads-kept` to fail files that lose too many reads during QC. 
 * passed_qc_fastq/ quality filter outcome with default at (≥ Q20); these are individual FASTQ files that passed that metric. 
 * failed_qc_fastq/ quality filter outcome with default at (≥ Q20); these are individual files that failed that metric whose average quality was below the threshold. 
 * reads.fasta the merged FASTA of all QC‑passed reads (made from passed_qc_fastq/). Created during the pipeline when FASTQs are converted to a single FASTA that is used for blasting by MicroSeq. 
 * hits.tsv `microseq blast` output 
-* hits_tax.tsv This file has the taxonomy needed to interpret the blast results by adding the taxonomy column using `microseq add_taxonomy` 
+* hits_tax.tsv This file has the taxonomy needed to interpret the blast results by adding the taxonomy column using `microseq add_taxonomy`
+
+# Understanding EE/kb + qeff in MicroSeq
+
+MicroSeq trims reads first (sliding‑window or Trimmomatic), and MEE is reported as telemetry rather than a default hard filter.
+
+### What MicroSeq reports
+
+`trim_summary.tsv` includes:
+
+* `avg_mee`: expected errors per read.
+* `avg_mee_per_kb`: length‑weighted expected errors per kb (EE/kb), computed as `1000 * (Σ EE_i) / (Σ L_i)` on trimmed reads (not the mean of per‑read EE/kb values).
+* `avg_qeff`: Phred‑equivalent derived from the file‑level EE/kb value (`avg_qeff = 30 - 10 log10(avg_mee_per_kb)`).
+* `mee_qc_label`: summary label derived from avg_mee_per_kb (`clean` ≤ 2, `watch` 2–5, `review` > 5).
+
+### Why EE/kb is useful for Sanger reads
+
+A fixed maxEE (like DADA2 defaults) is tuned for short Illumina reads and can be too strict for long Sanger reads. EE/kb normalizes by length so you can compare reads fairly.
+
+EE/kb also catches localized low‑quality segments that an average‑Q can hide because it sums error probabilities on a linear scale. EE/kb and qeff are computed on trimmed reads.
+
+### How MicroSeq computes these metrics
+
+```
+EE = Σ 10^(-Qi/10)
+EE/kb = 1000 * EE / L
+qeff = 30 - 10 * log10(EE/kb)
+```
+
+### Practical guidance (telemetry, not default gating)
+
+* `avg_mee_per_kb ≤ 2` (mee_qc_label = clean): very clean.
+* `2–5` (mee_qc_label = watch): usable, but watch species‑level calls.
+* `>5` (mee_qc_label = review): consider resequencing or inspecting the trace.
+* If avg_mee_per_kb > 5 (≈ qeff < 23), treat species‑level calls as suspect when top‑hit identity margins are small.
+
+Use MEE as a diagnostic flag for long Sanger reads
+
+### How this uses Phred and Sanger trace quality
+
+Each Sanger base call already has a Phred quality score derived from the trace; MicroSeq converts those Phred values to error probabilities (`10^(-Q/10)`), sums them across the trimmed read (EE), and normalizes by length (EE/kb). That means the metric is directly grounded in the Sanger trace quality, and the length normalization keeps long reads from being penalized just for being long.
+
+
 
 ## Example of a Paired AB1 Run (full pipeline with CAP3 assembly)
 
@@ -146,7 +190,7 @@ Expected outputs are written to `tests/paired_ab1_demo_run/10292025_1080497_micr
 ├── raw_fastq/               # AB1→FASTQ before trimming
 ├── qc/
 │   ├── *_avg_qual.txt       # per-read length and avg Phred
-│   ├── trim_summary.tsv     # combined QC metrics across reads
+│   ├── trim_summary.tsv     # combined QC metrics across reads (avg MEE, EE/kb, qeff, labels)
 │   ├── pairing_report.tsv   # which forward/reverse files paired (includes well codes if enforced)
 │   └── paired_fasta/        # per-read trimmed FASTA files before CAP3
 ├── passed_qc_fastq/         # individual FASTQs that passed QC (per primer direction)

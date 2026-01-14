@@ -10,6 +10,8 @@ from Bio import SeqIO
 import shutil 
 
 from microseq_tests.utility.utils import load_config, setup_logging 
+from microseq_tests.trimming.expected_errors import expected_errors, qeff_from_mee_per_kb 
+from microseq_tests.trimming.biopy_trim import _mee_qc_label 
 
 L = logging.getLogger(__name__)
 
@@ -56,21 +58,29 @@ def _looks_like_fastq(fp: Path) -> bool:
     suffixes = {s.lower() for s in fp.suffixes}
     return ".fastq" in suffixes or ".fq" in suffixes 
 
-def _fastq_stats(path: Path) -> tuple[int, float, float]:
+def _fastq_stats(path: Path) -> tuple[int, float, float, float, float, float, str]:
     """
     Stream a trimmed FASTQ and compute basic QC metrics:
-        returns (reads, avg_len, avg_q), where avg_q is the base-wise mean Phred (Phred+33) 
+        returns (reads, avg_len, avg_q, avg_mee), where avg_q is the base-wise mean Phred (Phred+33) 
     """
     reads = bases = qsum = 0 
+    mee_sum = 0.0 
     for rec in SeqIO.parse(path, "fastq"):
 
         ph = rec.letter_annotations["phred_quality"]
         reads += 1 
         bases += len(rec) 
-        qsum += sum(ph) 
+        qsum += sum(ph)
+        mee = expected_errors(ph)
+        mee_sum += mee 
     avg_q = qsum / bases if bases else 0 
     avg_len = bases / reads if reads else 0 
-    return reads, avg_len, avg_q  
+    avg_mee = mee_sum / reads if reads else 0 
+    avg_mee_per_kb = (1000 * mee_sum / bases) if bases else 0 
+    avg_qeff = qeff_from_mee_per_kb(avg_mee_per_kb) 
+    mee_qc_label = _mee_qc_label(avg_mee_per_kb) 
+    return reads, avg_len, avg_q, avg_mee, avg_mee_per_kb, avg_qeff, mee_qc_label 
+     
 
 def _iter_fastq_sources(path: Path) -> Iterable[Path]:
     """
@@ -113,7 +123,7 @@ def trim_fastq_inputs(input_path: PathLike, trim_dir: PathLike, *, summary_tsv: 
         out_fq.unlink() 
 
     # Initialze a list to hold summary stats for each processed file 
-    summary_rows : list[tuple[str, int, float, float]] = [] 
+    summary_rows : list[tuple[str, int, float, float, float, float, str]] = [] 
 
     # Iterate over FASTQ file found 
     for src in sources:
@@ -122,10 +132,10 @@ def trim_fastq_inputs(input_path: PathLike, trim_dir: PathLike, *, summary_tsv: 
         # Run acutaly trimming using Trimmomatic tool 
         trimmed = quality_trim(src, tmp_out) 
 
-        # If user requested a summary report, calculate stats for trimmed data 
-        if summary_tsv: 
-            reads, avg_len, avg_q = _fastq_stats(trimmed) 
-            summary_rows.append((src.name, reads, avg_len, avg_q))
+        # If user requested a summary report, calculate stats for trimmed data
+        reads, avg_len, avg_q, avg_mee, avg_mee_per_kb, avg_qeff, mee_qc_label = _fastq_stats(trimmed)
+        if summary_tsv:  
+            summary_rows.append((src.name, reads, avg_len, avg_q, avg_mee, avg_mee_per_kb, avg_qeff, mee_qc_label))
 
         # Append contents of the temporary trimmed file to the final combined output file 
         # 'ab' mode opens the combined file for appending in binary mode 
@@ -147,21 +157,31 @@ def trim_fastq_inputs(input_path: PathLike, trim_dir: PathLike, *, summary_tsv: 
         write_header = not summary_fp.exists()
 
         # For global avg sum handling
-        total_reads = sum(reads for _, reads, _, _ in summary_rows) 
-        total_bases = sum(reads * avg_len for _, reads, avg_len, _ in summary_rows)
-        total_qsum = sum(avg_q * reads * avg_len for _, reads, avg_len, avg_q in summary_rows) 
+        total_reads = sum(reads for _, reads, _, _, _, _, _, _ in summary_rows) 
+        total_bases = sum(reads * avg_len for _, reads, avg_len, _, _, _, _, _ in summary_rows) 
+        total_qsum = sum(avg_q * reads * avg_len for _, reads, avg_len, avg_q, _, _, _, _ in summary_rows)
+        total_mee_sum = sum(avg_mee * reads for _, reads, _, _, avg_mee, _, _, _ in summary_rows)
         combined_avg_len = total_bases / total_reads if total_reads else 0 
         combined_avg_q = total_qsum / total_bases if total_bases else 0 
+        combined_avg_mee = total_mee_sum / total_reads if total_reads else 0 
+        combined_avg_mee_per_kb = (1000 * total_mee_sum / total_bases) if total_bases else 0 
+        combined_avg_qeff = qeff_from_mee_per_kb(combined_avg_mee_per_kb) 
+        combined_mee_qc_label = _mee_qc_label(combined_avg_mee_per_kb)
 
         # Open summary file in append mode 
         with open(summary_fp, "a") as comb:
             if write_header:
-                comb.write("file\treads\tavg_len\tavg_q\n")
+                comb.write("file\treads\tavg_len\tavg_q\tavg_mee\tavg_mee_per_kb\tavg_qeff\tmee_qc_label\n")
             # Write each row of collected stats to the TSV file 
-            for name, reads, avg_len, avg_q in summary_rows:
-                comb.write(f"{name}\t{reads}\t{avg_len:.1f}\t{avg_q:.2f}\n")
+            for name, reads, avg_len, avg_q, avg_mee, avg_mee_per_kb, avg_qeff, mee_qc_label in summary_rows:
+                comb.write(f"{name}\t{reads}\t{avg_len:.1f}\t{avg_q:.2f}\t{avg_mee:.3f}\t"
+                           f"{avg_mee_per_kb:.3f}\t{avg_qeff:.2f}\t{mee_qc_label}\n"
+                )
             comb.write(
-                f"_combined\t{total_reads}\t{combined_avg_len:.1f}\t{combined_avg_q:.2f}\n")
+                f"_combined\t{total_reads}\t{combined_avg_len:.1f}\t{combined_avg_q:.2f}\t"
+                f"{combined_avg_mee:.3f}\t{combined_avg_mee_per_kb:.3f}\t{combined_avg_qeff:.2f}\t" 
+                f"{combined_mee_qc_label}\n"
+            )
     return out_fq 
 
 def main():

@@ -62,6 +62,8 @@ def run_trim(
     *,
     summary_tsv: PathLike | None = None,
     link_raw: bool = False,
+    mee_max: float | None = None,
+    mee_min_len: int | None = None, 
 
 ) -> int:
     """Trim reads and convert if needed.
@@ -107,7 +109,7 @@ def run_trim(
         trim_fastq_inputs(input_path, trim_dir, summary_tsv=summary_tsv) 
 
     fastq_to_fasta(trim_dir, work / "qc" / "trimmed.fasta")
-    L.info("Trim finished → %s", work / "qc" / "trimmed.fasta")
+    L.info("Trim finished -> %s", work / "qc" / "trimmed.fasta")
     return 0
 
 
@@ -386,10 +388,12 @@ def run_full_pipeline(
     well_pattern: str | re.Pattern[str] | None = None, 
     metadata: Path | None = None,
     summary_tsv: Path | None = None,
+    mee_max: float | None = None,
+    mee_min_len: int | None = None, 
     on_stage=None,
     on_progress=None,
 ) -> dict[str, Path]:
-    """Run trim → FASTA merge → BLAST → taxonomy (+ optional post‑BLAST).
+    """Run trim -> FASTA merge -> BLAST -> taxonomy (+ optional post‑BLAST).
 
     infile may be FASTA, FASTQ, a single ``.ab1`` trace, or a directory of
     ``.ab1`` files.  Sanger mode is triggered automatically when *infile* is a
@@ -470,7 +474,7 @@ def run_full_pipeline(
         assembly_input = infile
         if not is_fasta:
             on_stage("Trim")
-            run_trim(infile, out_dir, sanger=True, summary_tsv=summary_tsv)
+            run_trim(infile, out_dir, sanger=True, summary_tsv=summary_tsv,)
             if thr and thr.isInterruptionRequested():
                 raise RuntimeError("Cancelled")
             pct += step
@@ -530,7 +534,7 @@ def run_full_pipeline(
         on_stage("Trim")
 
         sanger = infile.is_dir() or infile.suffix.lower() == ".ab1"
-        run_trim(infile, out_dir, sanger=sanger, summary_tsv=summary_tsv)
+        run_trim(infile, out_dir, sanger=sanger, summary_tsv=summary_tsv,)
 
         pct += step
         on_progress(pct)
@@ -613,7 +617,7 @@ def run_full_pipeline(
     return paths
 
 
-# ───────────────────────────────────────────────────────── AB1 → FASTQ
+# ───────────────────────────────────────────────────────── AB1 -> FASTQ
 def run_ab1_to_fastq(
     input_dir: PathLike,
     output_dir: PathLike,
@@ -628,14 +632,14 @@ def run_ab1_to_fastq(
         written: Sequence[Path] = ab1_to_fastq(
             input_dir, output_dir, overwrite=overwrite
         )
-        L.info("AB1→FASTQ wrote %d files to %s", len(written), output_dir)
+        L.info("AB1->FASTQ wrote %d files to %s", len(written), output_dir)
         return 0
     except Exception:
-        L.exception("AB1→FASTQ failed")
+        L.exception("AB1->FASTQ failed")
         return 1
 
 
-# ───────────────────────────────────────────────────────── FASTQ → FASTA
+# ───────────────────────────────────────────────────────── FASTQ -> FASTA
 def run_fastq_to_fasta(
     input_dir: PathLike,
     output_fasta: PathLike,
@@ -645,8 +649,8 @@ def run_fastq_to_fasta(
     """
     try:
         out = fastq_to_fasta(input_dir, output_fasta)
-        L.info("FASTQ→FASTA wrote %s", out)
+        L.info("FASTQ->FASTA wrote %s", out)
         return 0
     except Exception:
-        L.exception("FASTQ→FASTA failed")
+        L.exception("FASTQ->FASTA failed")
         return 1

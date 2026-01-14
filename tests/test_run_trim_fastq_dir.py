@@ -66,14 +66,14 @@ def test_trim_fastq_inputs_directory_fastq(monkeypatch, tmp_path):
 
     # Summary rows per source file plus combined aggregate with header 
     summary_lines = summary.read_text().strip().splitlines() 
-    assert summary_lines[0] == "file\treads\tavg_len\tavg_q" 
+    assert summary_lines[0] == "file\treads\tavg_len\tavg_q\tavg_mee\tavg_mee_per_kb\tavg_qeff\tmee_qc_label" 
 
     # Because inputs are lexicographically sorted ("a", "b") etc. then just assert exact row order 
-    assert summary_lines[1] == "a.fastq\t1\t4.0\t0.00"
-    assert summary_lines[2] == "b.fastq\t1\t4.0\t0.00" # per file row 
+    assert summary_lines[1] == "a.fastq\t1\t4.0\t0.00\t4.000\t1000.000\t0.00\treview"
+    assert summary_lines[2] == "b.fastq\t1\t4.0\t0.00\t4.000\t1000.000\t0.00\treview" # per file row 
    
     # Global weighted row: R=2, B=1*4 + 1*4 = 8 ⇒ L̄=8/2=4.0; Q̄ = (0*8)/8 = 0.00 
-    assert summary_lines[3] == "_combined\t2\t4.0\t0.00" 
+    assert summary_lines[3] == "_combined\t2\t4.0\t0.00\t4.000\t1000.000\t0.00\treview" 
 
     # Creating combined file does not recreate source fastqs 
     assert sorted(p.name for p in input_dir.iterdir()) == ["a.fastq", "b.fastq"] 
@@ -84,8 +84,8 @@ def test_trim_fastq_inputs_directory_fastq(monkeypatch, tmp_path):
     # Running again appends rows w/o duplicating header 
     qt.trim_fastq_inputs(input_dir, tmp_path / "qc", summary_tsv=summary) 
     summary_lines = summary.read_text().strip().splitlines() 
-    assert summary_lines.count("file\treads\tavg_len\tavg_q") == 1 
-    assert summary_lines.count("_combined\t2\t4.0\t0.00") == 2
+    assert summary_lines.count("file\treads\tavg_len\tavg_q\tavg_mee\tavg_mee_per_kb\tavg_qeff\tmee_qc_label") == 1 
+    assert summary_lines.count("_combined\t2\t4.0\t0.00\t4.000\t1000.000\t0.00\treview") == 2
 
     # verify concatenation order is stable 
     assert combined.startswith("@r") and combined.count("@r") == 2 
@@ -127,4 +127,36 @@ def test_run_trim_uses_helper(monkeypatch, tmp_path):
     assert helper_calls == [(input_dir, tmp_path / "qc", summary)]
     assert fasta_calls == [(tmp_path / "qc", tmp_path / "qc" / "trimmed.fasta")] 
 
+def test_trim_fastq_inputs_with_mee_telemetry(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+
+    raw_content = (
+        "@good\nACGT\n+\nIIII\n"
+        "@bad\nACGT\n+\n!!!!\n"
+    )
+    (input_dir / "a.fastq").write_text(raw_content)
+
+    def fake_quality_trim(src: Path, dest: Path, **_: object) -> Path:
+        dest = Path(dest)
+        dest.write_text(raw_content)
+        return dest
+
+    monkeypatch.setattr(qt, "quality_trim", fake_quality_trim)
+
+    summary = tmp_path / "summary.tsv"
+    out = qt.trim_fastq_inputs(
+        input_dir,
+        tmp_path / "qc",
+        summary_tsv=summary,
+    )
+
+    combined = out.read_text()
+    assert combined.count("@good") == 1
+    assert combined.count("@bad") == 1
+
+    summary_lines = summary.read_text().strip().splitlines()
+    assert summary_lines[0] == "file\treads\tavg_len\tavg_q\tavg_mee\tavg_mee_per_kb\tavg_qeff\tmee_qc_label"
+    assert summary_lines[1] == "a.fastq\t2\t4.0\t20.00\t2.000\t500.050\t3.01\treview"
+    assert summary_lines[2] == "_combined\t2\t4.0\t20.00\t2.000\t500.050\t3.01\treview"
 

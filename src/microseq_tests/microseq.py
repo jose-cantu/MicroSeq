@@ -46,7 +46,7 @@ def main() -> None:
     p_trim.add_argument("--link-raw", action="store_true", help="Symlink AB1 traces into workdir instead of copying")
     p_trim.add_argument("--combined-tsv", metavar="TSV", help="Write trim summary TSV")
     
-    # ── AB1 → FASTQ -------------------------------------------------------
+    # ── AB1 -> FASTQ -------------------------------------------------------
     p_ab1 = sp.add_parser("ab1-to-fastq",
                           help="Convert ABI chromatograms to FASTQ")
     p_ab1.add_argument(
@@ -58,7 +58,7 @@ def main() -> None:
     p_ab1.add_argument("--overwrite", action="store_true",
                        help="Re-create FASTQ even if it exists")
 
-    # ── FASTQ → FASTA -----------------------------------------------------
+    # ── FASTQ -> FASTA -----------------------------------------------------
     p_fq = sp.add_parser("fastq-to-fasta",
                          help="Merge all FASTQ in a folder into one FASTA")
     p_fq.add_argument(
@@ -214,6 +214,8 @@ def main() -> None:
             sanger=args.sanger,
             summary_tsv=args.combined_tsv,
             link_raw=args.link_raw,
+            mee_max=args.mee_max,
+            mee_min_len=args.mee_min_len
 
         )
         fasta = workdir / "qc" / "trimmed.fasta"
@@ -307,7 +309,7 @@ def main() -> None:
         from microseq_tests.utility.merge_hits import merge_hits  
 
         merged = merge_hits(args.input, args.output) # progress bar & logging  
-        print("✓ merged →", merged) 
+        print("✓ merged ->", merged) 
     
     # keep in mind this is used as post-collapse estimate 
     elif args.cmd == "suggest-cutoffs":

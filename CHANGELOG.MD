@@ -27,7 +27,8 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 - Paired CAP3 assembly end-to-end: CLI/GUI support for `--mode paired`, primer presets or custom `--fwd-pattern/--rev-pattern`, duplicate policies (error/keep-first/keep-last/merge/keep-separate), plate well enforcement, pairing preview diagnostics, and per-sample contig outputs with `contig_map.tsv` manifest 
 - GUI primer set dropdown plus advanced regex override for pairing. primer token detection and suggestions when no pairs are found. 
 - Paired assembly now normalizes FASTA/FASTQ/AB1 inputs to per-read FASTA, re-writes contig headers with sample-aware IDs, and records detector/well metadata in pairing reports. 
-- Documented paired vs single-mode CAP3 usage with real-world scenarios used under tests for data samples (plate runs, ad-hoc single mode) in README and reference in GUI/doc tutorials. 
+- Documented paired vs single-mode CAP3 usage with real-world scenarios used under tests for data samples (plate runs, ad-hoc single mode) in README and reference in GUI/doc tutorials.
+- Trim summaries now report expected error telemetry (EE/kb) and qeff based lebels.  
 
 ### Changes Made 
 - Simplified `microseq-setup` wizard, removing obsolete logging mode.
@@ -40,8 +41,8 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 - Relaxed plate well regex detection in handle wells adjacent to underscores/dashes and added validation coverage. 
 - Added default contig map manifest creation during paired contig merges and rewrote cap3 with sample-aware identifiers to reference back to files being used in assembly 
 - Paired assembly task scheduling now skips empty task lists and respects duplicate policies when creating cap3 jobs. 
-- Removed outdated GUI warnings about blastn instability and pipeline workarounds that no longer apply 
-
+- Removed outdated GUI warnings about blastn instability and pipeline workarounds that no longer apply
+- QC trim summaries include EE/kb telemetry, qeff labels, and align per-read stats with expected-error calculations.
 
 ### Fixed Bugs 
 - Percent signs escape properly for `argparse`.
