@@ -4,7 +4,9 @@ from pathlib import Path
 from typing import List, Optional, Iterable 
 from Bio import SeqIO                         
 import logging 
-from importlib import import_module 
+from importlib import import_module
+
+from microseq_tests.trimming.expected_errors import expected_errors  
 
 L = logging.getLogger(__name__)
 
@@ -28,7 +30,7 @@ def dynamic_trim(record, win: int = 5, q: int = 20):
     if n < win:
         return None                            # too short
 
-    # 5′ → 3′
+    # 5′ -> 3′
     left = next(
         (i for i in range(n - win + 1)
          if sum(quals[i:i + win]) / win >= q),
@@ -37,7 +39,7 @@ def dynamic_trim(record, win: int = 5, q: int = 20):
     if left is None:
         return None
 
-    # 3′ → 5′
+    # 3′ -> 5′
     right = next(
         (j for j in range(n, win - 1, -1)
          if sum(quals[j - win:j]) / win >= q),
@@ -58,6 +60,10 @@ def _trim_all(
     window_size: int,
     per_base_q: int,
     file_q_threshold: float,
+    mee_max: float | None, 
+    mee_min_len: int | None,
+    min_reads_kept: int | None,
+    max_drop_fraction: float | None, 
     passed_dir: Path,
     failed_dir: Path,
     stats_root: Path,
@@ -75,6 +81,9 @@ def _trim_all(
         trimmed_path = passed_dir / f"{base}_trimmed.fastq"
         
         reads = bases = qsum = 0
+        mee_sum = 0.0
+        dropped_len = 0 
+        dropped_mee = 0 
         trimmed_recs = []
         
         for rec in SeqIO.parse(fq, "fastq"):
@@ -82,30 +91,52 @@ def _trim_all(
             if not trimmed:
                 continue
             ph = trimmed.letter_annotations["phred_quality"]
+            mee = expected_errors(ph)
+            if mee_min_len is not None and len(trimmed) < mee_min_len:
+                dropped += 1 
+                continue 
+            if mee_max is not None and mee > mee_max:
+                dropped_mee += 1
+                continue 
             reads += 1
             bases += len(trimmed)
             qsum  += sum(ph)
+            mee_sum += mee 
             trimmed_recs.append(trimmed)
             
         avg_q   = qsum  / bases if bases else 0
         avg_len = bases / reads if reads else 0
+        avg_mee = mee_sum / reads if reads else 0 
+        dropped_total = dropped_len + dropped_mee 
+        drop_fraction = (
+            dropped_total / (dropped_total + reads) if (dropped_total + reads) else 0 
+        ) 
         
         # per-read stats
         with open(stats_path, "w") as fh:
             for r in trimmed_recs:
                 ph = r.letter_annotations["phred_quality"]
-                fh.write(f"{r.id}\t{len(r)}\t{sum(ph)/len(ph):.2f}\n")
+                mee = expected_errors(ph) 
+                fh.write(f"{r.id}\t{len(r)}\t{sum(ph)/len(ph):.2f}\t{mee:.3f}\n")
                 
         # pass / fail per file
-        if avg_q < file_q_threshold:
+        fails_retention = False 
+        if min_reads_kept is not None and reads < min_reads_kept: 
+            fails_retention = True 
+        if max_drop_fraction is not None and drop_fraction > max_drop_fraction:
+            fails_retention = True 
+
+        if avg_q < file_q_threshold or fails_retention: 
             (failed_dir / fq.name).write_bytes(fq.read_bytes())
             (failed_dir / stats_path.name).write_bytes(stats_path.read_bytes())
             L.info("[FAIL] %s  (avgQ %.2f)", fq.name, avg_q)
         else:
             SeqIO.write(trimmed_recs, trimmed_path, "fastq")
-            L.info("[PASS] %s → %s (avgQ %.2f)", fq.name, trimmed_path, avg_q)
+            L.info("[PASS] %s -> %s (avgQ %.2f)", fq.name, trimmed_path, avg_q)
             if comb:
-                comb.write(f"{fq.name}\t{reads}\t{avg_len:.1f}\t{avg_q:.2f}\n")
+                comb.write(f"{fq.name}\t{reads}\t{avg_len:.1f}\t{avg_q:.2f}\t{avg_mee:.3f}\t"
+                f"{dropped_len}\t{dropped_mee}\n" 
+            )
                 
         _tick_safe(bar) # exactly one tick per FASTQ  
         
@@ -119,6 +150,10 @@ def trim_folder(
     window_size: int = 5,
     per_base_q: int = 20,
     file_q_threshold: float = 20.0,
+    mee_max: float | None = None,
+    mee_min_len: int | None = None,
+    min_reads_kept: int | None = None,
+    max_drop_fraction: float | None = None, 
     combined_tsv: str | Path | None = None,
     threads: int = 1,                          # kept for API parity; unused
     **kwargs,
@@ -146,8 +181,8 @@ def trim_folder(
     comb: Optional[open] = None
     if combined_tsv:
         comb = open(combined_tsv, "a")
-        if comb.tell() == 0:                   # new file → header
-            comb.write("file\treads\tavg_len\tavg_q\n")
+        if comb.tell() == 0:                   # new file -> header
+            comb.write("file\treads\tavg_len\tavg_q\tavg_mee\tdropped_len\tdropped_mee\n")
             
     fastqs = sorted(input_dir.glob("*.fastq"))
     
@@ -161,6 +196,10 @@ def trim_folder(
                 window_size=window_size,
                 per_base_q=per_base_q,
                 file_q_threshold=file_q_threshold,
+                mee_max=mee_max,
+                mee_min_len=mee_min_len,
+                min_reads_kept=min_reads_kept,
+                max_drop_fraction=max_drop_fraction, 
                 passed_dir=passed_dir,
                 failed_dir=failed_dir,
                 stats_root=output_dir,
