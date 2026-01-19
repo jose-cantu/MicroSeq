@@ -43,6 +43,9 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 - Paired assembly task scheduling now skips empty task lists and respects duplicate policies when creating cap3 jobs. 
 - Removed outdated GUI warnings about blastn instability and pipeline workarounds that no longer apply
 - QC trim summaries include EE/kb telemetry, qeff labels, and align per-read stats with expected-error calculations.
+- Included vsearch replicate collapse per sample and reference chimera filtering in the full pipeline that you can use optionally (like a toggle in the gui to include it), with config backed references per DB (SILVA & GG2) w/ recommendations to use SILVA as the default. 
+- vsearch docs and tests added for derep / uchime plus replicate weights tsv applied in BIOM. 
+- Added CLI workflow scripts that will make it easier to use the CLI and provided examples in the /docs how to use them in the test sample datasets. 
 
 ### Fixed Bugs 
 - Percent signs escape properly for `argparse`.

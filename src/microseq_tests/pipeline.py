@@ -35,7 +35,12 @@ from microseq_tests.assembly.pairing import  (
         DETECTORS, DupPolicy, _extract_well, extract_sid_orientation, make_pattern_detector) 
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
-from microseq_tests.utility.utils import load_config, expand_db_path 
+from microseq_tests.utility.utils import load_config, expand_db_path
+from microseq_tests.vsearch_tools import ( 
+    collapse_replicates_grouped, 
+    chimera_check_ref, 
+)
+from microseq_tests.utility.id_normaliser import NORMALISERS 
 from microseq_tests.post_blast_analysis import run as postblast_run
 
 __all__ = [
@@ -389,10 +394,15 @@ def run_full_pipeline(
     metadata: Path | None = None,
     summary_tsv: Path | None = None,
     mee_max: float | None = None,
-    mee_min_len: int | None = None, 
+    mee_min_len: int | None = None,
+    collapse_replicates: bool = False,
+    replicate_id_th: float | None = None,
+    min_replicate_size: int | None = None,
+    chimera_mode: str = "off",
+    chimera_db: PathLike | None = None,
     on_stage=None,
     on_progress=None,
-) -> dict[str, Path]:
+) -> dict[str, Path | None]:
     """Run trim -> FASTA merge -> BLAST -> taxonomy (+ optional post‑BLAST).
 
     infile may be FASTA, FASTQ, a single ``.ab1`` trace, or a directory of
@@ -413,6 +423,21 @@ def run_full_pipeline(
     out_dir.mkdir(parents=True, exist_ok=True)
     on_progress(0)
 
+    cfg = load_config()
+    chimera_db_path: Path | None = None
+    if chimera_mode != "off":
+        if chimera_db:
+            chimera_db_path = Path(chimera_db).expanduser().resolve()
+        else:
+            chimera_ref = cfg["databases"].get(db_key, {}).get("chimera_ref")
+            if chimera_ref:
+                chimera_db_path = Path(expand_db_path(chimera_ref))
+        if chimera_db_path is None:
+            raise ValueError(
+                f"No chimera reference configured for '{db_key}'. "
+                "Provide --chimera-db or add databases.<key>.chimera_ref."
+            )
+
     is_fasta = infile.suffix.lower() in {".fasta", ".fa", ".fna", ".fas"}
     using_paired = mode == "paired" 
 
@@ -427,13 +452,21 @@ def run_full_pipeline(
         "tax": out_dir / "hits_tax.tsv",
         "biom": out_dir / "table.biom",
         "trim_summary": summary_tsv if (not is_fasta and not using_paired) else None,
+        "chimera_db": chimera_db_path,
+        "collapsed_fasta": None,
+        "nonchimera_fasta": None,
+        "chimera_report": None,
+        "replicate_map": None,
+        "replicate_weights": None,
     }
+
+    extra_stages = int(collapse_replicates) + int(chimera_mode != "off")
 
     if using_paired:
         # Assembly + BLAST + taxonomy + postblast (optional here if using) 
-        n_stages = (3 if is_fasta else 5) + int(postblast)   
+        n_stages = (3 if is_fasta else 5) + extra_stages + int(postblast)   
     else:
-        n_stages = (2 if is_fasta else 4) + int(postblast)
+        n_stages = (2 if is_fasta else 4) + extra_stages + int(postblast)
     step = 100 // n_stages
     pct = 0
 
@@ -552,7 +585,104 @@ def run_full_pipeline(
         pct += step
         on_progress(pct)
 
-    # 3 – BLAST
+    # 3a - VSEARCH (opt in add on) Collapse and chimera stages 
+    current_fasta = paths["fasta"]
+
+    def _strip_sizes_and_filter_weights(
+        source: Path,
+        dest: Path,
+        weights_in: Path | None,
+        weights_out: Path,
+    ) -> None:
+        import re
+        from Bio import SeqIO
+
+        size_re = re.compile(r";size=(\d+);?")
+        weight_map: dict[str, str] = {}
+        if weights_in and weights_in.exists():
+            for line in weights_in.read_text().splitlines()[1:]:
+                if not line.strip():
+                    continue
+                qseqid, size = line.split("\t", 1)
+                weight_map[qseqid] = size
+
+        with dest.open("w", encoding="utf-8") as out_fh, weights_out.open(
+            "w", encoding="utf-8"
+        ) as weight_fh:
+            weight_fh.write("qseqid\treplicate_size\n")
+            for rec in SeqIO.parse(source, "fasta"):
+                clean_id = size_re.sub("", rec.id)
+                rec.id = clean_id
+                rec.name = clean_id
+                rec.description = ""
+                SeqIO.write(rec, out_fh, "fasta")
+                size = weight_map.get(clean_id)
+                if size:
+                    weight_fh.write(f"{clean_id}\t{size}\n")
+                else:
+                    weight_fh.write(f"{clean_id}\t1\n")
+
+    if collapse_replicates:
+        on_stage("Collapse replicates")
+        collapsed = out_dir / "qc" / "replicates_collapsed.fasta"
+        replicate_map = out_dir / "qc" / "replicate_map.tsv"
+        replicate_weights = out_dir / "qc" / "replicate_weights.tsv"
+
+        cfg_norm = cfg.get("metadata", {}).get("sample_id_normaliser", "strip_suffix")
+        normaliser = NORMALISERS.get(cfg_norm, NORMALISERS["strip_suffix"])
+
+        collapse_replicates_grouped(
+            current_fasta,
+            collapsed,
+            group_fn=normaliser,
+            min_size=min_replicate_size or 1,
+            id_th=replicate_id_th,
+            threads=threads,
+            map_tsv=replicate_map,
+            weights_tsv=replicate_weights,
+        )
+        paths["collapsed_fasta"] = collapsed
+        paths["replicate_map"] = replicate_map
+        paths["replicate_weights"] = replicate_weights
+        current_fasta = collapsed
+        pct += step
+        on_progress(pct)
+
+    if chimera_mode != "off":
+        on_stage("Chimera check")
+        nonchimera = out_dir / "qc" / "nonchimeras.fasta"
+        report = out_dir / "qc" / "uchime_report.tsv"
+        nonchimera, report = chimera_check_ref(
+            current_fasta,
+            nonchimera,
+            reference=chimera_db_path,
+            report_tsv=report,
+            threads=threads,
+            size_in=collapse_replicates,
+        )
+        paths["nonchimera_fasta"] = nonchimera
+        paths["chimera_report"] = report
+        current_fasta = nonchimera
+        pct += step
+        on_progress(pct)
+
+    if collapse_replicates:
+        cleaned = out_dir / "qc" / "replicates_clean.fasta"
+        replicate_weights = out_dir / "qc" / "replicate_weights.tsv"
+        weights_in = paths["replicate_weights"]
+        _strip_sizes_and_filter_weights(
+            current_fasta,
+            cleaned,
+            weights_in,
+            replicate_weights,
+        )
+        paths["replicate_weights"] = replicate_weights
+        paths["fasta"] = cleaned
+    else:
+        paths["fasta"] = current_fasta
+
+
+    # 3b – BLAST
     on_stage("BLAST")
     run_blast_stage(
         paths["fasta"],
@@ -571,7 +701,6 @@ def run_full_pipeline(
     on_progress(pct)
 
     # 4 – Add taxonomy
-    cfg = load_config()
     tax_template = cfg["databases"][db_key]["taxonomy"]
     tax_fp = Path(expand_db_path(tax_template))
     on_stage("Taxonomy")
@@ -607,7 +736,7 @@ def run_full_pipeline(
         if metadata is None:
             raise ValueError("metadata file required for postblast stage")
         on_stage("Post-BLAST")
-        run_postblast(paths["tax"], metadata, paths["biom"])
+        run_postblast(paths["tax"], metadata, paths["biom"], weights_tsv=paths["replicate_weights"],)
         if thr and thr.isInterruptionRequested():
             raise RuntimeError("Cancelled")
         pct += step

@@ -6,8 +6,8 @@ from microseq_tests.utility.progress import stage_bar
 from microseq_tests.utility.merge_hits import merge_hits 
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
-from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, _summarize_paired_candidates, _suggest_pairing_patterns)
-from microseq_tests.utility.utils import setup_logging, load_config
+from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, run_full_pipeline, _summarize_paired_candidates, _suggest_pairing_patterns)
+from microseq_tests.utility.utils import setup_logging, load_config, expand_db_path
 from microseq_tests.assembly.pairing import DupPolicy 
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.post_blast_analysis import run as postblast_run 
@@ -20,7 +20,11 @@ from functools import partial
 from microseq_tests.utility.merge_hits import merge_hits as merged_hits 
 from microseq_tests.utility.cutoff_sweeper import suggest_after_collapse as suggest
 from microseq_tests.utility import filter_hits_cli 
-from microseq_tests.utility.id_normaliser import NORMALISERS 
+from microseq_tests.utility.id_normaliser import NORMALISERS
+from microseq_tests.vsearch_tools import (
+    collapse_replicates_grouped,
+    chimera_check_ref,
+)
 from microseq_tests import __version__
 
 def main() -> None:
@@ -30,8 +34,6 @@ def main() -> None:
     # adding global flags here ......
     ap.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}", help="Show me the current Version of MicroSeq and exit") 
     ap.add_argument("--workdir", default=cfg.get("default_workdir","data"), help="Root folder for intermediate outputs (default: ./data) note: Yaml is placed as a 2ndary place for a shared repo project which can you modify and change without using workdir flag otherwise use --workdir to point where you want to set up your individual project")
-    ap.add_argument("--threads", type=int, default=4,
-                    help="CPU threads for parallel stages")
     ap.add_argument("--session-id", help="Override MICROSEQ_SESSION_ID")
     ap.add_argument("-v", "--verbose", action="count", default=0, help="-v: info, -vv: use for debugging")
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -99,6 +101,30 @@ def main() -> None:
     p_blast.add_argument("--export-sweeper", action="store_true", help="Also write hits_full_sweeper.tsv containing " "sample_id, bitscore, clean headers") 
     p_blast.add_argument("--blast-task", choices=["megablast", "blastn"], default="megablast", help="BLAST algorithm: megablast (fast, ≥95 %% ID) or blastn (comprehensive, use <95%% ID)") 
 
+    # vsearch collapse
+    p_vs_collapse = sp.add_parser("vsearch-collapse", help="Collapse technical replicates with vsearch")
+    p_vs_collapse.add_argument("-i", "--input", required=True, help="FASTA input")
+    p_vs_collapse.add_argument("-o", "--output", required=True, help="Collapsed FASTA output")
+    p_vs_collapse.add_argument("--threads", type=int, default=4, help="CPU threads to pass to vsearch")
+    p_vs_collapse.add_argument("--id-normaliser", choices=list(NORMALISERS.keys()), default="strip_suffix", help="Sample ID normaliser to group replicates")
+    p_vs_collapse.add_argument("--replicate-id-th", type=float, help="Identity threshold for replicate collapse")
+    p_vs_collapse.add_argument("--min-replicate-size", type=int, help="Minimum replicate group size for collapse")
+    p_vs_collapse.add_argument("--map-tsv", help="Optional replicate map TSV output path")
+    p_vs_collapse.add_argument("--weights-tsv", help="Optional replicate weights TSV output path")
+
+    # vsearch chimera
+    p_vs_chim = sp.add_parser("vsearch-chimera", help="Reference-based chimera filtering with vsearch")
+    p_vs_chim.add_argument("-i", "--input", required=True, help="FASTA input")
+    p_vs_chim.add_argument("-o", "--output", required=True, help="Non-chimera FASTA output")
+    p_vs_chim.add_argument("-d", "--db", choices=db_choices, help="Database key for default chimera reference")
+    p_vs_chim.add_argument("--chimera-db", help="Reference FASTA for chimera filtering")
+    p_vs_chim.add_argument("--report", help="Optional chimera report TSV output path")
+    p_vs_chim.add_argument("--threads", type=int, default=4, help="CPU threads to pass to vsearch")
+    p_vs_chim.add_argument(
+        "--sizein",
+        action="store_true",
+        help="Forward --sizein to vsearch (use when FASTA has ;size= annotations)",
+    )
 
     # sweeper used to predict PASS cutoff point to hit desired TARGET PASS count 
     p_sweep = sp.add_parser("suggest-cutoffs", help="Suggest identity/qcov pairs to hit TARGET PASS count of number of samples after per-sample collapse", description=("Given a BLAST sweeper table (*.tsv) from a relaxed search, "
@@ -303,6 +329,53 @@ def main() -> None:
                 on_progress=progress_cb,
                 blast_task=args.blast_task,
             )
+
+    elif args.cmd == "vsearch-collapse":
+        fasta_in = pathlib.Path(args.input).expanduser().resolve()
+        fasta_out = pathlib.Path(args.output).expanduser().resolve()
+        map_tsv = pathlib.Path(args.map_tsv).expanduser().resolve() if args.map_tsv else None
+        weights_tsv = (
+            pathlib.Path(args.weights_tsv).expanduser().resolve()
+            if args.weights_tsv
+            else None
+        )
+        normaliser = NORMALISERS[args.id_normaliser]
+        collapse_replicates_grouped(
+            fasta_in,
+            fasta_out,
+            group_fn=normaliser,
+            min_size=args.min_replicate_size or 1,
+            id_th=args.replicate_id_th,
+            threads=args.threads,
+            map_tsv=map_tsv,
+            weights_tsv=weights_tsv,
+        )
+        print("Collapsed FASTA:", fasta_out)
+
+    elif args.cmd == "vsearch-chimera":
+        fasta_in = pathlib.Path(args.input).expanduser().resolve()
+        fasta_out = pathlib.Path(args.output).expanduser().resolve()
+        report = pathlib.Path(args.report).expanduser().resolve() if args.report else None
+        chimera_db = args.chimera_db
+        if chimera_db:
+            chimera_path = pathlib.Path(chimera_db).expanduser().resolve()
+        else:
+            if not args.db:
+                ap.error("--db or --chimera-db is required for vsearch-chimera")
+            chimera_ref = cfg["databases"].get(args.db, {}).get("chimera_ref")
+            if not chimera_ref:
+                ap.error(f"databases.{args.db}.chimera_ref is not configured")
+            chimera_path = pathlib.Path(expand_db_path(chimera_ref))
+        _, report_path = chimera_check_ref(
+            fasta_in,
+            fasta_out,
+            reference=chimera_path,
+            report_tsv=report,
+            threads=args.threads,
+            size_in=args.sizein,
+        )
+        print("Non-chimera FASTA:", fasta_out)
+        print("Chimera report:", report_path)
 
     elif args.cmd == "merge-hits":
         # resolve globs after argparse to keep it cross-platform functional 

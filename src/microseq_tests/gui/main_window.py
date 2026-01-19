@@ -58,6 +58,7 @@ from microseq_tests.pipeline import (
     _summarize_paired_candidates,
     _suggest_pairing_patterns
 )
+from microseq_tests.vsearch_tools import resolve_vsearch 
 from microseq_tests.assembly.pairing import DupPolicy 
 from microseq_tests.utility.utils import setup_logging, load_config
 
@@ -219,6 +220,16 @@ class MainWindow(QMainWindow):
         self.enforce_well_chk = QCheckBox("Enforce same plate well (A1-H12)")
 
         self.enforce_well_chk.setToolTip("Only pair forward/reverse reads when the same well plate code (e.g. B10)")
+
+        self.collapse_reps_chk = QCheckBox("Collapse replicates")
+        self.collapse_reps_chk.setToolTip("Collapse technical replicates with vsearch (requires vsearch).")
+
+        self.chimera_mode_combo = QComboBox()
+        self.chimera_mode_combo.addItem("Off", userData="off")
+        self.chimera_mode_combo.addItem("Reference (vsearch)", userData="reference")
+        self.chimera_mode_combo.setToolTip(
+            "Reference-based chimera filtering uses vsearch and the selected DB's chimera_ref by default."
+        )
         
         self.dup_policy_lbl = QLabel("Duplicate Policy")
         self.dup_policy_combo = QComboBox() 
@@ -278,6 +289,14 @@ class MainWindow(QMainWindow):
         
         # Set intial state of enfore_same_well checkbox default to False 
         self.enforce_well_chk.setChecked(self.settings.value("enforce_same_well", False, type=bool))
+
+        self.collapse_reps_chk.setChecked(
+            self.settings.value("collapse_replicates", False, type=bool)
+        )
+
+        saved_chimera_mode = self.settings.value("chimera_mode", "off")
+        chimera_idx = max(0, self.chimera_mode_combo.findData(saved_chimera_mode))
+        self.chimera_mode_combo.setCurrentIndex(chimera_idx)
         
         saved_dup_policy = DupPolicy(self.settings.value("dup_policy", DupPolicy.ERROR.value))
         dup_idx = max(0, self.dup_policy_combo.findData(saved_dup_policy))
@@ -291,6 +310,16 @@ class MainWindow(QMainWindow):
         self.advanced_regex_chk.toggled.connect(self._toggle_advanced_regex)
         self.enforce_well_chk.toggled.connect(
             lambda checked: self.settings.setValue("enforce_same_well", checked)
+        )
+
+        self.collapse_reps_chk.toggled.connect(
+            lambda checked: self.settings.setValue("collapse_replicates", checked)
+        )
+
+        self.chimera_mode_combo.currentIndexChanged.connect(
+            lambda idx: self.settings.setValue(
+                "chimera_mode", self.chimera_mode_combo.itemData(idx)
+            )
         )
         
         self.dup_policy_combo.currentIndexChanged.connect(
@@ -435,6 +464,13 @@ class MainWindow(QMainWindow):
         mid.addWidget(self.cancel_btn)
         mid.addWidget(self.run_btn)
 
+        pipeline_opts = QHBoxLayout()
+        pipeline_opts.addWidget(QLabel("Pipeline options"))
+        pipeline_opts.addWidget(self.collapse_reps_chk)
+        pipeline_opts.addWidget(QLabel("Chimera"))
+        pipeline_opts.addWidget(self.chimera_mode_combo)
+        pipeline_opts.addStretch()
+
         pairing = QHBoxLayout()
         pairing.addWidget(QLabel("Primer set"))
         pairing.addWidget(self.primer_set_combo)
@@ -453,6 +489,7 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout()
         outer.addLayout(top)
         outer.addLayout(mid)
+        outer.addLayout(pipeline_opts)
         outer.addLayout(pairing) 
         outer.addWidget(self.log_view)
 
@@ -519,6 +556,12 @@ class MainWindow(QMainWindow):
             "enforce_same_well": self.enforce_well_chk.isChecked(),
             "dup_policy": self.dup_policy_combo.currentData() 
         }
+
+    def _pipeline_kwargs(self) -> dict:
+        return {
+            "collapse_replicates": self.collapse_reps_chk.isChecked(),
+            "chimera_mode": self.chimera_mode_combo.currentData(),
+        }
     
     def _tokens_to_regex(self, text: str) -> str | None:
         tokens = [t.strip() for t in text.split(",") if t.strip()]
@@ -529,12 +572,22 @@ class MainWindow(QMainWindow):
 
     def _current_patterns(self) -> tuple[str | None, str | None]:
         if self.advanced_regex_chk.isChecked():
-            fwd = self.fwd_regex_edit.text().strip or None 
-            rev = self.rev_regex_edit.text().strip or None 
+            fwd = self.fwd_regex_edit.text().strip() or None 
+            rev = self.rev_regex_edit.text().strip() or None 
         else:
             fwd = self._tokens_to_regex(self.fwd_pattern_edit.text())
             rev = self._tokens_to_regex(self.rev_pattern_edit.text())
-        return fwd, rev 
+        return fwd, rev
+
+    def _ensure_vsearch_available(self) -> bool:
+        if not (self.collapse_reps_chk.isChecked() or self.chimera_mode_combo.currentData() != "off"):
+            return True
+        try:
+            resolve_vsearch()
+        except FileNotFoundError as exc:
+            QMessageBox.warning(self, "vsearch not found", str(exc))
+            return False
+        return True
 
     def _on_primer_set_changed(self, index: int):
         label = self.primer_set_combo.itemText(index)
@@ -823,6 +876,8 @@ class MainWindow(QMainWindow):
         if not self._input_path:
             QMessageBox.warning(self, "No input", "Choose a file or folder first.")
             return
+        if not self._ensure_vsearch_available():
+            return
         task = self.settings.value("blast_task", "megablast")
         self._launch(
             run_full_pipeline,
@@ -832,13 +887,16 @@ class MainWindow(QMainWindow):
             postblast=self.biom_chk.isChecked(),
             metadata=None,   # Trim → Convert → BLAST → Tax
             blast_task=task,
-            **self._assembly_kwargs()
+            **self._assembly_kwargs(),
+            **self._pipeline_kwargs()
         )
 
     # ------ Run full pipeline with Post-Blast as well -------------
     def _launch_full(self):
         if not self._input_path:
             QMessageBox.warning(self, "No input", "Choose a file or folder first.")
+            return
+        if not self._ensure_vsearch_available():
             return
         # if user asked for BIOM but hasn't chosen metadata, abort early
         if self.biom_chk.isChecked() and not self.meta_path:
@@ -858,7 +916,8 @@ class MainWindow(QMainWindow):
             postblast=self.biom_chk.isChecked(), # source of truth decide via checkbox
             metadata=self.meta_path,      # None or Path run the Post-BLAST stage too
             blast_task=task,
-            **self._assembly_kwargs()
+            **self._assembly_kwargs(),
+            **self._pipeline_kwargs()
         )
 
     # ------ Run stand-alone Post-BLAST ---------------------------------

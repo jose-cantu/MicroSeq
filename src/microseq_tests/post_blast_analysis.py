@@ -157,11 +157,26 @@ def run(blast_tsv: Path,
         taxonomy_col: str = "auto",
         taxonomy_format: str = "auto",
         duplicate_policy: str = "error",
+        weights_tsv: Path | None = None, 
         **kw) -> None:
 
         # ---- more tolerant parser: any whitespace, not just tabs ---------
         blast = _smart_read(blast_tsv)
         meta = _smart_read(metadata_tsv)
+
+        if "sample_id" not in blast.columns and "qseqid" in blast.columns:
+            blast["sample_id"] = blast["qseqid"]
+
+        if weights_tsv is None:
+            candidate = Path(blast_tsv).with_name("replicate_weights.tsv")
+            if candidate.exists():
+                weights_tsv = candidate 
+
+        if weights_tsv:
+            weights = pd.read_csv(weights_tsv, sep="\t")
+            if ["qseqid", "replicate_size"].issubset(weights.columns):
+                weight_map = weights.set_index("qseqid")["replicate_size"].to_dict() 
+                blast["replicate_size"] = blast["qseqid"].map(weight_map) 
         
         # ---- id-normaliser config -> pull rule from YAML 
         if id_normaliser == "config":
@@ -244,14 +259,20 @@ def run(blast_tsv: Path,
             merged = merged.rename(columns={taxonomy_col: "taxonomy"})
             taxonomy_col = "taxonomy"
 
+        count_col = "replicate_size" if "replicate_size" in merged.columns else None
+        if count_col:
+            merged[count_col] = pd.to_numeric(merged[count_col], errors="coerce").fillna(1)
+        else:
+            merged["replicate_size"] = 1
 
         # one count per sample (presence/absence) matrix  
         mat = (
-            merged.assign(count=1) # add constant 1 
+            merged.assign(count=merged["replicate_size"]) # add weights 
                   .pivot_table(index="taxonomy", # rows = taxa 
                                   columns="sample_id", # cols = isolates 
                                   values="count",
-                                  fill_value=0) # 0/1 matrix 
+                                  fill_value=0, # 0/1 matrix 
+                                  aggfunc="sum") # additive weights  
                   )
         biom_table = Table(
             mat.values,

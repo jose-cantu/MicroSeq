@@ -57,7 +57,7 @@ In short: MicroSeq is the only open-source package that ingests raw Sanger or FA
   * AB1 -> FASTQ (`microseq ab1-to-fastq`)
   * FASTQ QC (Phred, length, expected errors, adapters) with Trimmomatic / BioPython (`microseq trim`).
 * **De‑novo assembly** using *CAP3* (`microseq assembly`).
-* **Chimera/replicate collapse** via vsearch {Planned will release and update once this feature is fully finished}. Clustering/centroid is better done via vsearch before/after CAP3 depending on whether you are collapsing technical replicates or creating cross sample OTUs. 
+* **Chimera checking + replicate collapse** using vsearch (it's optional to use). It enables reference based chimera filterting and dereplication before BLAST when desired. I am currently working on implmenting library dereplication across all samples, global clustering so OTU clustering across all samples, and finally denovo chimera detection . 
 * **Taxonomic classification**
 
   * BLAST+ search (**FASTA** or **FASTQ** input) (`microseq blast`)
@@ -86,6 +86,15 @@ Approximate mapping between mean Phred (or qeff) and EE per kb (length-normalize
 | 27 | 2 |
 | 23 | 5 |
 | 20 |10 | 
+
+## Chimera checking and replicate collapse | vsearch 
+
+MicroSeq can use vsearch to dereplicate sequences (collapsing technical replicates per sample) and/or preform reference based chimera filtering before BLAST.
+These are treated as opt in options and not part of the full pipeline automatically ran so you would need to include that via toggle in the GUI or using my cli bash workflowthat I have setup once include vsearch and one does not.
+
+When `--chimera-mode reference` is enabled, MicroSeq uses the **selected BLAST DB’s** `chimera_ref` FASTA by default (GG2 or SILVA). I would highly recommend SILVA from the two given its larger curated database. You can override with `--chimera-db /path/to/ref.fasta`. Replicate sizes are preserved in `qc/replicate_weights.tsv` and applied during BIOM export.
+
+Further details will be in the /docs. 
 
 ---
 

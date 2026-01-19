@@ -276,12 +276,15 @@ export MICROSEQ_LOG_DIR="{log_dir}"
         with target.open("a") as fh:
             fh.write(text)
         log(f"✓ exports appended to {target}")
-
-    shell_rc = Path.home() / (os.getenv("SHELL", "/bin/bash").split("/")[-1] + "rc")
+    
+    shell_name = os.getenv("SHELL", "/bin/bash").split("/")[-1]
+    shell_rc = Path.home() / f".{shell_name}rc"  
     append_once(shell_rc, snippet)
 
-    if os.getenv("CONDA_PREFIX"):
-        hook = Path(os.getenv("CONDA_PREFIX")) / "etc/conda/activate.d/microseq.sh"
+    conda_prefix = os.getenv("CONDA_PREFIX")
+    if conda_prefix:
+        hook = Path(conda_prefix) / "etc/conda/activate.d/microseq.sh"
+
         append_once(hook, snippet)
 
     # ---------- patch config.yaml ---------------------------------------
@@ -289,17 +292,27 @@ export MICROSEQ_LOG_DIR="{log_dir}"
     cfg_path.parent.mkdir(exist_ok=True)
     cfg = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
     cfg.setdefault("logging", {})
+    cfg.setdefault("tools", {}) 
     cfg["logging"]["dir"] = str(log_dir)
     cfg["logging"]["backup_count"] = 0 # keep every log
     if pipeline_user:
         cfg["logging"]["session_env"] = "MICROSEQ_SESSION_ID"
+    cfg["tools"].setdefault("vsearch", "vsearch")
     cfg["databases"] = {
-        "gg2":   {"blastdb": "${MICROSEQ_DB_HOME}/gg2/greengenes2_db",
-            "taxonomy": "${MICROSEQ_DB_HOME}/gg2/taxonomy.tsv"},
-        "silva": {"blastdb": "${MICROSEQ_DB_HOME}/silva/silva_db",
-            "taxonomy": "${MICROSEQ_DB_HOME}/silva/taxonomy.tsv"},
-        "ncbi":  {"blastdb": "${MICROSEQ_DB_HOME}/ncbi/16S_ribosomal_RNA",
-            "taxonomy": "${MICROSEQ_DB_HOME}/ncbi/taxonomy.tsv"},
+        "gg2": {
+            "blastdb": "${MICROSEQ_DB_HOME}/gg2/greengenes2_db",
+            "taxonomy": "${MICROSEQ_DB_HOME}/gg2/taxonomy.tsv",
+            "chimera_ref": "${MICROSEQ_DB_HOME}/gg2/dna-sequences.fasta",
+        },
+        "silva": {
+            "blastdb": "${MICROSEQ_DB_HOME}/silva/silva_db",
+            "taxonomy": "${MICROSEQ_DB_HOME}/silva/taxonomy.tsv",
+            "chimera_ref": "${MICROSEQ_DB_HOME}/silva/SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta",
+        },
+        "ncbi": {
+            "blastdb": "${MICROSEQ_DB_HOME}/ncbi/16S_ribosomal_RNA",
+            "taxonomy": "${MICROSEQ_DB_HOME}/ncbi/taxonomy.tsv",
+        },
     }
     cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
     log(f"✓ config.yaml updated at {cfg_path}")
