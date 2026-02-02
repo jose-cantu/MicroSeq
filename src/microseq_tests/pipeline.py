@@ -770,7 +770,7 @@ def run_full_pipeline(
         return lambda p: on_progress(off + p * step // 100)
 
     if using_paired:
-       def _fastq_to_paired_fastas(
+        def _fastq_to_paired_fastas(
             source_dir: Path,
             dest_dir: Path,
             *,
@@ -779,20 +779,20 @@ def run_full_pipeline(
             dest_dir.mkdir(parents=True, exist_ok=True)
             written: list[Path] = []
             for fq in sorted(source_dir.rglob("*.fastq")): 
-                SeqIO.write(records, out_fp, "fasta")
+                out_fp = dest_dir / f"{fq.stem}.fasta"
                 if use_qual:
                     result = write_fasta_and_qual_from_fastq(fq, out_fp)
+                    if result is None:
+                        continue
+                    written.append(result[0])
                 else:
                     records = list(SeqIO.parse(fq, "fastq"))
                     if not records:
-                        result = None
-                    else:
-                        out_fp.parent.mkdir(parents=True, exist_ok=True)
-                        SeqIO.write(records, out_fp, "fasta")
-                        result = out_fp
-                if result is None:
-                    continue
-                written.append(out_fp)
+                        continue
+                    out_fp.parent.mkdir(parents=True, exist_ok=True)
+                    SeqIO.write(records, out_fp, "fasta")
+                    written.append(out_fp)
+    
             return written
 
         assembly_input = infile
