@@ -28,7 +28,9 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 - GUI primer set dropdown plus advanced regex override for pairing. primer token detection and suggestions when no pairs are found. 
 - Paired assembly now normalizes FASTA/FASTQ/AB1 inputs to per-read FASTA, re-writes contig headers with sample-aware IDs, and records detector/well metadata in pairing reports. 
 - Documented paired vs single-mode CAP3 usage with real-world scenarios used under tests for data samples (plate runs, ad-hoc single mode) in README and reference in GUI/doc tutorials.
-- Trim summaries now report expected error telemetry (EE/kb) and qeff based lebels.  
+- Trim summaries now report expected error telemetry (EE/kb) and qeff based lebels. 
+- Paired assembly now supports CAP3 profiling presets (strict/diagnostic/relaxed), QUAL usuage, overlap auditing, and blast input manifests (`asm/blast_inputs.fasta` + `asm/blast_inputs.tsv`) 
+- GUI paired assembly panels now include CAP3 profile selection, BLAST input toggles, overlap audit display, and summary/detail views for paired outputs. 
 
 ### Changes Made 
 - Simplified `microseq-setup` wizard, removing obsolete logging mode.
@@ -46,6 +48,7 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 - Included vsearch replicate collapse per sample and reference chimera filtering in the full pipeline that you can use optionally (like a toggle in the gui to include it), with config backed references per DB (SILVA & GG2) w/ recommendations to use SILVA as the default. 
 - vsearch docs and tests added for derep / uchime plus replicate weights tsv applied in BIOM. 
 - Added CLI workflow scripts that will make it easier to use the CLI and provided examples in the /docs how to use them in the test sample datasets. 
+- Paired contigs outputs now support `paired_contigs.fasta` which is contigs only or `blast_inputs.fasta` (which is the contigs + singlets fallback) for BLAST, with payload tracebility in `asm/blast_inputs.tsv`. 
 
 ### Fixed Bugs 
 - Percent signs escape properly for `argparse`.

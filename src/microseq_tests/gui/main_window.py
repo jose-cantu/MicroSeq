@@ -46,9 +46,11 @@ from PySide6.QtCore import (
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
     QHBoxLayout, QPushButton, QLabel, QListView, QSpinBox, QMessageBox,
-    QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, QAbstractItemView, QLineEdit 
+    QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, QAbstractItemView, QLineEdit,
+    QTabWidget, QTableWidget, QTableWidgetItem, QSplitter 
 )
 from PySide6 import QtCore
+from PySide6.QtGui import QColor, QBrush, QDesktopServices 
 
 # ==== MicroSeq wrappers ----------
 from microseq_tests.pipeline import (
@@ -221,6 +223,33 @@ class MainWindow(QMainWindow):
 
         self.enforce_well_chk.setToolTip("Only pair forward/reverse reads when the same well plate code (e.g. B10)")
 
+        self.cap3_profile_combo = QComboBox()
+        self.cap3_profile_combo.addItem("Strict", userData="strict")
+        self.cap3_profile_combo.addItem("Diagnostic", userData="diagnostic")
+        self.cap3_profile_combo.addItem("Relaxed", userData="relaxed")
+        self.cap3_profile_combo.setToolTip("Preset CAP3 overlap thresholds")
+
+        self.cap3_extra_args_edit = QLineEdit()
+        self.cap3_extra_args_edit.setPlaceholderText("Extra CAP3 args (e.g., -a 20 -b 15)")
+
+        self.cap3_qual_chk = QCheckBox("Use per-base quality scores for assembly")
+        self.cap3_qual_chk.setToolTip("Use QUAL files to weight CAP3 assembly scoring.")
+
+        self.write_blast_inputs_chk = QCheckBox("Create BLAST input file (contigs or singlets)")
+        self.write_blast_inputs_chk.setToolTip("Emit asm/blast_inputs.fasta + asm/blast_inputs.tsv.")
+
+        self.use_blast_inputs_combo = QComboBox()
+        self.use_blast_inputs_combo.addItem(
+            "Paired contigs only (paired_contigs.fasta)", userData=False
+        )
+        self.use_blast_inputs_combo.addItem(
+            "Contig or singlets (blast_inputs.fasta)", userData=True
+        )
+
+        self.overlap_audit_chk = QCheckBox("Overlap audit (diagnostic only)")
+        self.overlap_audit_chk.setToolTip("Run overlap heuristic and write qc/overlap_audit.tsv.")
+
+
         self.collapse_reps_chk = QCheckBox("Collapse replicates")
         self.collapse_reps_chk.setToolTip("Collapse technical replicates with vsearch (requires vsearch).")
 
@@ -302,6 +331,27 @@ class MainWindow(QMainWindow):
         dup_idx = max(0, self.dup_policy_combo.findData(saved_dup_policy))
         self.dup_policy_combo.setCurrentIndex(dup_idx)
 
+        saved_profile = self.settings.value("cap3_profile", "strict")
+        profile_idx = max(0, self.cap3_profile_combo.findData(saved_profile))
+        self.cap3_profile_combo.setCurrentIndex(profile_idx)
+
+        saved_cap3_extra = self.settings.value("cap3_extra_args", "")
+        self.cap3_extra_args_edit.setText(saved_cap3_extra)
+
+        self.cap3_qual_chk.setChecked(
+            self.settings.value("cap3_use_qual", True, type=bool)
+        )
+        self.write_blast_inputs_chk.setChecked(
+            self.settings.value("write_blast_inputs", True, type=bool)
+        )
+        saved_use_blast_inputs = self.settings.value("use_blast_inputs", False, type=bool)
+        use_blast_idx = max(0, self.use_blast_inputs_combo.findData(saved_use_blast_inputs))
+        self.use_blast_inputs_combo.setCurrentIndex(use_blast_idx)
+
+        self.overlap_audit_chk.setChecked(
+            self.settings.value("overlap_audit", False, type=bool)
+        )
+
         # ------ connecting user action event handlers -----------------
         # For when users change selection in drop down menu 
         self.primer_set_combo.currentIndexChanged.connect(self._on_primer_set_changed)
@@ -327,7 +377,31 @@ class MainWindow(QMainWindow):
                 "dup_policy", 
                 getattr(data := self.dup_policy_combo.itemData(idx), "value", data),
             ) 
-        ) 
+        )
+        
+        self.cap3_profile_combo.currentIndexChanged.connect(
+            lambda idx: self.settings.setValue(
+                "cap3_profile", self.cap3_profile_combo.itemData(idx)
+            )
+        )
+        self.cap3_extra_args_edit.textEdited.connect(
+            lambda txt: self.settings.setValue("cap3_extra_args", txt)
+        )
+        self.cap3_qual_chk.toggled.connect(
+            lambda checked: self.settings.setValue("cap3_use_qual", checked)
+        )
+        self.write_blast_inputs_chk.toggled.connect(
+            lambda checked: self.settings.setValue("write_blast_inputs", checked)
+        )
+        self.use_blast_inputs_combo.currentIndexChanged.connect(
+            lambda idx: self.settings.setValue(
+                "use_blast_inputs", self.use_blast_inputs_combo.itemData(idx)
+            )
+        )
+        self.overlap_audit_chk.toggled.connect(
+            lambda checked: self.settings.setValue("overlap_audit", checked)
+        )
+
         # Connect the signal for text edits in the forward field to an anonymous function that saves the new text to settings. 
         self.fwd_pattern_edit.textEdited.connect(
             lambda txt: self._on_token_edited("fwd_tokens", txt)
@@ -402,6 +476,118 @@ class MainWindow(QMainWindow):
         # Performance tweak tells view all rows are the same height
         self.log_view.setUniformItemSizes(True)
 
+        # ---- Output tables + tabs ----
+        self.summary_filter = QComboBox()
+        self.summary_filter.addItem("All statuses", userData=None)
+
+        self.summary_table = QTableWidget(0, 6)
+        self.summary_table.setHorizontalHeaderLabels(
+            ["sample_id", "status", "contigs_count", "singlets_count", "overlaps_saved", "overlaps_removed"]
+        )
+        self.summary_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.summary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.summary_table.itemSelectionChanged.connect(self._update_detail_panel)
+
+        self.blast_table = QTableWidget(0, 4)
+        self.blast_table.setHorizontalHeaderLabels(
+            ["sample_id", "blast_payload", "reason", "payload_ids"]
+        )
+        self.blast_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.blast_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.blast_table.itemSelectionChanged.connect(self._update_detail_panel)
+
+        self.diagnostics_table = QTableWidget(0, 5)
+        self.diagnostics_table.setHorizontalHeaderLabels(
+            ["sample_id", "overlap_len", "overlap_identity", "overlap_quality", "status"]
+        )
+        self.diagnostics_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.diagnostics_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+        self.open_blast_inputs_btn = QPushButton("Open blast_inputs.fasta")
+        self.open_blast_inputs_btn.clicked.connect(lambda: self._open_path(self._blast_inputs_fasta))
+        self.open_blast_inputs_btn.setEnabled(False)
+
+        self.open_asm_folder_btn = QPushButton("Open asm folder")
+        self.open_asm_folder_btn.clicked.connect(lambda: self._open_path(self._asm_dir))
+        self.open_asm_folder_btn.setEnabled(False)
+
+        summary_tab = QWidget()
+        summary_layout = QVBoxLayout(summary_tab)
+        summary_filter_row = QHBoxLayout()
+        summary_filter_row.addWidget(QLabel("Status filter"))
+        summary_filter_row.addWidget(self.summary_filter)
+        summary_filter_row.addStretch()
+        summary_layout.addLayout(summary_filter_row)
+        summary_layout.addWidget(self.summary_table)
+
+        blast_tab = QWidget()
+        blast_layout = QVBoxLayout(blast_tab)
+        blast_buttons = QHBoxLayout()
+        blast_buttons.addWidget(self.open_blast_inputs_btn)
+        blast_buttons.addWidget(self.open_asm_folder_btn)
+        blast_buttons.addStretch()
+        blast_layout.addLayout(blast_buttons)
+        blast_layout.addWidget(self.blast_table)
+
+        diagnostics_tab = QWidget()
+        diagnostics_layout = QVBoxLayout(diagnostics_tab)
+        diagnostics_layout.addWidget(self.diagnostics_table)
+
+        logs_tab = QWidget()
+        logs_layout = QVBoxLayout(logs_tab)
+        logs_layout.addWidget(self.log_view)
+
+        self.output_tabs = QTabWidget()
+        self.output_tabs.addTab(logs_tab, "Logs")
+        self.output_tabs.addTab(summary_tab, "Assembly Summary")
+        self.output_tabs.addTab(blast_tab, "BLAST Inputs")
+        self.output_tabs.addTab(diagnostics_tab, "Diagnostics")
+
+        # ---- Detail panel ----
+        self.detail_sample_lbl = QLabel("sample_id: —")
+        self.detail_status_lbl = QLabel("status: —")
+        self.detail_reason_lbl = QLabel("reason: —")
+        self.detail_payload_lbl = QLabel("blast_payload: —")
+        self.detail_payload_ids_lbl = QLabel("payload_ids: —")
+        self.detail_overlap_lbl = QLabel("overlap: —")
+
+        self.detail_contigs_btn = QPushButton("Open contigs")
+        self.detail_singlets_btn = QPushButton("Open singlets")
+        self.detail_info_btn = QPushButton("Open cap.info")
+        for btn in (self.detail_contigs_btn, self.detail_singlets_btn, self.detail_info_btn):
+            btn.setEnabled(False)
+        self.detail_contigs_btn.clicked.connect(lambda: self._open_path(self._detail_paths.get("contigs")))
+        self.detail_singlets_btn.clicked.connect(lambda: self._open_path(self._detail_paths.get("singlets")))
+        self.detail_info_btn.clicked.connect(lambda: self._open_path(self._detail_paths.get("info")))
+
+        detail_box = QGroupBox("Details")
+        detail_layout = QVBoxLayout(detail_box)
+        detail_layout.addWidget(self.detail_sample_lbl)
+        detail_layout.addWidget(self.detail_status_lbl)
+        detail_layout.addWidget(self.detail_reason_lbl)
+        detail_layout.addWidget(self.detail_payload_lbl)
+        detail_layout.addWidget(self.detail_payload_ids_lbl)
+        detail_layout.addWidget(self.detail_overlap_lbl)
+        detail_layout.addWidget(self.detail_contigs_btn)
+        detail_layout.addWidget(self.detail_singlets_btn)
+        detail_layout.addWidget(self.detail_info_btn)
+        detail_layout.addStretch()
+
+        self.output_splitter = QSplitter()
+        self.output_splitter.addWidget(self.output_tabs)
+        self.output_splitter.addWidget(detail_box)
+        self.output_splitter.setStretchFactor(0, 3)
+        self.output_splitter.setStretchFactor(1, 1)
+
+        self.summary_filter.currentIndexChanged.connect(self._apply_summary_filter)
+
+        self._blast_inputs_fasta: Optional[Path] = None
+        self._asm_dir: Optional[Path] = None
+        self._detail_paths: dict[str, Optional[Path]] = {"contigs": None, "singlets": None, "info": None}
+        self._summary_rows: dict[str, dict[str, str]] = {}
+        self._blast_rows: dict[str, dict[str, str]] = {}
+        self._audit_rows: dict[str, dict[str, str]] = {}
+
         # connect to model's signal to auto-scroll to the bottom on new logs
         self.log_model.rowsInserted.connect(
             lambda _parent, _first, last: # _ to mark unused
@@ -471,6 +657,16 @@ class MainWindow(QMainWindow):
         pipeline_opts.addWidget(self.chimera_mode_combo)
         pipeline_opts.addStretch()
 
+        cap3_opts = QHBoxLayout()
+        cap3_opts.addWidget(QLabel("CAP3 profile"))
+        cap3_opts.addWidget(self.cap3_profile_combo)
+        cap3_opts.addWidget(self.cap3_extra_args_edit)
+        cap3_opts.addWidget(self.cap3_qual_chk)
+        cap3_opts.addWidget(self.write_blast_inputs_chk)
+        cap3_opts.addWidget(self.use_blast_inputs_combo)
+        cap3_opts.addWidget(self.overlap_audit_chk)
+        cap3_opts.addStretch()
+
         pairing = QHBoxLayout()
         pairing.addWidget(QLabel("Primer set"))
         pairing.addWidget(self.primer_set_combo)
@@ -490,8 +686,9 @@ class MainWindow(QMainWindow):
         outer.addLayout(top)
         outer.addLayout(mid)
         outer.addLayout(pipeline_opts)
+        outer.addLayout(cap3_opts)
         outer.addLayout(pairing) 
-        outer.addWidget(self.log_view)
+        outer.addWidget(self.output_splitter)
 
         # Embed composite layout as the window's central widget
         root = QWidget(); root.setLayout(outer)
@@ -533,7 +730,13 @@ class MainWindow(QMainWindow):
             self.advanced_regex_chk,
             self.fwd_regex_edit, 
             self.rev_regex_edit,
-            self.enforce_well_chk
+            self.enforce_well_chk,
+            self.cap3_profile_combo,
+            self.cap3_extra_args_edit,
+            self.cap3_qual_chk,
+            self.write_blast_inputs_chk,
+            self.use_blast_inputs_combo,
+            self.overlap_audit_chk,
         ):
             widget.setVisible(is_paired)
             widget.setEnabled(is_paired)
@@ -554,13 +757,19 @@ class MainWindow(QMainWindow):
             "fwd_pattern": fwd,
             "rev_pattern": rev, 
             "enforce_same_well": self.enforce_well_chk.isChecked(),
-            "dup_policy": self.dup_policy_combo.currentData() 
+            "dup_policy": self.dup_policy_combo.currentData(),
+            "cap3_profile": self.cap3_profile_combo.currentData(),
+            "cap3_extra_args": extra_args,
+            "cap3_use_qual": self.cap3_qual_chk.isChecked(),
+            "write_blast_inputs": write_blast_inputs,
+            "use_blast_inputs": use_blast_inputs,
         }
 
     def _pipeline_kwargs(self) -> dict:
         return {
             "collapse_replicates": self.collapse_reps_chk.isChecked(),
             "chimera_mode": self.chimera_mode_combo.currentData(),
+            "overlap_audit": self.overlap_audit_chk.isChecked(),
         }
     
     def _tokens_to_regex(self, text: str) -> str | None:
@@ -1061,6 +1270,9 @@ class MainWindow(QMainWindow):
                 f"Last output file:\n{p}") 
             )
 
+        if rc == 0 and isinstance(result, dict):
+            QTimer.singleShot(0, lambda r=result: self._load_output_tables(r))
+
         # re‑enable buttons -----------------------------------------
         def _reenable():
 
@@ -1073,7 +1285,177 @@ class MainWindow(QMainWindow):
            self._worker = None
            self._thread = None
 
-        QTimer.singleShot(0, _reenable) 
+        QTimer.singleShot(0, _reenable)
+
+    def _open_path(self, path: Optional[Path]) -> None:
+        if not path:
+            QMessageBox.information(self, "No file", "No file is available for this selection.")
+            return
+        if not path.exists():
+            QMessageBox.warning(self, "Missing file", f"File not found:\n{path}")
+            return
+        QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(path)))
+
+    def _load_output_tables(self, paths: dict) -> None:
+        assembly_summary = paths.get("assembly_summary")
+        if assembly_summary:
+            self._load_summary_table(Path(assembly_summary))
+
+        asm_dir = None
+        if assembly_summary:
+            asm_dir = Path(assembly_summary).parent
+        elif paths.get("fasta"):
+            asm_dir = Path(paths.get("fasta")).parent
+
+        blast_tsv = asm_dir / "blast_inputs.tsv" if asm_dir else None
+        if blast_tsv and blast_tsv.exists():
+            self._load_blast_inputs_table(blast_tsv)
+
+        overlap_audit = paths.get("overlap_audit")
+        if overlap_audit:
+            self._load_overlap_audit_table(Path(overlap_audit))
+
+        if asm_dir:
+            self._asm_dir = asm_dir
+            self._blast_inputs_fasta = self._asm_dir / "blast_inputs.fasta"
+            self.open_blast_inputs_btn.setEnabled(self._blast_inputs_fasta.exists())
+            self.open_asm_folder_btn.setEnabled(self._asm_dir.exists())
+
+    def _load_summary_table(self, summary_path: Path) -> None:
+        if not summary_path.exists():
+            return
+        df = pd.read_csv(summary_path, sep="\t")
+        self.summary_table.setRowCount(0)
+        self._summary_rows.clear()
+        self.summary_filter.blockSignals(True)
+        self.summary_filter.clear()
+        self.summary_filter.addItem("All statuses", userData=None)
+
+        status_colors = {
+            "assembled": QColor("#C8E6C9"),
+            "singlets_only": QColor("#FFF9C4"),
+            "cap3_no_output": QColor("#FFE0B2"),
+            "pair_missing": QColor("#FFCDD2"),
+        }
+
+        for row_idx, row in df.iterrows():
+            self.summary_table.insertRow(row_idx)
+            row_values = [
+                str(row.get("sample_id", "")),
+                str(row.get("status", "")),
+                str(row.get("contigs_count", "")),
+                str(row.get("singlets_count", "")),
+                str(row.get("overlaps_saved", "")),
+                str(row.get("overlaps_removed", "")),
+            ]
+            for col, value in enumerate(row_values):
+                item = QTableWidgetItem(value)
+                if col == 1:
+                    status = value
+                    color = status_colors.get(status, QColor("#E1F5FE") if status.startswith("overlap_") else None)
+                    if color:
+                        item.setBackground(QBrush(color))
+                self.summary_table.setItem(row_idx, col, item)
+            self._summary_rows[row_values[0]] = {
+                "status": row_values[1],
+                "contigs_count": row_values[2],
+                "singlets_count": row_values[3],
+                "overlaps_saved": row_values[4],
+                "overlaps_removed": row_values[5],
+            }
+        for status in sorted(df["status"].dropna().unique()):
+            self.summary_filter.addItem(status, userData=status)
+        self.summary_filter.blockSignals(False)
+        self._apply_summary_filter()
+
+    def _load_blast_inputs_table(self, blast_tsv: Path) -> None:
+        df = pd.read_csv(blast_tsv, sep="\t")
+        self.blast_table.setRowCount(0)
+        self._blast_rows.clear()
+        for row_idx, row in df.iterrows():
+            self.blast_table.insertRow(row_idx)
+            row_values = [
+                str(row.get("sample_id", "")),
+                str(row.get("blast_payload", "")),
+                str(row.get("reason", "")),
+                str(row.get("payload_ids", "")),
+            ]
+            for col, value in enumerate(row_values):
+                self.blast_table.setItem(row_idx, col, QTableWidgetItem(value))
+            self._blast_rows[row_values[0]] = {
+                "blast_payload": row_values[1],
+                "reason": row_values[2],
+                "payload_ids": row_values[3],
+            }
+
+    def _load_overlap_audit_table(self, audit_path: Path) -> None:
+        if not audit_path.exists():
+            return
+        df = pd.read_csv(audit_path, sep="\t")
+        self.diagnostics_table.setRowCount(0)
+        self._audit_rows.clear()
+        for row_idx, row in df.iterrows():
+            self.diagnostics_table.insertRow(row_idx)
+            row_values = [
+                str(row.get("sample_id", "")),
+                str(row.get("overlap_len", "")),
+                str(row.get("overlap_identity", "")),
+                str(row.get("overlap_quality", "")),
+                str(row.get("status", "")),
+            ]
+            for col, value in enumerate(row_values):
+                self.diagnostics_table.setItem(row_idx, col, QTableWidgetItem(value))
+            self._audit_rows[row_values[0]] = {
+                "overlap_len": row_values[1],
+                "overlap_identity": row_values[2],
+                "overlap_quality": row_values[3],
+                "status": row_values[4],
+            }
+
+    def _apply_summary_filter(self) -> None:
+        selected = self.summary_filter.currentData()
+        for row in range(self.summary_table.rowCount()):
+            status_item = self.summary_table.item(row, 1)
+            status = status_item.text() if status_item else ""
+            self.summary_table.setRowHidden(row, selected is not None and status != selected)
+
+    def _update_detail_panel(self) -> None:
+        sample_id = None
+        if self.summary_table.selectedItems():
+            sample_id = self.summary_table.item(self.summary_table.currentRow(), 0).text()
+        elif self.blast_table.selectedItems():
+            sample_id = self.blast_table.item(self.blast_table.currentRow(), 0).text()
+
+        if not sample_id:
+            return
+
+        summary = self._summary_rows.get(sample_id, {})
+        blast = self._blast_rows.get(sample_id, {})
+        audit = self._audit_rows.get(sample_id, {})
+
+        self.detail_sample_lbl.setText(f"sample_id: {sample_id}")
+        self.detail_status_lbl.setText(f"status: {summary.get('status', '—')}")
+        self.detail_reason_lbl.setText(f"reason: {blast.get('reason', '—')}")
+        self.detail_payload_lbl.setText(f"blast_payload: {blast.get('blast_payload', '—')}")
+        self.detail_payload_ids_lbl.setText(f"payload_ids: {blast.get('payload_ids', '—')}")
+        if audit:
+            self.detail_overlap_lbl.setText(
+                "overlap: "
+                f"{audit.get('status', '—')} (len {audit.get('overlap_len', '—')}, "
+                f"id {audit.get('overlap_identity', '—')}, "
+                f"q {audit.get('overlap_quality', '—')})"
+            )
+        else:
+            self.detail_overlap_lbl.setText("overlap: —")
+
+        if self._asm_dir:
+            sample_dir = self._asm_dir / sample_id
+            self._detail_paths["contigs"] = sample_dir / f"{sample_id}_paired.fasta.cap.contigs"
+            self._detail_paths["singlets"] = sample_dir / f"{sample_id}_paired.fasta.cap.singlets"
+            self._detail_paths["info"] = sample_dir / f"{sample_id}_paired.fasta.cap.info"
+            self.detail_contigs_btn.setEnabled(self._detail_paths["contigs"].exists())
+            self.detail_singlets_btn.setEnabled(self._detail_paths["singlets"].exists())
+            self.detail_info_btn.setEnabled(self._detail_paths["info"].exists())
 
     # closeEvent ----------------------------
     def closeEvent(self, event):

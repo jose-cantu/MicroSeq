@@ -9,7 +9,9 @@ from pathlib import Path
 from collections import Counter, defaultdict
 import re 
 from typing import Union, Sequence
-from Bio import SeqIO 
+from Bio import SeqIO
+from Bio.SeqRecord import SeqRecord
+from Bio.Align import PairwiseAligner
 import pandas as pd 
 import logging
 try:
@@ -30,9 +32,11 @@ from microseq_tests.trimming.fastq_to_fasta import (
 )
 
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
-from microseq_tests.assembly.paired_assembly import assemble_pairs
+from microseq_tests.assembly.paired_assembly import assemble_pairs, _build_keep_separate_pairs 
 from microseq_tests.assembly.pairing import  (
-        DETECTORS, DupPolicy, _extract_well, extract_sid_orientation, make_pattern_detector) 
+        DETECTORS, DupPolicy, _extract_well, _strip_well_token, extract_sid_orientation, make_pattern_detector) 
+from microseq_tests.assembly.cap3_report import parse_cap3_reports
+from microseq_tests.assembly.cap3_profiles import resolve_cap3_profile
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
 from microseq_tests.utility.utils import load_config, expand_db_path
@@ -40,7 +44,8 @@ from microseq_tests.vsearch_tools import (
     collapse_replicates_grouped, 
     chimera_check_ref, 
 )
-from microseq_tests.utility.id_normaliser import NORMALISERS 
+from microseq_tests.utility.id_normaliser import NORMALISERS
+from microseq_tests.utility.io_utils import write_fasta_and_qual_from_fastq
 from microseq_tests.post_blast_analysis import run as postblast_run
 
 __all__ = [
@@ -127,7 +132,7 @@ def run_assembly(fasta_in: PathLike, out_dir: PathLike, *, threads: int | None =
     return 0
 
 def run_paired_assembly(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options=None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None) -> list[Path]:
-    return assemble_pairs(Path(input_dir), Path(output_dir), dup_policy=dup_policy, cap3_options=cap3_options, fwd_pattern=fwd_pattern, rev_pattern=rev_pattern, pairing_report=pairing_report, enforce_same_well=enforce_same_well, well_pattern=well_pattern )
+    return assemble_pairs(Path(input_dir), Path(output_dir), dup_policy=dup_policy, cap3_options=cap3_options, fwd_pattern=fwd_pattern, rev_pattern=rev_pattern, pairing_report=pairing_report, enforce_same_well=enforce_same_well, well_pattern=well_pattern, use_qual=use_qual )
 
 # ───────────────────────────────────────────────────────── BLAST
 
@@ -371,7 +376,286 @@ def _suggest_pairing_patterns(directory: Path) -> str:
             "(e.g., sample_27F / sample_1492R) or pass --fwd-pattern/--rev-pattern explicitly."
         )
 
-    return " ".join(suggestions) 
+    return " ".join(suggestions)
+
+def _collect_pairing_catalog(
+    directory: Path,
+    *,
+    fwd_pattern: str | None,
+    rev_pattern: str | None,
+    dup_policy: DupPolicy,
+    enforce_same_well: bool,
+    well_pattern: str | re.Pattern[str] | None,
+) -> tuple[dict[str, dict[str, list[Path]]], set[str]]:
+    """Return paired sample mappings and missing-mate sample IDs."""
+    detectors = list(DETECTORS)
+    if fwd_pattern and rev_pattern:
+        detectors = [make_pattern_detector(fwd_pattern, rev_pattern), *detectors]
+
+    pairs: dict[str, dict[str, list[Path]]] = defaultdict(lambda: {"F": [], "R": []})
+
+    if directory.is_file():
+        for record in SeqIO.parse(directory, "fasta"):
+            sid, orient = extract_sid_orientation(record.id, detectors=detectors)
+            if orient not in ("F", "R"):
+                continue
+            if not enforce_same_well:
+                sid = _strip_well_token(sid)
+            well = _extract_well(record.id, pattern=well_pattern) if enforce_same_well else None
+            if enforce_same_well and not well:
+                continue
+            key = well if (enforce_same_well and well) else sid
+            pairs[key][orient].append(directory)
+    else:
+        for suffix in ("*.fasta", "*.fa", "*.fna"):
+            for fp in sorted(directory.glob(suffix)):
+                sid, orient = extract_sid_orientation(fp.name, detectors=detectors)
+                if orient not in ("F", "R"):
+                    continue
+                if not enforce_same_well:
+                    sid = _strip_well_token(sid)
+                well = _extract_well(fp.name, pattern=well_pattern) if enforce_same_well else None
+                if enforce_same_well and not well:
+                    continue
+                key = well if (enforce_same_well and well) else sid
+                pairs[key][orient].append(fp)
+
+    paired_samples: dict[str, dict[str, list[Path]]] = {}
+    missing_samples: set[str] = set()
+    for sid, entries in pairs.items():
+        f_sources = entries["F"]
+        r_sources = entries["R"]
+        if not f_sources or not r_sources:
+            missing_samples.add(sid)
+            continue
+        if dup_policy == DupPolicy.KEEP_SEPARATE:
+            primer_pairs = _build_keep_separate_pairs(f_sources, r_sources)
+            for idx, (fwd, rev) in enumerate(primer_pairs, start=1):
+                sample_key = sid if len(primer_pairs) == 1 else f"{sid}_{idx}"
+                paired_samples[sample_key] = {"F": [fwd], "R": [rev]}
+        else:
+            paired_samples[sid] = {"F": f_sources, "R": r_sources}
+
+    return paired_samples, missing_samples
+
+
+def _read_first_record(path: Path, fmt: str) -> SeqRecord | None:
+    for record in SeqIO.parse(path, fmt):
+        return record
+    return None
+
+
+def _load_qual_record(qual_path: Path, record_id: str) -> list[int] | None:
+    if not qual_path.exists():
+        return None
+    for qual_rec in SeqIO.parse(qual_path, "qual"):
+        if qual_rec.id == record_id:
+            return qual_rec.letter_annotations.get("phred_quality")
+    return None
+
+
+def _evaluate_overlap(
+    fwd_seq: str,
+    rev_seq: str,
+    fwd_qual: list[int] | None,
+    rev_qual: list[int] | None,
+    *,
+    min_overlap: int = 100,
+    min_identity: float = 0.8,
+    min_quality: float = 20.0,
+) -> dict[str, float | str | None]:
+    aligner = PairwiseAligner()
+    aligner.mode = "local"
+    aligner.match_score = 1.0
+    aligner.mismatch_score = 0.0
+    aligner.open_gap_score = -1.0
+    aligner.extend_gap_score = -0.5
+
+    alignment = aligner.align(fwd_seq, rev_seq)[0]
+    overlap_len = 0
+    matches = 0
+    quality_vals: list[int] = []
+
+    for (start1, end1), (start2, end2) in zip(alignment.aligned[0], alignment.aligned[1]):
+        segment_len = end1 - start1
+        overlap_len += segment_len
+        for idx in range(segment_len):
+            base1 = fwd_seq[start1 + idx]
+            base2 = rev_seq[start2 + idx]
+            if base1 == base2:
+                matches += 1
+            if fwd_qual is not None and rev_qual is not None:
+                quality_vals.append(min(fwd_qual[start1 + idx], rev_qual[start2 + idx]))
+
+    identity = matches / overlap_len if overlap_len else 0.0
+    overlap_quality = None
+    if quality_vals:
+        overlap_quality = sum(quality_vals) / len(quality_vals)
+
+    if overlap_len < min_overlap:
+        status = "overlap_too_short"
+    elif identity < min_identity:
+        status = "overlap_identity_low"
+    elif overlap_quality is not None and overlap_quality < min_quality:
+        status = "overlap_quality_low"
+    else:
+        status = "ok"
+
+    return {
+        "overlap_len": overlap_len,
+        "identity": identity,
+        "overlap_quality": overlap_quality,
+        "status": status,
+    }
+
+
+def _write_overlap_audit(
+    paired_samples: dict[str, dict[str, list[Path]]],
+    output_tsv: Path,
+) -> dict[str, str]:
+    output_tsv.parent.mkdir(parents=True, exist_ok=True)
+    status_map: dict[str, str] = {}
+    with output_tsv.open("w", encoding="utf-8") as fh:
+        fh.write("sample_id\toverlap_len\toverlap_identity\toverlap_quality\tstatus\n")
+        for sample_id, entries in sorted(paired_samples.items()):
+            if not entries["F"] or not entries["R"]:
+                status = "overlap_missing_reads"
+                status_map[sample_id] = status
+                fh.write(f"{sample_id}\t0\t0\t\t{status}\n")
+                continue
+            fwd_path = entries["F"][0]
+            rev_path = entries["R"][0]
+            if not fwd_path.exists() or not rev_path.exists():
+                status = "overlap_missing_reads"
+                status_map[sample_id] = status
+                fh.write(f"{sample_id}\t0\t0\t\t{status}\n")
+                continue
+            fwd_record = _read_first_record(fwd_path, "fasta")
+            rev_record = _read_first_record(rev_path, "fasta")
+            if fwd_record is None or rev_record is None:
+                status = "overlap_missing_reads"
+                status_map[sample_id] = status
+                fh.write(f"{sample_id}\t0\t0\t\t{status}\n")
+                continue
+
+            fwd_qual = _load_qual_record(Path(f"{fwd_path}.qual"), fwd_record.id)
+            rev_qual = _load_qual_record(Path(f"{rev_path}.qual"), rev_record.id)
+            audit = _evaluate_overlap(
+                str(fwd_record.seq),
+                str(rev_record.seq),
+                fwd_qual,
+                rev_qual,
+            )
+            status = str(audit["status"])
+            status_map[sample_id] = status
+            overlap_quality = audit["overlap_quality"]
+            fh.write(
+                f"{sample_id}\t{audit['overlap_len']}\t{audit['identity']:.4f}\t"
+                f"{'' if overlap_quality is None else f'{overlap_quality:.2f}'}\t{status}\n"
+            )
+    return status_map
+
+
+def _build_blast_inputs(
+    asm_dir: Path,
+    paired_samples: dict[str, dict[str, list[Path]]],
+    missing_samples: set[str],
+    output_fasta: Path,
+    output_tsv: Path,
+) -> None:
+    output_fasta.parent.mkdir(parents=True, exist_ok=True)
+    output_tsv.parent.mkdir(parents=True, exist_ok=True)
+
+    records_to_write: list[SeqIO.SeqRecord] = []
+    rows: list[dict[str, str]] = []
+
+    for sample_id in sorted(set(paired_samples) | set(missing_samples)):
+        if sample_id in missing_samples:
+            rows.append(
+                {
+                    "sample_id": sample_id,
+                    "blast_payload": "pair_missing",
+                    "payload_ids": "",
+                    "reason": "pair_missing",
+                }
+            )
+            continue
+
+        contigs_path = asm_dir / sample_id / f"{sample_id}_paired.fasta.cap.contigs"
+        singlets_path = asm_dir / sample_id / f"{sample_id}_paired.fasta.cap.singlets"
+
+        contigs = list(SeqIO.parse(contigs_path, "fasta")) if contigs_path.exists() else []
+        singlets = list(SeqIO.parse(singlets_path, "fasta")) if singlets_path.exists() else []
+
+        if contigs:
+            payload = "contig"
+            source_records = contigs
+            reason = "contigs_present"
+            label = "cap3_c"
+        elif singlets:
+            payload = "singlet"
+            source_records = singlets
+            reason = "singlets_only"
+            label = "cap3_s"
+        else:
+            payload = "no_payload"
+            source_records = []
+            reason = "cap3_no_output"
+            label = "cap3"
+
+        payload_ids: list[str] = []
+        for idx, record in enumerate(source_records, start=1):
+            new_id = f"{sample_id}|{payload}|{label}{idx}"
+            payload_ids.append(f"{new_id}={record.id}")
+            record.id = new_id
+            record.name = new_id
+            record.description = ""
+            records_to_write.append(record)
+
+        rows.append(
+            {
+                "sample_id": sample_id,
+                "blast_payload": payload,
+                "payload_ids": ";".join(payload_ids),
+                "reason": reason,
+            }
+        )
+
+    with output_fasta.open("w", encoding="utf-8") as fh:
+        SeqIO.write(records_to_write, fh, "fasta")
+
+    with output_tsv.open("w", encoding="utf-8") as fh:
+        fh.write("sample_id\tblast_payload\tpayload_ids\treason\n")
+        for row in rows:
+            fh.write("\t".join([row["sample_id"], row["blast_payload"], row["payload_ids"], row["reason"]]) + "\n")
+
+
+def _resolve_cap3_options(
+    cap3_profile: str,
+    cap3_options: Sequence[str] | None,
+    cap3_extra_args: Sequence[str] | None,
+) -> list[str]:
+    args = resolve_cap3_profile(cap3_profile)
+    if cap3_options:
+        args.extend(cap3_options)
+    if cap3_extra_args:
+        args.extend(cap3_extra_args)
+    return args
+
+
+def _merge_cap3_contigs(
+    files: Sequence[Path],
+    destination: Path,
+) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("w", encoding="utf-8") as out:
+        for fp in files:
+            sid = Path(fp).parent.name
+            for idx, rec in enumerate(SeqIO.parse(fp, "fasta"), 1):
+                rec.id = f"{sid}|contig|cap3_c{idx}"
+                rec.name = rec.id
+                rec.description = ""
+                SeqIO.write(rec, out, "fasta")
 
 def run_full_pipeline(
     infile: Path,
@@ -386,7 +670,12 @@ def run_full_pipeline(
     threads: int = 4,
     blast_task: str = "megablast", 
     dup_policy: DupPolicy = DupPolicy.ERROR, 
-    cap3_options=None, 
+    cap3_options=None,
+    cap3_profile: str = "strict",
+    cap3_extra_args: Sequence[str] | None = None,
+    cap3_use_qual: bool = True,
+    write_blast_inputs: bool = True,
+    use_blast_inputs: bool = True,
     fwd_pattern: str | None = None,
     rev_pattern: str | None = None,
     enforce_same_well: bool = False,
@@ -400,15 +689,20 @@ def run_full_pipeline(
     min_replicate_size: int | None = None,
     chimera_mode: str = "off",
     chimera_db: PathLike | None = None,
+    overlap_audit: bool = False, 
     on_stage=None,
     on_progress=None,
 ) -> dict[str, Path | None]:
-    """Run trim -> FASTA merge -> BLAST -> taxonomy (+ optional post‑BLAST).
+    """
+    Run trim -> FASTA merge -> BLAST -> taxonomy (+ optional post‑BLAST).
 
     infile may be FASTA, FASTQ, a single ``.ab1`` trace, or a directory of
     ``.ab1`` files.  Sanger mode is triggered automatically when *infile* is a
     directory or ends with ``.ab1``.  When *summary_tsv* is ``None`` the summary
-    is written to ``qc/trim_summary.tsv`` inside *out_dir*.
+    is written to ``qc/trim_summary.tsv`` inside *out_dir*. Set *overlap_audit* 
+    to emit ``qc/overlap_audit.tsv`` and annotate paired assembly summaries with
+    overlap status codes. CAP3 profiles and extra args can be supplied via
+    *cap3_profile* and *cap3_extra_args* to tune paired assembly parameters.
     """
 
     on_stage = on_stage or (lambda *_: None)
@@ -458,6 +752,8 @@ def run_full_pipeline(
         "chimera_report": None,
         "replicate_map": None,
         "replicate_weights": None,
+        "assembly_summary": out_dir / "asm" / "assembly_summary.tsv" if using_paired else None,
+        "overlap_audit": out_dir / "qc" / "overlap_audit.tsv" if (using_paired and overlap_audit) else None,
     }
 
     extra_stages = int(collapse_replicates) + int(chimera_mode != "off")
@@ -474,33 +770,28 @@ def run_full_pipeline(
         return lambda p: on_progress(off + p * step // 100)
 
     if using_paired:
-        def _merge_cap3_contigs(files: Sequence[Path], destination: Path, map_tsv: Path | None = None) -> None:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            
-            map_tsv = map_tsv or destination.with_suffix(".tsv")
-            with destination.open("w", encoding="utf-8") as out, map_tsv.open(
-                    "w", encoding="utf-8" 
-            ) as manifest:
-                manifest.write("qseqid\tsample\n")
-                
-                for fp in files:
-                    sid = Path(fp).parent.name
-                    for idx, rec in enumerate(SeqIO.parse(fp, "fasta"), 1):
-                        rec.id = f"{sid}_c{idx}"
-                        rec.name = rec.id
-                        rec.description = ""
-                        SeqIO.write(rec, out, "fasta")
-                        manifest.write(f"{rec.id}\t{sid}\n")
-                   
-        def _fastq_to_paired_fastas(source_dir: Path, dest_dir: Path) -> list[Path]:
+       def _fastq_to_paired_fastas(
+            source_dir: Path,
+            dest_dir: Path,
+            *,
+            use_qual: bool,
+        ) -> list[Path]:
             dest_dir.mkdir(parents=True, exist_ok=True)
             written: list[Path] = []
-            for fq in sorted(source_dir.rglob("*.fastq")):
-                records = list(SeqIO.parse(fq, "fastq"))
-                if not records:
-                    continue
-                out_fp = dest_dir / f"{fq.stem}.fasta"
+            for fq in sorted(source_dir.rglob("*.fastq")): 
                 SeqIO.write(records, out_fp, "fasta")
+                if use_qual:
+                    result = write_fasta_and_qual_from_fastq(fq, out_fp)
+                else:
+                    records = list(SeqIO.parse(fq, "fastq"))
+                    if not records:
+                        result = None
+                    else:
+                        out_fp.parent.mkdir(parents=True, exist_ok=True)
+                        SeqIO.write(records, out_fp, "fasta")
+                        result = out_fp
+                if result is None:
+                    continue
                 written.append(out_fp)
             return written
 
@@ -524,7 +815,7 @@ def run_full_pipeline(
             on_progress(pct)
 
             fasta_dir = out_dir / "qc" / "paired_fasta"
-            generated_fastas = _fastq_to_paired_fastas(fastq_dir, fasta_dir)
+            generated_fastas = _fastq_to_paired_fastas(fastq_dir, fasta_dir, use_qual=cap3_use_qual)
             if not generated_fastas:
                 raise ValueError(f"No FASTA files generated from {fastq_dir}")
             assembly_input = fasta_dir
@@ -534,16 +825,18 @@ def run_full_pipeline(
         pairing_report.parent.mkdir(parents=True, exist_ok=True)
 
         on_stage("Paired assembly")
+        cap3_args = _resolve_cap3_options(cap3_profile, cap3_options, cap3_extra_args)
         contig_paths = assemble_pairs(
             assembly_input, 
             out_dir / "asm",
             dup_policy=dup_policy,
-            cap3_options=cap3_options,
+            cap3_options=cap3_args,
             fwd_pattern=fwd_pattern,
             rev_pattern=rev_pattern,
             pairing_report=pairing_report,
             enforce_same_well=enforce_same_well,
-            well_pattern=well_pattern 
+            well_pattern=well_pattern,
+            use_qual=cap3_use_qual
         )
         if not contig_paths:
            summary = _summarize_paired_candidates(assembly_input, fwd_pattern, rev_pattern, enforce_same_well=enforce_same_well, well_pattern=well_pattern)
@@ -552,12 +845,65 @@ def run_full_pipeline(
                 f"No paired reads detected in {assembly_input}; {summary}. "
                 "If your primer names differ, provide --fwd-pattern/--rev-pattern."
                 f" {suggestions}"
-            )  
+            ) 
+        paired_samples, missing_samples = _collect_pairing_catalog(
+            assembly_input,
+            fwd_pattern=fwd_pattern,
+            rev_pattern=rev_pattern,
+            dup_policy=dup_policy,
+            enforce_same_well=enforce_same_well,
+            well_pattern=well_pattern,
+        )
+        if pairing_report.exists():
+            report_ids = set(
+                line.split("\t", 1)[0]
+                for line in pairing_report.read_text(encoding="utf-8").splitlines()[1:]
+                if line.strip()
+            )
+            missing_samples.difference_update(report_ids)
+            for sid in report_ids:
+                paired_samples.setdefault(sid, {"F": [], "R": []})
+
+        overlap_status = None
+        if overlap_audit and paths["overlap_audit"]:
+            if Path(assembly_input).is_dir():
+                overlap_status = _write_overlap_audit(paired_samples, paths["overlap_audit"])
+            else:
+                L.warning("Overlap audit skipped; paired input is not a directory: %s", assembly_input)
+
+        assembly_summary = paths["assembly_summary"]
+        if assembly_summary:
+            parse_cap3_reports(
+                out_dir / "asm",
+                sorted(set(paired_samples.keys()) | set(missing_samples)),
+                output_tsv=assembly_summary,
+                missing_samples=missing_samples,
+                overlap_status=overlap_status,
+            )
         merged_contigs = out_dir / "asm" / "paired_contigs.fasta"
-        contig_map = out_dir / "asm" / "contig_map.tsv"
-        _merge_cap3_contigs(contig_paths, merged_contigs, contig_map)
-        paths["fasta"] = merged_contigs
-        paths["trimmed_fasta"] = merged_contigs
+        _merge_cap3_contigs(contig_paths, merged_contigs)
+
+        if use_blast_inputs and not write_blast_inputs:
+            L.warning("use_blast_inputs requested without write_blast_inputs; enabling blast input output.")
+            write_blast_inputs = True
+
+        blast_inputs_fasta = out_dir / "asm" / "blast_inputs.fasta"
+        blast_inputs_tsv = out_dir / "asm" / "blast_inputs.tsv"
+        if write_blast_inputs:
+            _build_blast_inputs(
+                out_dir / "asm",
+                paired_samples,
+                missing_samples,
+                blast_inputs_fasta,
+                blast_inputs_tsv,
+            )
+
+        if use_blast_inputs and write_blast_inputs:
+            paths["fasta"] = blast_inputs_fasta
+            paths["trimmed_fasta"] = blast_inputs_fasta
+        else:
+            paths["fasta"] = merged_contigs
+            paths["trimmed_fasta"] = merged_contigs
 
         pct += step
         on_progress(pct)
@@ -711,25 +1057,15 @@ def run_full_pipeline(
     on_progress(pct)
 
     if using_paired:
-        contig_map = out_dir / "asm" / "contig_map.tsv"
         try:
-            if contig_map.exists():
-                tax_df = pd.read_csv(paths["tax"], sep="\t")
-                map_df = pd.read_csv(contig_map, sep="\t")
-                
-                merge_key = None
-                if "qseqid" in tax_df.columns:
-                    merge_key = "qseqid"
-                elif "sample_id" in tax_df.columns:
-                    merge_key = "sample_id"
-                    map_df = map_df.rename(columns={"qseqid": "sample_id"})
-
-                if merge_key and "sample" not in tax_df.columns:
-                    tax_df = tax_df.merge(map_df, on=merge_key, how="left") 
-
-                    tax_df.to_csv(paths["tax"], sep="\t", index=False)
+            tax_df = pd.read_csv(paths["tax"], sep="\t")
+            if "sample_id" not in tax_df.columns and "qseqid" in tax_df.columns:
+                tax_df["sample_id"] = (
+                    tax_df["qseqid"].astype(str).str.split("|").str[0]
+                )
+                tax_df.to_csv(paths["tax"], sep="\t", index=False) 
         except Exception as exc:
-            L.warning("Failed to merge contig map into taxonomy table: %s", exc)
+            L.warning("Failed to add paired sample_id column to taxonomy table: %s", exc)
 
     # 5 – Optional post-BLAST
     if postblast:

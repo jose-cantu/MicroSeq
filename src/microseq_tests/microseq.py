@@ -6,7 +6,7 @@ from microseq_tests.utility.progress import stage_bar
 from microseq_tests.utility.merge_hits import merge_hits 
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
-from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, run_full_pipeline, _summarize_paired_candidates, _suggest_pairing_patterns)
+from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, run_full_pipeline, _summarize_paired_candidates, _suggest_pairing_patterns, _collect_pairing_catalog, _write_overlap_audit)
 from microseq_tests.utility.utils import setup_logging, load_config, expand_db_path
 from microseq_tests.assembly.pairing import DupPolicy 
 from microseq_tests.blast.run_blast import run_blast
@@ -21,6 +21,7 @@ from microseq_tests.utility.merge_hits import merge_hits as merged_hits
 from microseq_tests.utility.cutoff_sweeper import suggest_after_collapse as suggest
 from microseq_tests.utility import filter_hits_cli 
 from microseq_tests.utility.id_normaliser import NORMALISERS
+from microseq_tests.assembly.cap3_profiles import resolve_cap3_profile, CAP3_PROFILES
 from microseq_tests.vsearch_tools import (
     collapse_replicates_grouped,
     chimera_check_ref,
@@ -81,7 +82,12 @@ def main() -> None:
     p_asm.add_argument("--rev-pattern", default="1492R|806R|926R|R", help="Regex pattern used to detect reverse primer tokens in filenames (paired mode)") 
     p_asm.add_argument("--enforce-well", action="store_true", help="Require forward/reverse reads to share a plate well code (A1-H12) before pairing")
     p_asm.add_argument("--well-pattern", help="Optional custom regex to detect wells (default matches A1-H12)")
-    p_asm.add_argument("--preview-pairs", action="store_true", help="Summarizing pairing candidates instead of running paired assembly") 
+    p_asm.add_argument("--preview-pairs", action="store_true", help="Summarizing pairing candidates instead of running paired assembly")
+    p_asm.add_argument("--overlap-audit", action="store_true", help="Generate qc/overlap_audit.tsv for paired assembly runs")
+    p_asm.add_argument("--cap3-profile", choices=sorted(CAP3_PROFILES.keys()), default="strict", help="CAP3 profile preset for paired assembly")
+    p_asm.add_argument("--cap3-extra-args", nargs="*", help="Additional CAP3 args appended after the selected profile")
+    p_asm.add_argument("--cap3-qual", action="store_true", default=True, help="Use per-base quality scores during CAP3 assembly (default)")
+    p_asm.add_argument("--no-cap3-qual", dest="cap3_qual", action="store_false", help="Disable QUAL usage for CAP3 assembly; I would use this for diagnositcs ONLY its recommended to use the error base model CAP3 relies on more details in docs on this")
 
     # blast 
     db_choices = list(cfg["databases"].keys())    # e.g. here ['gg2', 'silva', 'ncbi16s']
@@ -286,11 +292,26 @@ def main() -> None:
                 args.input,
                 args.output,
                 dup_policy=DupPolicy(args.dup_policy),
+                cap3_options=resolve_cap3_profile(args.cap3_profile, args.cap3_extra_args),
                 fwd_pattern=args.fwd_pattern,
                 rev_pattern=args.rev_pattern,
                 enforce_same_well=args.enforce_well,
-                well_pattern=args.well_pattern
+                well_pattern=args.well_pattern,
+                use_qual=args.cap3_qual,
             )
+            if args.overlap_audit:
+                pairing_dir = pathlib.Path(args.input)
+                output_dir = pathlib.Path(args.output)
+                paired_samples, _ = _collect_pairing_catalog(
+                    pairing_dir,
+                    fwd_pattern=args.fwd_pattern,
+                    rev_pattern=args.rev_pattern,
+                    dup_policy=DupPolicy(args.dup_policy),
+                    enforce_same_well=args.enforce_well,
+                    well_pattern=args.well_pattern,
+                )
+                audit_path = output_dir / "qc" / "overlap_audit.tsv"
+                _write_overlap_audit(paired_samples, audit_path)
         else:
             run_assembly(args.input, args.output, threads=args.threads) 
 

@@ -14,8 +14,9 @@ It can auto-detect primer tokens in filenames, enforce plate well consistency, a
 * **Well-aware pairing.** Plate positions such as `A1`–`H12` can be required with `--enforce-well`; mismatched or missing wells are skipped with an explicit report.
 * **Duplicate policies.** Choose whether duplicate forward/reverse files error, keep-first, keep-last, merge, or **keep-separate** (runs CAP3 per duplicate and preserves separate outputs).
 * **Generalised inputs.** Mixed FASTA, FASTQ, or AB1 inputs are normalised to per-read FASTA before pairing so you can point at a folder or a merged FASTA file.
-* **Contig traceability.** CAP3 headers are rewritten with sample-aware IDs and a `contig_map.tsv` manifest records which input reads built each contig.
-* **GUI support.** The GUI now stages multi-file selections, exposes single vs paired assembly, primer presets, advanced regex toggles, duplicate policy selector, well enforcement, and a pairing preview dialog.
+* **Contig traceability.**  Blast inputs are rewritten with sample aware IDs and tracked in `asm/blast_inputs.tsv` so CAP3 contigs/singlets can be traced back to the original IDs. 
+**GUI support.** The GUI now stages multi-file selections, exposes single vs paired assembly, primer presets, advanced regex toggles, duplicate policy selector, well enforcement, and a pairing preview dialog.
+* **BLAST input manifest.** Paired assemblies now emit `asm/blast_inputs.fasta` and `asm/blast_inputs.tsv` so you can trace BLAST inputs back to CAP3 contigs/singlets and see which samples were missing mates.
 
 ## CLI tutorial: guaranteed forward/reverse pairing
 
@@ -31,8 +32,7 @@ microseq assembly --mode paired \
 
 * I would recommend just defaulting to `--dup-policy error` unless otherwise. 
 * `--dup-policy merge` merges duplicate orientations before CAP3; swap to `keep-first`, `keep-last`, or `keep-separate` as needed.
-* Outputs land in `results/paired_cap3/<sample>/` with `*.cap.contigs`, `*.cap.singlets`, `contig_map.tsv`, and a pairing report.
-
+* Outputs land in `results/paired_cap3/<sample>/` with `*.cap.contigs`, `*.cap.singlets`, and a pairing report, plus `asm/blast_inputs.fasta`/`asm/blast_inputs.tsv` for BLAST payload tracking. 
 3) **Require wells + custom primer regex** (when filenames include plate codes and unusual primer names):
 
 ```bash
@@ -59,7 +59,7 @@ microseq assembly --mode paired \
 3) **Well enforcement.** Check **Enforce well codes** to require plate positions (A1–H12 by default). You can edit the regex if your lab uses a different format.
 4) **Duplicate policy.** Choose whether duplicates **Error**, **Keep first**, **Keep last**, **Merge**, or **Keep separate**. The choice persists between sessions via QSettings.
 5) **Preview pairs.** Click **Preview pairs** to see which files were detected as forward/reverse, which detector matched, any missing mates, and suggested regexes. Fix naming if needed, then proceed.
-6) **Run assembly.** The GUI launches CAP3 per paired sample, rewrites contig headers, and writes a `contig_map.tsv` manifest alongside contigs and singlets for traceability. Logs include the pairing report so you can audit wells, detectors, and duplicate handling.
+6) **Run assembly.** The GUI launches CAP3 per paired sample, rewrites BLAST input headers, and writes `asm/blast_inputs.tsv` for traceability. Logs include the pairing report so you can audit wells, detectors, and duplicate handling.
 
 ## Tips
 
@@ -67,6 +67,137 @@ microseq assembly --mode paired \
 * When supplying regexes, wrap alternatives in parentheses (e.g., `(27F|8F)`), and include trailing `F`/`R` so orientations are unambiguous.
 * For plate runs, enable well enforcement to avoid mixing reads across wells; the manifest reflects the enforced well key.
 * Use **keep-separate** when you intentionally want per-orientation CAP3 outputs (e.g., troubleshooting primer performance) without merging reads.
+
+## BLAST inputs and payload tracking
+
+Paired mode now writes two BLAST-oriented artifacts:
+
+* `asm/blast_inputs.fasta` – the sequences submitted to BLAST, with rewritten IDs.
+* `asm/blast_inputs.tsv` – a per-sample manifest showing what payload was selected and why.
+
+### Contig → singlet fallback order
+
+For each paired sample, MicroSeq chooses the first available payload in the order:
+
+1) CAP3 contigs (`*.cap.contigs`)
+2) CAP3 singlets (`*.cap.singlets`)
+3) No payload (empty assembly output)
+
+### FASTA header rewrite
+
+Each BLAST record is rewritten so the sample ID is embedded in the query ID:
+
+```
+sampleA|contig|cap3_c1
+sampleA|singlet|cap3_s1
+```
+
+### `blast_inputs.tsv` columns
+
+| Column | Description |
+| --- | --- |
+| `sample_id` | The paired sample key (includes `_1`, `_2`, … in keep‑separate mode). |
+| `blast_payload` | One of `contig`, `singlet`, `no_payload`, or `pair_missing`. |
+| `payload_ids` | A semicolon‑delimited mapping of rewritten IDs to original CAP3/read IDs. |
+| `reason` | Why that payload was chosen (see taxonomy below). |
+
+Example payload mapping:
+
+```
+payload_ids: sampleA|contig|cap3_c1=Contig1;sampleA|contig|cap3_c2=Contig2
+```
+
+### `blast_payload` and `reason` taxonomy
+
+* `contig` → `contigs_present` (contigs found, used for BLAST)
+* `singlet` → `singlets_only` (no contigs, but singlets found)
+* `no_payload` → `cap3_no_output` (no contigs or singlets produced)
+* `pair_missing` → `pair_missing` (no valid forward/reverse pair)
+
+### How `pair_missing` is determined
+
+MicroSeq combines the pairing report (`qc/pairing_report.tsv`) with the original
+paired FASTA filenames. If a sample has only one orientation (forward **or**
+reverse) after pairing detection and well enforcement, it is marked as
+`pair_missing` and kept in `blast_inputs.tsv` without any BLAST payload.
+
+## Paired assembly outputs (current version)
+
+The paired pipeline now produces the following key files under the run folder:
+
+* `qc/pairing_report.tsv` : resolved forward/reverse pairs, detectors, and wells.
+* `qc/overlap_audit.tsv` : optional overlap diagnostics (only when enabled).
+* `asm/<sample>/<sample>_paired.fasta` : concatenated per-sample FASTA input to CAP3.
+* `asm/<sample>/<sample>_paired.fasta.qual` : concatenated QUALs (when available).
+* `asm/<sample>/*.cap.contigs` : CAP3 contigs.
+* `asm/<sample>/*.cap.singlets` : CAP3 singlets.
+* `asm/<sample>/*.cap.info` : CAP3 run summary (overlaps saved/removed, clip info).
+* `asm/assembly_summary.tsv` : per-sample CAP3 summary + status.
+* `asm/paired_contigs.fasta` : merged contigs-only FASTA (for contigs-only BLAST).
+* `asm/blast_inputs.fasta` : contigs+singlets BLAST payload FASTA.
+* `asm/blast_inputs.tsv` : payload manifest with `blast_payload`, `reason`, and `payload_ids`.
+
+## Diagnosing singlets and overlap failures
+
+Use the CAP3 logs, `assembly_summary.tsv`, and `overlap_audit.tsv` to identify
+which overlap gate is binding before relaxing parameters. CAP3 overlap acceptance
+is a conjunction of multiple filters, so the most reliable “relaxation” is the
+one that targets the gate that actually failed.
+
+### CAP3 overlap removal gates
+
+* **Clipping range failures (`-y`)**: CAP3 logs messages like “No overlap is found
+  in the given 5’ clipping range…”. This usually indicates that clipping removed
+  the true overlap; increase `-y` or relax upstream trimming before lowering `-o`.
+* **Difference score (`-b/-d`)**: mismatches contribute `max(0, min(q1,q2) - b)`
+  and CAP3 removes overlaps when the total exceeds `d`.
+* **Expected-differences (`-e`)**: overlaps are removed when observed differences
+  exceed expected errors (from overlap-region qualities) plus `e`.
+* **Similarity score (`-s`)**: CAP3 computes a quality-weighted similarity score
+  (using `-m/-n/-g`) and removes overlaps below `s`.
+* **Hard gates (`-o`, `-p`)**: minimum overlap length and minimum percent identity.
+
+### Why QUAL propagation matters
+
+Without `.qual` files CAP3 treats every base as Q=10, which distorts clipping,
+difference scoring, and similarity scoring. Always run strict profiles *with*
+QUALs first, then re-evaluate how many singlets remain before tuning profiles.
+This is the error model that CAP3 uses to assess if the two reads should be assembled together or not. 
+
+### Audit-driven relaxation strategy
+
+* If the audit shows overlap length just below `-o`, adjust `-o` (small steps).
+* If the audit shows a valid overlap but CAP3 reports a clipping-range failure,
+  increase `-y` or adjust trimming before changing `-o`.
+* If length/identity look fine but overlaps are removed, suspect quality-weighted
+  gates (`-b/-d/-e/-s`) rather than `-o/-p`, and avoid over-relaxing unless audit
+  evidence supports it.
+
+### Near-miss cohort approach
+
+Define “near-miss” thresholds such as:
+
+* overlap length within 5–15 bp of `-o`
+* percent identity within 1–3% of `-p`
+
+Then run a small structured sweep on only those samples to determine which gate
+is binding, instead of relaxing global thresholds blindly.
+
+### Validation criteria for rescued contigs
+
+* Forward and reverse singlet BLAST top hits agree taxonomically.
+* Contig BLAST agrees with both singlets.
+* Contig aligns back to each singlet without implausible mismatch clusters in
+  the overlap region.
+
+### Rescue vs. do-not-relax checklist
+
+* **Rescue first**: clipping range (`-y`) and overlap length (`-o`) when audits
+  show real overlaps were clipped or narrowly too short.
+* **Relax cautiously**: identity (`-p`) only for near-miss cases with strong
+  supporting evidence.
+* **Do not relax by default**: quality-disagreement gates (`-b/-d/-e`) and
+  similarity score (`-s`), which protect against mis-merges in mixed templates.
 
 ## Mock Example workflows to get an idea how to use it 
 
@@ -97,7 +228,7 @@ microseq assembly --mode paired \
   --enforce-well
 ```
 
-Outputs include `results/plateA_cap3/<sample>/contig_map.tsv` plus CAP3 contigs and singlets; the manifest records which input reads built each contig with the enforced well code.
+Outputs include`asm/blast_inputs.tsv` plus CAP3 contigs and singlets; the manifest records which input reads built each payload with the enforced well code.
 
 Single mode either does forward/reverse and simply runs CAP3 on the merged FASTA; use this when you know each file is already single-direction only.
 
@@ -124,7 +255,7 @@ microseq assembly --mode paired \
    --dup-policy error 
 
 # Step 3) Blast assembled contigs against Greengenes2 
-microseq blast -i "$OUTPUT/asm/paired_contigs.fasta" -d gg2 -o "$OUTPUT/hits.tsv"
+microseq blast -i "$OUTPUT/asm/blast_inputs.fasta" -d gg2 -o "$OUTPUT/hits.tsv"
 
 # Step 4) Join taxonomy 
 microseq add_taxonomy -i "$OUTPUT/hits.tsv" -d gg2 -o "$OUTPUT/hits_tax.tsv"

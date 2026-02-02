@@ -9,7 +9,9 @@ from os import PathLike
 import subprocess 
 from pathlib import Path 
 from typing import Iterable, Sequence
-import re 
+import re
+
+from Bio import SeqIO 
 
 from microseq_tests.utility.utils import load_config 
 
@@ -61,21 +63,55 @@ def _build_keep_separate_pairs(forward: list[Path], reverse: list[Path]) -> list
 
 
 
-def _write_combined_fasta(sources: Iterable[Path], destination: Path) -> None: 
-    """ Here I will combine multiple FASTA files into 'destination'."""
+def _write_combined_fasta(sources: Iterable[Path], destination: Path, *, use_qual: bool = True) -> None: 
+    """ 
+    Here I will combine multiple FASTA files into 'destination' and appending matching QUALS.
+    Each input FASTA is written in-order. When a sibling ``.qual`` file is
+    available (``<fasta>.qual``), its records are appended in the same order and
+    validated to ensure IDs and sequence/quality lengths match. If a source FASTA
+    lacks a ``.qual`` file, log a warning and skip its QUAL contribution.
+
+    """
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("w", encoding="utf-8") as fout:
+    qual_out_path = destination.with_name(f"{destination.name}.qual")
+    qual_out_handle = None 
+
+    with destination.open("w", encoding="utf-8") as fasta_out:
         for src in sources:
-            data = Path(src).read_text(encoding="utf-8")
-            # check if the data file is empty or not 
-            if not data:
-                # if its empty skip and continue 
-                continue 
-            # write data to file 
-            fout.write(data)
-            # make sure it adheres to FASTA format and check if newline if not newline will make one for next sample 
-            if not data.endswith("\n"):
-                fout.write("\n") 
+            records = list(SeqIO.parse(src, "fasta"))
+            if not records:
+                continue
+            SeqIO.write(records, fasta_out, "fasta")
+
+            if not use_qual:
+                continue
+
+            qual_src = Path(f"{src}.qual")
+            if not qual_src.exists():
+                L.warning("Missing QUAL file for %s; skipping quality output for this source.", src)
+                continue
+
+            qual_records = {rec.id: rec for rec in SeqIO.parse(qual_src, "qual")}
+            if qual_out_handle is None:
+                qual_out_handle = qual_out_path.open("w", encoding="utf-8")
+
+            for record in records:
+                qual_rec = qual_records.get(record.id)
+                if qual_rec is None:
+                    raise ValueError(
+                        f"QUAL record missing for {record.id} in {qual_src}"
+                    )
+                quals = qual_rec.letter_annotations.get("phred_quality", [])
+                if len(quals) != len(record.seq):
+                    raise ValueError(
+                        f"Quality length mismatch for {record.id} in {qual_src}: "
+                        f"{len(quals)} != {len(record.seq)}"
+                    )
+                qual_rec.description = ""
+                SeqIO.write(qual_rec, qual_out_handle, "qual")
+
+    if qual_out_handle is not None:
+        qual_out_handle.close()
 
 def _write_pairing_report(pairs: dict, meta: dict, destination: Path) -> None:
     """Persist a TSV showing how pairs were matched and which detector fired."""
@@ -138,7 +174,8 @@ def _write_pairing_report(pairs: dict, meta: dict, destination: Path) -> None:
                 + "\n"
             )
 
-def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options: Sequence[str] | None = None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None  
+def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options: Sequence[str] | None = None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None, 
+                   use_qual: bool = True 
                    ) -> list[Path]:
     """
     Run CAP3 assemblies for each forward and reverse pair discovered in ``input_dir``. 
@@ -228,7 +265,7 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
             sample_dir.mkdir(parents=True, exist_ok=True) 
             sample_fasta = sample_dir / f"{sample_key}_paired.fasta" 
 
-            _write_combined_fasta(sources, sample_fasta) 
+            _write_combined_fasta(sources, sample_fasta, use_qual=use_qual) 
 
             cmd = [cap3_exe, sample_fasta.name]
             if cap3_options:
