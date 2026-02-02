@@ -232,8 +232,8 @@ class MainWindow(QMainWindow):
         self.cap3_extra_args_edit = QLineEdit()
         self.cap3_extra_args_edit.setPlaceholderText("Extra CAP3 args (e.g., -a 20 -b 15)")
 
-        self.cap3_qual_chk = QCheckBox("Use per-base quality scores for assembly")
-        self.cap3_qual_chk.setToolTip("Use QUAL files to weight CAP3 assembly scoring.")
+        self.cap3_qual_chk = QCheckBox("Use per-base quality scores for assembly (its required for correct CAP3 scoring)")
+        self.cap3_qual_chk.setToolTip("Use QUAL files to weight CAP3 assembly scoring it ensures its correct.")
 
         self.write_blast_inputs_chk = QCheckBox("Create BLAST input file (contigs or singlets)")
         self.write_blast_inputs_chk.setToolTip("Emit asm/blast_inputs.fasta + asm/blast_inputs.tsv.")
@@ -751,7 +751,11 @@ class MainWindow(QMainWindow):
         if mode == "paired":
             fwd, rev = self._current_patterns()
         else:
-            fwd = rev = None 
+            fwd = rev = None
+        raw_extra_args = self.cap3_extra_args_edit.text().strip()
+        extra_args = raw_extra_args.split() if raw_extra_args else None
+        write_blast_inputs = self.write_blast_inputs_chk.isChecked()
+        use_blast_inputs = self.use_blast_inputs_combo.currentData()
         return {
             "mode": mode, 
             "fwd_pattern": fwd,

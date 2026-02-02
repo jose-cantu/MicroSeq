@@ -86,8 +86,8 @@ def main() -> None:
     p_asm.add_argument("--overlap-audit", action="store_true", help="Generate qc/overlap_audit.tsv for paired assembly runs")
     p_asm.add_argument("--cap3-profile", choices=sorted(CAP3_PROFILES.keys()), default="strict", help="CAP3 profile preset for paired assembly")
     p_asm.add_argument("--cap3-extra-args", nargs="*", help="Additional CAP3 args appended after the selected profile")
-    p_asm.add_argument("--cap3-qual", action="store_true", default=True, help="Use per-base quality scores during CAP3 assembly (default)")
-    p_asm.add_argument("--no-cap3-qual", dest="cap3_qual", action="store_false", help="Disable QUAL usage for CAP3 assembly; I would use this for diagnositcs ONLY its recommended to use the error base model CAP3 relies on more details in docs on this")
+    p_asm.add_argument("--cap3-qual", action="store_true", default=True, help="Use per-base quality scores during CAP3 assembly (required for correct scoring)")
+    p_asm.add_argument("--no-cap3-qual", dest="cap3_qual", action="store_false", help="Disable QUAL usage for CAP3 assembly; degrades CAP3 scoring")
 
     # blast 
     db_choices = list(cfg["databases"].keys())    # e.g. here ['gg2', 'silva', 'ncbi16s']

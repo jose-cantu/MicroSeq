@@ -128,11 +128,12 @@ The paired pipeline now produces the following key files under the run folder:
 * `qc/pairing_report.tsv` : resolved forward/reverse pairs, detectors, and wells.
 * `qc/overlap_audit.tsv` : optional overlap diagnostics (only when enabled).
 * `asm/<sample>/<sample>_paired.fasta` : concatenated per-sample FASTA input to CAP3.
-* `asm/<sample>/<sample>_paired.fasta.qual` : concatenated QUALs (when available).
+* `asm/<sample>/<sample>_paired.fasta.qual` : concatenated QUALs required for correct CAP3 scoring.
 * `asm/<sample>/*.cap.contigs` : CAP3 contigs.
 * `asm/<sample>/*.cap.singlets` : CAP3 singlets.
 * `asm/<sample>/*.cap.info` : CAP3 run summary (overlaps saved/removed, clip info).
 * `asm/assembly_summary.tsv` : per-sample CAP3 summary + status.
+* `asm/cap3_run_metadata.txt` : CAP3 executable path, version, and full per-sample command lines.
 * `asm/paired_contigs.fasta` : merged contigs-only FASTA (for contigs-only BLAST).
 * `asm/blast_inputs.fasta` : contigs+singlets BLAST payload FASTA.
 * `asm/blast_inputs.tsv` : payload manifest with `blast_payload`, `reason`, and `payload_ids`.
@@ -159,10 +160,27 @@ one that targets the gate that actually failed.
 
 ### Why QUAL propagation matters
 
-Without `.qual` files CAP3 treats every base as Q=10, which distorts clipping,
+QUAL is required for correct CAP3 scoring. Without `.qual` files CAP3 treats every base as Q=10, which distorts clipping,
 difference scoring, and similarity scoring. Always run strict profiles *with*
 QUALs first, then re-evaluate how many singlets remain before tuning profiles.
-This is the error model that CAP3 uses to assess if the two reads should be assembled together or not. 
+This is the error model that CAP3 uses to assess if the two reads should be assembled together or not.
+
+### CAP3 built-in defaults vs wrapper defaults
+
+CAP3 ships with **built-in** defaults (e.g., `-o 40`, `-p 90`, `-s 900`, and a
+per‑base quality of 10 when no `.qual` file is provided). Those are compiled
+into CAP3 and applied whenever options are omitted. Wrapper tools may impose
+their own defaults or presets, so “CAP3 defaults” can mean either the built‑in
+CAP3 defaults or the wrapper’s configured defaults. To avoid confusion, MicroSeq
+uses explicit CAP3 profiles and logs the exact arguments and CAP3 version used.
+
+### CAP3 profiles in MicroSeq
+
+The CLI argument `--cap3-profile` is derived from the profile names defined in
+`CAP3_PROFILES` (via `CAP3_PROFILES.keys()`), so every profile key in
+`cap3_profiles.py` becomes a valid command-line choice (currently: `strict`,
+`diagnostic`, `relaxed`). The selected profile expands into explicit CAP3
+arguments before running CAP3.
 
 ### Audit-driven relaxation strategy
 

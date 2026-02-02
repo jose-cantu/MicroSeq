@@ -209,7 +209,46 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
 
     in_dir = Path(input_dir).resolve() 
     out_dir = Path(output_dir).resolve() 
-    out_dir.mkdir(parents=True, exist_ok=True) 
+    out_dir.mkdir(parents=True, exist_ok=True)
+    metadata_path = out_dir / "cap3_run_metadata.txt"
+
+    cap3_version = "unknown"
+    try:
+        version_result = subprocess.run(
+            [cap3_exe, "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        cap3_version = (version_result.stdout or version_result.stderr).strip() or "unknown"
+    except (OSError, subprocess.CalledProcessError) as exc:
+        L.warning("Failed to determine CAP3 version via --version: %s", exc)
+
+    if cap3_version == "unknown":
+        for cmd in ("conda", "mamba"):
+            try:
+                version_result = subprocess.run(
+                    [cmd, "list", "cap3"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except (OSError, subprocess.CalledProcessError):
+                continue
+            for line in version_result.stdout.splitlines():
+                if line.startswith("cap3"):
+                    parts = line.split()
+                    if len(parts) > 1:
+                        cap3_version = f"{parts[0]} {parts[1]}"
+                        break
+            if cap3_version != "unknown":
+                break
+
+    metadata_lines = [
+        f"cap3_executable\t{cap3_exe}",
+        f"cap3_version\t{cap3_version}",
+        "sample_id\tcap3_command",
+    ]
 
     if pairing_report is not None:
         pairs, meta = group_pairs(
@@ -270,7 +309,11 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
             cmd = [cap3_exe, sample_fasta.name]
             if cap3_options:
                 cmd.extend(cap3_options)
-            L.info("Run CAP3 (apired) %s: %s", sample_key, " ".join(cmd)) 
+            L.info("Run CAP3 (apired) %s: %s", sample_key, " ".join(cmd))
+
+            metadata_lines.append(
+                f"{sample_key}\t{' '.join(cmd)}"
+            )
 
             try:
                 subprocess.run(
@@ -291,4 +334,6 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
             contig_paths.append(contig_path)
             L.info("Cap3 paired assembly finished for %s and for contigs: %s", sample_key, contig_path) 
     
+    metadata_path.write_text("\n".join(metadata_lines) + "\n", encoding="utf-8")
+
     return contig_paths 
