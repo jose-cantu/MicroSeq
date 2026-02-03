@@ -41,7 +41,7 @@ PRIMER_SETS: dict[str, tuple[list[str], list[str]]] = {
 }
 
 from PySide6.QtCore import (
-    QLine, Qt, QObject, QThread, Signal, Slot, QMetaObject, Q_ARG, QSettings, QTimer, QModelIndex
+    QLine, Qt, QObject, QThread, Signal, Slot, QSettings, QTimer, QModelIndex
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
@@ -90,23 +90,36 @@ class LogModel(QtCore.QAbstractListModel): # defining a new class
         return len(self._lines) # returning number from deque w/ _parent unused
 
     def data(self, index, role=QtCore.Qt.ItemDataRole.DisplayRole): # data to display specific item
-        if role == QtCore.Qt.ItemDataRole.DisplayRole: # just display the text by first checking
-            return self._lines[index.row()] # fetch line text
-        return None
-
+        if role != QtCore.Qt.ItemDataRole.DisplayRole:
+            return None
+        if not index.isValid():
+            return None
+        row = index.row()
+        if row < 0 or row >= len(self._lines):
+            return None 
+        return self._lines[row] # fetch line text 
     # public API
     @QtCore.Slot(str)
     def append(self, line: str):
-        if len(self._lines) >= self.MAX_ROWS: # overflow? drop oldest
-            self.beginRemoveRows(QtCore.QModelIndex(), 0, 0)
-            self._lines.popleft()
-            self.endRemoveRows() # Finished removing can update again
+        self.append_many([line]) 
+   
+    @QtCore.Slot(list)
+    def append_many(self, lines: list[str]) -> None:
+        if not lines:
+            return 
+        total = len(self._lines) + len(lines)
+        overflow = max(0, total - self.MAX_ROWS)
+        if overflow:
+            self.beginRemoveRows(QtCore.QModelIndex(), 0, overflow -1)
+            for _ in range(overflow):
+                self._lines.popleft()
+            self.endRemoveRows
 
-        row = len(self._lines) # figure row end of current list place new row
-        self.beginInsertRows(QtCore.QModelIndex(), row, row) # insert row end
-        self._lines.append(line)
-        self.endInsertRows() # Done inserting can update now
-
+        row0 = len(self._lines)
+        row1 = row0 + len(lines)
+        self.beginInsertRows(QtCore.QModelIndex(), row0, row1)
+        self._lines.extend(lines)
+        self.endInsertRows 
 
 # Worker class ----------------
 class Worker(QObject):
@@ -125,6 +138,9 @@ class Worker(QObject):
 
     @Slot() # design to warn if any errors occur
     def run(self):
+        if QThread.currentThread().isInterruptionRequested():
+            self.finished.emit(RuntimeError("Cancelled"))
+            return 
         # Drop any duplicate that might have been supplied on mistake
         self._kwargs.pop("on_stage", None)
         self._kwargs.pop("on_progress", None) # guard
@@ -138,6 +154,8 @@ class Worker(QObject):
         try:
             logging.info("%s started", self._fn.__name__)
             result = self._fn(*self._args, **self._kwargs)
+            if QThread.currentThread().isInterruptionRequested():
+                raise RuntimeError("Cancelled")
             logging.info("%s finished", self._fn.__name__)
         except Exception as e:
             logging.exception("Worker crashed:")
@@ -588,21 +606,9 @@ class MainWindow(QMainWindow):
         self._blast_rows: dict[str, dict[str, str]] = {}
         self._audit_rows: dict[str, dict[str, str]] = {}
 
-        # connect to model's signal to auto-scroll to the bottom on new logs
-        self.log_model.rowsInserted.connect(
-            lambda _parent, _first, last: # _ to mark unused
-                # Safely queue a call to the scrollTo method to run after the current            # event (the paint event) has finished. THis helps in avoiding 
-                # and preventing re-entrancy crashes.
-                QTimer.singleShot(
-                    0,
-                    lambda row=last: # capture the value 
-                       self.log_view.scrollTo(
-                           self.log_model.index(row, 0),
-                           QAbstractItemView.ScrollHint.PositionAtBottom
-                       ) 
-
-                )
-        )
+        # connect to model's signal to auto-scroll to the bottom on new logs if the user is already at the bottom or near it 
+        sb = self.log_view.verticalScrollBar() 
+        sb.valueChanged.connect(lambda v: setattr(self, "_autoscroll", (sb.maximum() - v) <= 2))
 
         # ---- Layout here will update UX -------------------------
         top = QHBoxLayout()
@@ -706,6 +712,13 @@ class MainWindow(QMainWindow):
         self._thread: Optional[QThread] = None
         self._worker: Optional[Worker] = None
         self._log_handler: Optional[LogBridge] = None
+        self._pending_logs: list[str] = [] 
+        self._log_flush_timer = QTimer(self)
+        self._log_flush_timer.setInterval(33) # ~33Hz 
+        self._log_flush_timer.setSingleShot(True) 
+        self._log_flush_timer.timeout.connect(self._flush_logs)
+        self._autoscroll = True
+        self._active_box: Optional[QMessageBox] = None 
         setup_logging(level=logging.INFO) # file + console stderr + GUI output
         root_logger = logging.getLogger() # grab singleton root logger
         self._log_handler = LogBridge(self)
@@ -798,7 +811,7 @@ class MainWindow(QMainWindow):
         try:
             resolve_vsearch()
         except FileNotFoundError as exc:
-            QMessageBox.warning(self, "vsearch not found", str(exc))
+            self._show_box(QMessageBox.Icon.Warning, "vsearch not found", str(exc))
             return False
         return True
 
@@ -838,15 +851,15 @@ class MainWindow(QMainWindow):
 
     def _detect_tokens(self):
         if not self._input_path:
-            QMessageBox.warning(self, "No input", "Choose a file or folder first please.")
+            self._show_box(QMessageBox.Icon.Warning,"No input", "Choose a file or folder first please.")
             return 
         directory = self._input_path if self._input_path.is_dir() else self._input_path.parent
 
         fwd_tokens, rev_tokens = self._scan_tokens(directory)
 
         if not fwd_tokens and not rev_tokens:
-            QMessageBox.information(
-                self,
+            self._show_box(
+                QMessageBox.Icon.Information,
                 "No tokens found",
                 "No primer-like forward/reverse tokens were detected in the filenames."
             )
@@ -861,8 +874,8 @@ class MainWindow(QMainWindow):
             self.rev_pattern_edit.setText(joined)
             self._on_token_edited("rev_tokens", joined)
 
-        QMessageBox.information(
-            self,
+        self._show_box(
+            QMessageBox.Icon.Information,
             "Primers/tokens detected",
             f"Forward primers/tokens: {', '.join(fwd_tokens) or '-'}\n"
             f"Reverse primers/tokens: {', '.join(rev_tokens) or '-'}\n"
@@ -889,11 +902,11 @@ class MainWindow(QMainWindow):
 
     def _preview_pairs(self):
         if self.mode_combo.currentData() != "paired":
-            QMessageBox.information(self, "Not paired", "Preview is only available in paired mode.")
+            self._show_box(QMessageBox.Icon.Information, "Not paired", "Preview is only available in paired mode.")
             return 
 
         if not self._input_path:
-            QMessageBox.warning(self, "No input", "Choose a file or folder first for set of inputs.")
+            self._show_box(QMessageBox.Icon.Warning, "No input", "Choose a file or folder first for set of inputs.")
             return 
 
         directory = self._input_path if self._input_path.is_dir() else self._input_path.parent 
@@ -905,8 +918,8 @@ class MainWindow(QMainWindow):
             enforce_same_well=self.enforce_well_chk.isChecked()
         )
         suggestions = _suggest_pairing_patterns(directory)
-        QMessageBox.information(
-            self,
+        self._show_box(
+            QMessageBox.Icon.Information,
             "Pairing Preview",
             f"{summary}.\n\nSuggestions: {suggestions}"
         )
@@ -997,7 +1010,7 @@ class MainWindow(QMainWindow):
     # guarding against accidental click
     def _launch_blast(self):
         if not self._input_path:
-            QMessageBox.warning(self, "No input", "Choose a file or folder first.")
+            self._show_box(QMessageBox.Icon.Warning, "No input", "Choose a file or folder first.")
             return
 
         self.progress.setValue(0) # resets progress bar during each run
@@ -1087,7 +1100,7 @@ class MainWindow(QMainWindow):
     # -------- Trim -> Convert -> BLAST -> Taxonomy ---------------
     def _launch_qc(self):
         if not self._input_path:
-            QMessageBox.warning(self, "No input", "Choose a file or folder first.")
+            self._show_box(QMessageBox.Icon.Warning, "No input", "Choose a file or folder first.")
             return
         if not self._ensure_vsearch_available():
             return
@@ -1107,14 +1120,14 @@ class MainWindow(QMainWindow):
     # ------ Run full pipeline with Post-Blast as well -------------
     def _launch_full(self):
         if not self._input_path:
-            QMessageBox.warning(self, "No input", "Choose a file or folder first.")
+            self._show_box(QMessageBox.Icon.Warning, "No input", "Choose a file or folder first.")
             return
         if not self._ensure_vsearch_available():
             return
         # if user asked for BIOM but hasn't chosen metadata, abort early
         if self.biom_chk.isChecked() and not self.meta_path:
-            QMessageBox.warning(
-                self, "No metadata",
+            self._show_box(QMessageBox.Icon.Warning,
+                "No metadata",
                 "A metadata file is required to build the BIOM table.\n"
                 "Click ‘Browse metadata…’ first or un-tick ‘Make BIOM’."
             )
@@ -1136,10 +1149,10 @@ class MainWindow(QMainWindow):
     # ------ Run stand-alone Post-BLAST ---------------------------------
     def _launch_postblast(self):
         if not self.hits_path:
-            QMessageBox.warning(self, "No hits", "Choose a BLAST hits file first.")
+            self._show_box(QMessageBox.Icon.Warning, "No hits", "Choose a BLAST hits file first.")
             return
         if not self.meta_path:
-            QMessageBox.warning(self, "No metadata", "Choose a metadata file first.")
+            self._show_box(QMessageBox.Icon.Warning, "No metadata", "Choose a metadata file first.")
             return
 
         self.progress.setValue(0)
@@ -1167,6 +1180,41 @@ class MainWindow(QMainWindow):
         thread.start()
 
     # Helper method using here for batch log signals from worker threads
+    @Slot(str)
+    def _queue_log(self, line: str):
+        """Appends the log line directly to the model on the GUI thread.
+        This is called from the Python Logger to update the GUI model."""
+        self._pending_logs.append(line)
+        if not self._log_flush_timer.isActive():
+            self._log_flush_timer.start() 
+
+    @Slot(str)
+    def _flush_logs(self) -> None:
+        if not self._pending_logs:
+            return 
+        lines = self._pending_logs
+        self._pending_logs = [] 
+        self.log_model.append_many(lines)
+
+        if self._autoscroll:
+            last = self.log_model.rowCount() - 1 
+            if last >= 0:
+                self.log_view.scrollTo(
+                    self.log_model.index(last, 0),
+                    QAbstractItemView.ScrollHint.PositionAtBottom
+                ) 
+    def _show_box(self, icon: QMessageBox.Icon, title: str, text: str) -> None:
+        box = QMessageBox(self)
+        box.setIcon(icon)
+        box.setWindowTitle(title)
+        box.setText(text)
+        box.setStandardButtons(QMessageBox.Ok)
+        box.setModal(True)
+        box.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self._active_box = box
+        box.finished.connect(lambda *_: setattr(self, "_active_box", None))
+        box.open()
+
     @Slot(str) 
     def _stage_slot(self, msg: str) -> None: 
         """Update the status bar text - runs in the GUI thread."""
@@ -1195,15 +1243,6 @@ class MainWindow(QMainWindow):
         """Runs in the GUI thread -> safe to touch self.* attributes."""
         self._last_result = result
 
-    @Slot(str)
-    def _queue_log(self, line: str):
-        """Safely asks the GUI thread to call the Model's "append" method.
-        This is the bridge from Python Logger to the GUI model."""
-        QMetaObject.invokeMethod(
-            self.log_model, "append",
-            QtCore.Qt.ConnectionType.QueuedConnection,
-            Q_ARG(str, line))
-
     def _cancel_run(self):
         """Request interruption of the running worker thread."""
         if self._thread and self._thread.isRunning():
@@ -1217,6 +1256,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._safe_cleanup)
 
     def _safe_cleanup(self):
+        self._flush_logs() 
         self._thread = None
         self._finalise_ui() # old _done body
 
@@ -1230,29 +1270,40 @@ class MainWindow(QMainWindow):
         All UI mutations are queued with single Shot(0, ..) so they execute only
         after Qt has finished any pending paint events. 
         """
+        assert QThread.currentThread() == QApplication.instance().thread() 
         # interpret the saved result --------------------------------
         result = getattr(self, "_last_result", 1)      # default = error
+        out: Optional[Path] = None 
 
         # --- decide status/message -------------------------------- 
         if isinstance(result, dict):                   # full‑pipeline success
-            rc, out = 0, result.get("tax", Path())        # pick any key to show
+            rc = 0 
+            for key in ("tax", "hits_tax", "biom", "fasta", "assembly_summary"): 
+                candidate = result.get(key)
+                if candidate:
+                    path = Path(candidate)
+                    if path.exists():
+                        out = path 
+                        break 
         elif isinstance(result, RuntimeError) and str(result) == "Cancelled":
-            rc, out = None, Path()
+            rc = None 
         elif isinstance(result, Exception):            # Worker caught an error
-            rc, out = 1, Path()
+            rc = 1 
             err = str(result) 
 
             # friendlier message for the "no hits" situation
             if "no blast hits" in err.lower(): 
-                dialog_fn = lambda: QMessageBox.information(
-                    self, "Nothing to summarise",
+                dialog_fn = lambda: self._show_box(
+                    QMessageBox.Icon.Information, 
+                    "Nothing to summarise",
                     ("BLAST finished, but no hits met the filters.\n"
                      "You can:\n"
                      " lower Identity / Q-cov, or\n"
                      "run again without the BIOM option.")
                 )
             else:
-                dialog_fn = lambda e=err: QMessageBox.warning(self, 
+                dialog_fn = lambda e=err: self._show_box(
+                    QMessageBox.Icon.Warning,
                     "Run Failed", e)
             QTimer.singleShot(0, dialog_fn)
         else:                                          # int from BLAST‑only path
@@ -1265,11 +1316,11 @@ class MainWindow(QMainWindow):
             0, lambda m=msg: self.log_model.append(f"● {m}\n")
         )
 
-        if rc == 0 and out:
+        if rc == 0 and out is not None:
             QTimer.singleShot(
                 0,
-                lambda p=out: QMessageBox.information(
-                self,
+                lambda p=out: self._show_box(
+                QMessageBox.Icon.Information,
                 "Pipeline finished",
                 f"Last output file:\n{p}") 
             )
@@ -1293,12 +1344,16 @@ class MainWindow(QMainWindow):
 
     def _open_path(self, path: Optional[Path]) -> None:
         if not path:
-            QMessageBox.information(self, "No file", "No file is available for this selection.")
+            self._show_box(QMessageBox.Icon.Information, "No file", "No file is available for this selection.")
             return
         if not path.exists():
-            QMessageBox.warning(self, "Missing file", f"File not found:\n{path}")
+            self._show_box(QMessageBox.Icon.Warning, "Missing file", f"File not found:\n{path}")
             return
         QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(path)))
+
+    @Slot(object)
+    def _close_after_worker_finished(self, _result=None) -> None: 
+        self.close() 
 
     def _load_output_tables(self, paths: dict) -> None:
         assembly_summary = paths.get("assembly_summary")
@@ -1469,12 +1524,13 @@ class MainWindow(QMainWindow):
         if self._thread and self._thread.isRunning():
             if self._worker:
                 # ask the thread to finish, then auto-close the window
-                self._worker.finished.connect(lambda *_: self.close())
+                self._worker.finished.connect(self._close_after_worker_finished, type=QtCore.Qt.ConnectionType.QueuedConnection) 
                 self._thread.requestInterruption()     # politely signal
                 event.ignore()                         # keep window open
                 self.log_model.append("Waiting for BLAST thread to finish…")
                 return
-        self._cleanup_input_staging() 
+        self._cleanup_input_staging()
+        self._flush_logs() 
         event.accept()
         root = logging.getLogger()
         if self._log_handler and self._log_handler in root.handlers:
@@ -1485,11 +1541,11 @@ class MainWindow(QMainWindow):
 def qt_message_handler(mode, _context, message):
     """Redirect Qt messages to the Python logging module."""
     level = {
-        QtCore.Qt.QtMsgType.QtDebugMsg:    logging.DEBUG,
-        QtCore.Qt.QtMsgType.QtInfoMsg:     logging.INFO,
-        QtCore.Qt.QtMsgType.QtWarningMsg:  logging.WARNING,
-        QtCore.Qt.QtMsgType.QtCriticalMsg: logging.ERROR,
-        QtCore.Qt.QtMsgType.QtFatalMsg:    logging.CRITICAL,
+        QtCore.QtMsgType.QtDebugMsg:    logging.DEBUG,
+        QtCore.QtMsgType.QtInfoMsg:     logging.INFO,
+        QtCore.QtMsgType.QtWarningMsg:  logging.WARNING,
+        QtCore.QtMsgType.QtCriticalMsg: logging.ERROR,
+        QtCore.QtMsgType.QtFatalMsg:    logging.CRITICAL,
     }.get(mode, logging.CRITICAL)
     logging.log(level, "Qt: %s", message)
 

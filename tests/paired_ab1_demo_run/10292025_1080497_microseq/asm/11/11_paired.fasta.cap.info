@@ -1,0 +1,10 @@
+No file of constraints (.con) is found.
+Number of overlaps saved: 1
+ComputeOverlap done
+IdentifyChimeras done
+Overlap 11__1492R+ and 11__27F-  P  lengths of diffs and sims: upper left 0  lower right 178  middle 545
+Number of overlaps removed: 1
+RemovePoorOverlaps done
+ASSEM done
+ComputDistForContigs done
+PresentLayout done

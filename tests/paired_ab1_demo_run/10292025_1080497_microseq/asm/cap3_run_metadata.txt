@@ -1,0 +1,25 @@
+cap3_executable	cap3
+cap3_version	cap3 10.2011
+sample_id	cap3_command
+1	cap3 1_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+10	cap3 10_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+11	cap3 11_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+12	cap3 12_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+13	cap3 13_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+14	cap3 14_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+15	cap3 15_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+16	cap3 16_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+17	cap3 17_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+2	cap3 2_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+23	cap3 23_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+24	cap3 24_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+25	cap3 25_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+26	cap3 26_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+27	cap3 27_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+3	cap3 3_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+4	cap3 4_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+5	cap3 5_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+6	cap3 6_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+7	cap3 7_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+8	cap3 8_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+9	cap3 9_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100

@@ -1,0 +1,11 @@
+No file of constraints (.con) is found.
+Number of overlaps saved: 1
+ComputeOverlap done
+IdentifyChimeras done
+Number of overlaps removed: 0
+RemovePoorOverlaps done
+ASSEM done
+ComputDistForContigs done
+PresentLayout done
+Clip 15__1492R left clip: 1, right clip: 1045,  length: 1045,  right size 0
+Clip 15__27F left clip: 1, right clip: 995,  length: 995,  right size 0

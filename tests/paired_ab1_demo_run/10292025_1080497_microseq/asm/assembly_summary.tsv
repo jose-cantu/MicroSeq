@@ -1,0 +1,24 @@
+sample_id	overlaps_saved	overlaps_removed	contigs_count	singlets_count	clip_f_left	clip_f_right	clip_r_left	clip_r_right	status
+1	1	0	1	0	1	653	1	1131	overlap_identity_low
+10	1	0	1	0	1	1033	1	1004	overlap_identity_low
+11	1	1	0	2					overlap_identity_low
+12	1	0	1	0	1	989	1	1060	overlap_identity_low
+13	1	1	0	2					overlap_identity_low
+14	1	0	1	0	1	1058	1	1020	overlap_identity_low
+15	1	0	1	0	1	995	1	1045	overlap_identity_low
+16	1	1	0	2					overlap_identity_low
+17	1	1	0	2					overlap_identity_low
+18	0	0	0	0					pair_missing
+2	1	1	0	2					overlap_identity_low
+23	1	0	1	0	1	1094	1	1085	overlap_identity_low
+24	1	0	1	0	1	1072	1	1036	overlap_identity_low
+25	1	0	1	0	1	1000	1	1083	overlap_identity_low
+26	1	0	1	0	1	1055	1	1067	overlap_identity_low
+27	1	0	1	0	1	1069	1	1085	overlap_identity_low
+3	1	1	0	2					overlap_identity_low
+4	1	1	0	2					overlap_identity_low
+5	1	1	0	2					overlap_identity_low
+6	1	1	0	2					overlap_identity_low
+7	1	1	0	2					overlap_identity_low
+8	1	0	1	0	1	1029	1	1096	overlap_identity_low
+9	1	0	1	0	1	1014	1	1055	overlap_identity_low
