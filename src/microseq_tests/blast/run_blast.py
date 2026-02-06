@@ -146,7 +146,7 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *, options: Bl
          "-num_threads", str(threads),
          ])
     # debugging to make sure it works 
-    print("BLAST CMD:", " ".join(cmd)) 
+    L.info("BLAST CMD: %s", " ".join(cmd)) 
 
     # merge env here so BLASTDB_LMDB_MAP_SIZE is kept 
     env = os.environ.copy() # start from full parent env 

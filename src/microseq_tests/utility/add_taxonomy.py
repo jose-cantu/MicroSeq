@@ -11,7 +11,8 @@ python add_taxonomy.py \
         --taxonomy ~/.microseq_dbs/gg2/taxonomy.tsv \
         --out data/biom/ocular_isolates_with_tax.csv 
 """
-from __future__ import annotations 
+from __future__ import annotations
+import logging 
 import re 
 from pathlib import Path 
 import pandas as pd
@@ -66,8 +67,12 @@ def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path, fill_speci
     
     merged = hits.merge(tax, on="sseqid", how="left")
     n_unmatched = merged["taxonomy"].isna().sum()
-    print(f"[add_taxonomy] {n_unmatched}/{len(merged)} rows unmatched")
-    
+    logging.getLogger(__name__).info(
+        "[add_taxonomy] %s/%s rows unmatched",
+        n_unmatched,
+        len(merged),
+    ) 
+
     if fill_species:
         needs_fill = (merged["taxonomy"].str.count(";") < 6) & \
                      (merged["pident"].astype(float) >= 97.0) 
@@ -92,4 +97,4 @@ def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path, fill_speci
 
     out_sep = "\t" if out_fp.suffix.lower() in {".tsv", ".txt"} else ","
     merged.to_csv(out_fp, sep=out_sep, index=False)
-    print(f"[add_taxonomy] wrote {out_fp}") 
+    logging.getLogger(__name__).info("[add_taxonomy] wrote %s", out_fp) 

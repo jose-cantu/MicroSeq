@@ -10,7 +10,8 @@ import tracemalloc
 import tempfile 
 import shutil 
 import atexit
-import re 
+import re
+import pandas as pd 
 
 # Pick the first visible backend that has a server.........
 if "WSL_DISTRO_NAME" in os.environ:  # running inside WSL
@@ -113,13 +114,13 @@ class LogModel(QtCore.QAbstractListModel): # defining a new class
             self.beginRemoveRows(QtCore.QModelIndex(), 0, overflow -1)
             for _ in range(overflow):
                 self._lines.popleft()
-            self.endRemoveRows
+            self.endRemoveRows()
 
         row0 = len(self._lines)
-        row1 = row0 + len(lines)
+        row1 = row0 + len(lines) - 1 
         self.beginInsertRows(QtCore.QModelIndex(), row0, row1)
         self._lines.extend(lines)
-        self.endInsertRows 
+        self.endInsertRows()  
 
 # Worker class ----------------
 class Worker(QObject):
@@ -1188,7 +1189,7 @@ class MainWindow(QMainWindow):
         if not self._log_flush_timer.isActive():
             self._log_flush_timer.start() 
 
-    @Slot(str)
+    @Slot()
     def _flush_logs(self) -> None:
         if not self._pending_logs:
             return 
