@@ -48,7 +48,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
     QHBoxLayout, QPushButton, QLabel, QListView, QSpinBox, QMessageBox,
     QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, QAbstractItemView, QLineEdit,
-    QTabWidget, QTableWidget, QTableWidgetItem, QSplitter, QDialog, QPlainTextEdit  
+    QTabWidget, QTableWidget, QTableWidgetItem, QSplitter, QDialog, QPlainTextEdit, QHeaderView 
 )
 from PySide6 import QtCore
 from PySide6.QtGui import QColor, QBrush, QDesktopServices 
@@ -188,6 +188,30 @@ class TextViewerDialog(QDialog):
         btn_row.addWidget(copy_btn)
         btn_row.addStretch()
 
+        close_btn = QPushButton("Close", self)
+        close_btn.clicked.connect(self.close)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+class TextBlobDialog(QDialog):
+    def __init__(self, title: str, text: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(800, 500)
+
+        layout = QVBoxLayout(self)
+
+        editor = QPlainTextEdit(self)
+        editor.setReadOnly(True)
+        editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        editor.setPlainText(text)
+        layout.addWidget(editor)
+
+        btn_row = QHBoxLayout()
+        copy_btn = QPushButton("Copy", self)
+        copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(text))
+        btn_row.addWidget(copy_btn)
+        btn_row.addStretch()
         close_btn = QPushButton("Close", self)
         close_btn.clicked.connect(self.close)
         btn_row.addWidget(close_btn)
@@ -598,8 +622,11 @@ class MainWindow(QMainWindow):
         self.open_blast_inputs_btn.setEnabled(False)
 
         self.open_blast_inputs_system_btn = QPushButton("Open blast_inputs.fasta (system)")
-        self.open_blast_inputs_system_btn.clicked.connect(lambda: self._open_path_system(self._blast_inputs_fasta))
+        self.open_blast_inputs_system_btn.clicked.connect(
+            lambda: self._open_path_system(self._blast_inputs_fasta)
+        )
         self.open_blast_inputs_system_btn.setEnabled(False)
+
 
         self.open_asm_folder_btn = QPushButton("Open asm folder")
         self.open_asm_folder_btn.clicked.connect(lambda: self._open_path(self._asm_dir))
@@ -703,10 +730,21 @@ class MainWindow(QMainWindow):
         self.output_splitter.setStretchFactor(1, 1)
 
         self.summary_filter.currentIndexChanged.connect(self._apply_summary_filter)
+        self.diagnostics_table.itemSelectionChanged.connect(self._update_detail_panel)
+        self.summary_table.cellDoubleClicked.connect(
+            lambda row, col: self._show_cell_text(self.summary_table, row, col)
+        )
+        self.blast_table.cellDoubleClicked.connect(
+            lambda row, col: self._show_cell_text(self.blast_table, row, col)
+        )
+        self.diagnostics_table.cellDoubleClicked.connect(
+            lambda row, col: self._show_cell_text(self.diagnostics_table, row, col)
+        )
+
 
         self._blast_inputs_fasta: Optional[Path] = None
         self._asm_dir: Optional[Path] = None
-        self._detail_paths: dict[str, Optional[Path]] = {"contigs": None, "singlets": None, "info": None}
+        self._detail_paths: dict[str, list[Path]] = {"contigs": [], "singlets": [], "info": []} 
         self._summary_rows: dict[str, dict[str, str]] = {}
         self._blast_rows: dict[str, dict[str, str]] = {}
         self._audit_rows: dict[str, dict[str, str]] = {}
@@ -1455,6 +1493,23 @@ class MainWindow(QMainWindow):
         if not path.exists():
             self._show_box(QMessageBox.Icon.Warning, "Missing file", f"File not found:\n{path}")
             return
+
+        if prefer_in_app and path.is_file():
+            self._open_text_viewer(path)
+            return
+
+        if self._open_external_detached(path):
+            return
+
+        self._open_path_fallback(path, reason="Unable to open via system handler.")
+
+    def _open_path_system(self, path: Optional[Path]) -> None:
+        if not path:
+            self._show_box(QMessageBox.Icon.Information, "No file", "No file is available for this selection.")
+            return
+        if not path.exists():
+            self._show_box(QMessageBox.Icon.Warning, "Missing file", f"File not found:\n{path}")
+            return 
         if self._open_external_detached(path):
             return
 
@@ -1510,6 +1565,55 @@ class MainWindow(QMainWindow):
             f"Path:\n{path}"
         )
         self._show_box(QMessageBox.Icon.Information, "Open manually", message)
+
+    def _open_detail_paths(
+        self,
+        kind: str,
+        prefer_in_app: bool = False,
+        system: bool = False,
+    ) -> None:
+        paths = self._detail_paths.get(kind, [])
+        if not paths:
+            self._show_box(QMessageBox.Icon.Information, "No file", "No file is available for this selection.")
+            return
+        self._open_paths(paths, prefer_in_app=prefer_in_app, system=system)
+
+    def _open_paths(
+        self,
+        paths: list[Path],
+        prefer_in_app: bool = False,
+        system: bool = False,
+    ) -> None:
+        if not paths:
+            return
+        if len(paths) > 5:
+            reply = QMessageBox.question(
+                self,
+                "Open multiple files",
+                f"Open {len(paths)} files?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        for path in paths:
+            if system:
+                self._open_path_system(path)
+            else:
+                self._open_path(path, prefer_in_app=prefer_in_app)
+
+    def _show_cell_text(self, table: QTableWidget, row: int, col: int) -> None:
+        item = table.item(row, col)
+        if not item:
+            return
+        text = item.text()
+        if not text:
+            return
+        dialog = TextBlobDialog("Cell details", text, self)
+        dialog.setModal(True)
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.open()
+ 
 
     @Slot(object)
     def _close_after_worker_finished(self, _result=None) -> None: 
@@ -1570,6 +1674,7 @@ class MainWindow(QMainWindow):
             ]
             for col, value in enumerate(row_values):
                 item = QTableWidgetItem(value)
+                item.setToolTip(value) 
                 if col == 1:
                     status = value
                     color = status_colors.get(status, QColor("#E1F5FE") if status.startswith("overlap_") else None)
@@ -1587,6 +1692,7 @@ class MainWindow(QMainWindow):
             self.summary_filter.addItem(status, userData=status)
         self.summary_filter.blockSignals(False)
         self._apply_summary_filter()
+        self._configure_table_view(self.summary_table) 
 
     def _load_blast_inputs_table(self, blast_tsv: Path) -> None:
         df = pd.read_csv(blast_tsv, sep="\t")
@@ -1601,12 +1707,15 @@ class MainWindow(QMainWindow):
                 str(row.get("payload_ids", "")),
             ]
             for col, value in enumerate(row_values):
-                self.blast_table.setItem(row_idx, col, QTableWidgetItem(value))
+                item = QTableWidgetItem(value)
+                item.setToolTip(value)
+                self.blast_table.setItem(row_idx, col, item)
             self._blast_rows[row_values[0]] = {
                 "blast_payload": row_values[1],
                 "reason": row_values[2],
                 "payload_ids": row_values[3],
             }
+        self._configure_table_view(self.blast_table)
 
     def _load_overlap_audit_table(self, audit_path: Path) -> None:
         if not audit_path.exists():
@@ -1624,13 +1733,16 @@ class MainWindow(QMainWindow):
                 str(row.get("status", "")),
             ]
             for col, value in enumerate(row_values):
-                self.diagnostics_table.setItem(row_idx, col, QTableWidgetItem(value))
+                item = QTableWidgetItem(value)
+                item.setToolTip(value)
+                self.diagnostics_table.setItem(row_idx, col, item)
             self._audit_rows[row_values[0]] = {
                 "overlap_len": row_values[1],
                 "overlap_identity": row_values[2],
                 "overlap_quality": row_values[3],
                 "status": row_values[4],
             }
+        self._configure_table_view(self.diagnostics_table)
 
     def _apply_summary_filter(self) -> None:
         selected = self.summary_filter.currentData()
@@ -1639,26 +1751,79 @@ class MainWindow(QMainWindow):
             status = status_item.text() if status_item else ""
             self.summary_table.setRowHidden(row, selected is not None and status != selected)
 
-    def _update_detail_panel(self) -> None:
-        sample_id = None
-        if self.summary_table.selectedItems():
-            sample_id = self.summary_table.item(self.summary_table.currentRow(), 0).text()
-        elif self.blast_table.selectedItems():
-            sample_id = self.blast_table.item(self.blast_table.currentRow(), 0).text()
+    def _configure_table_view(self, table: QTableWidget) -> None:
+        table.setWordWrap(False)
+        header = table.horizontalHeader()
+        if table.rowCount() <= 500:
+            table.resizeColumnsToContents()
+            header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        else:
+            header.setSectionResizeMode(QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+            if table.columnCount() > 1:
+                header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            if table.columnCount() > 2:
+                header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            if table.columnCount() > 3:
+                header.setSectionResizeMode(3, QHeaderView.Interactive)
+                table.setColumnWidth(3, 260)
+        header.setStretchLastSection(True)
+        if table.rowCount() <= 200:
+            table.resizeRowsToContents()
 
-        if not sample_id:
+    def _selected_sample_ids(self, table: QTableWidget) -> list[str]:
+        model = table.selectionModel()
+        if not model:
+            return []
+        rows = model.selectedRows(0)
+        if rows:
+            return [table.item(idx.row(), 0).text() for idx in rows if table.item(idx.row(), 0)]
+        current_row = table.currentRow()
+        if current_row >= 0:
+            item = table.item(current_row, 0)
+            if item:
+                return [item.text()]
+        return []
+
+    def _join_values(self, values: list[str]) -> str:
+        cleaned = [v for v in values if v]
+        if not cleaned:
+            return "—"
+        unique = list(dict.fromkeys(cleaned))
+        if len(unique) <= 5:
+            return ", ".join(unique)
+        return f"{', '.join(unique[:5])}, … (+{len(unique) - 5} more)"
+
+    def _update_detail_panel(self) -> None:
+        table = None
+        tab_index = self.output_tabs.currentIndex()
+        if tab_index == 1:
+            table = self.summary_table
+        elif tab_index == 2:
+            table = self.blast_table
+        elif tab_index == 3:
+            table = self.diagnostics_table
+        else:
+            table = self.summary_table if self.summary_table.selectedItems() else self.blast_table
+
+        sample_ids = self._selected_sample_ids(table) if table else []
+        if not sample_ids:
             return
 
-        summary = self._summary_rows.get(sample_id, {})
-        blast = self._blast_rows.get(sample_id, {})
-        audit = self._audit_rows.get(sample_id, {})
+        summary_vals = [self._summary_rows.get(sid, {}).get("status", "—") for sid in sample_ids]
+        reason_vals = [self._blast_rows.get(sid, {}).get("reason", "—") for sid in sample_ids]
+        payload_vals = [self._blast_rows.get(sid, {}).get("blast_payload", "—") for sid in sample_ids]
+        payload_ids_vals = [self._blast_rows.get(sid, {}).get("payload_ids", "—") for sid in sample_ids]
 
-        self.detail_sample_lbl.setText(f"sample_id: {sample_id}")
-        self.detail_status_lbl.setText(f"status: {summary.get('status', '—')}")
-        self.detail_reason_lbl.setText(f"reason: {blast.get('reason', '—')}")
-        self.detail_payload_lbl.setText(f"blast_payload: {blast.get('blast_payload', '—')}")
-        self.detail_payload_ids_lbl.setText(f"payload_ids: {blast.get('payload_ids', '—')}")
-        if audit:
+        self.detail_sample_lbl.setText(f"sample_id: {self._join_values(sample_ids)}")
+        self.detail_status_lbl.setText(f"status: {self._join_values(summary_vals)}")
+        self.detail_reason_lbl.setText(f"reason: {self._join_values(reason_vals)}")
+        self.detail_payload_lbl.setText(f"blast_payload: {self._join_values(payload_vals)}")
+        self.detail_payload_ids_lbl.setText(f"payload_ids: {self._join_values(payload_ids_vals)}")
+
+        audit_values = [self._audit_rows.get(sid, {}) for sid in sample_ids]
+        if len(sample_ids) == 1 and audit_values and audit_values[0]:
+            audit = audit_values[0]
             self.detail_overlap_lbl.setText(
                 "overlap: "
                 f"{audit.get('status', '—')} (len {audit.get('overlap_len', '—')}, "
@@ -1666,20 +1831,32 @@ class MainWindow(QMainWindow):
                 f"q {audit.get('overlap_quality', '—')})"
             )
         else:
-            self.detail_overlap_lbl.setText("overlap: —")
+            statuses = [audit.get("status", "—") for audit in audit_values if audit]
+            self.detail_overlap_lbl.setText(f"overlap: {self._join_values(statuses)}")
+
+        for key in self._detail_paths:
+            self._detail_paths[key] = []
 
         if self._asm_dir:
-            sample_dir = self._asm_dir / sample_id
-            self._detail_paths["contigs"] = sample_dir / f"{sample_id}_paired.fasta.cap.contigs"
-            self._detail_paths["singlets"] = sample_dir / f"{sample_id}_paired.fasta.cap.singlets"
-            self._detail_paths["info"] = sample_dir / f"{sample_id}_paired.fasta.cap.info"
-            self.detail_contigs_btn.setEnabled(self._detail_paths["contigs"].exists())
-            self.detail_singlets_btn.setEnabled(self._detail_paths["singlets"].exists())
-            self.detail_info_btn.setEnabled(self._detail_paths["info"].exists())
-            self.detail_contigs_system_btn.setEnabled(self._detail_paths["contigs"].exists())
-            self.detail_singlets_system_btn.setEnabled(self._detail_paths["singlets"].exists())
-            self.detail_info_system_btn.setEnabled(self._detail_paths["info"].exists())
+            for sample_id in sample_ids:
+                sample_dir = self._asm_dir / sample_id
+                contig_path = sample_dir / f"{sample_id}_paired.fasta.cap.contigs"
+                singlet_path = sample_dir / f"{sample_id}_paired.fasta.cap.singlets"
+                info_path = sample_dir / f"{sample_id}_paired.fasta.cap.info"
+                if contig_path.exists():
+                    self._detail_paths["contigs"].append(contig_path)
+                if singlet_path.exists():
+                    self._detail_paths["singlets"].append(singlet_path)
+                if info_path.exists():
+                    self._detail_paths["info"].append(info_path)
 
+        self.detail_contigs_btn.setEnabled(bool(self._detail_paths["contigs"]))
+        self.detail_singlets_btn.setEnabled(bool(self._detail_paths["singlets"]))
+        self.detail_info_btn.setEnabled(bool(self._detail_paths["info"]))
+        self.detail_contigs_system_btn.setEnabled(bool(self._detail_paths["contigs"]))
+        self.detail_singlets_system_btn.setEnabled(bool(self._detail_paths["singlets"]))
+        self.detail_info_system_btn.setEnabled(bool(self._detail_paths["info"]))
+ 
     # closeEvent ----------------------------
     def closeEvent(self, event):
         """
