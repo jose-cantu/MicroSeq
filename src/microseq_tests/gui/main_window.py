@@ -42,13 +42,13 @@ PRIMER_SETS: dict[str, tuple[list[str], list[str]]] = {
 }
 
 from PySide6.QtCore import (
-    QLine, Qt, QObject, QThread, Signal, Slot, QSettings, QTimer, QModelIndex
+    QLine, Qt, QObject, QThread, Signal, Slot, QSettings, QTimer, QModelIndex, QProcess, QUrl
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
     QHBoxLayout, QPushButton, QLabel, QListView, QSpinBox, QMessageBox,
     QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, QAbstractItemView, QLineEdit,
-    QTabWidget, QTableWidget, QTableWidgetItem, QSplitter 
+    QTabWidget, QTableWidget, QTableWidgetItem, QSplitter, QDialog, QPlainTextEdit  
 )
 from PySide6 import QtCore
 from PySide6.QtGui import QColor, QBrush, QDesktopServices 
@@ -120,7 +120,78 @@ class LogModel(QtCore.QAbstractListModel): # defining a new class
         row1 = row0 + len(lines) - 1 
         self.beginInsertRows(QtCore.QModelIndex(), row0, row1)
         self._lines.extend(lines)
-        self.endInsertRows()  
+        self.endInsertRows() 
+
+TEXT_FILE_EXTENSIONS = {
+    ".txt",
+    ".log",
+    ".info",
+    ".fasta",
+    ".fa",
+    ".fna",
+    ".fastq",
+    ".fq",
+    ".tsv",
+    ".csv",
+}
+
+def is_wsl() -> bool:
+    """Checks if the code is executing inside Windows SubSystem for Linux."""
+    return bool(os.environ.get("WSL_INTEROP") or os.environ.get("WSL_DISTRO_NAME"))
+
+def has_gui_session() -> bool:
+    """Checking if there an is an active windowing system (x11/Wayland/Win/macOS) to show a UI."""
+    if platform.system() in ("Darwin", "Windows"):
+        return True 
+    return bool(os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY"))
+
+def looks_texty(path: Path) -> bool:
+    """ 
+    Heuristic here I made to determine if a file is plain text. Due to the limit I'm using here of a max of 2MB inorder to deal with not overloading the machine and GUI by not opening huge byte files that are non text otherwise it risks being either not as responsive or worse freezing outright. Will test run this more robustly at a lter date for now the max is 2MB for opening files in the GUI which should be sufficient. 
+
+    This function checks the extension first, then reads 4KB chunk of data to look for null bytes which is a binary marker if it does appear it will not load it in the GUI.    """ 
+    if path.suffix.lower() in TEXT_FILE_EXTENSIONS:
+        return True 
+    try: 
+       chunk = path.read_bytes()[:4096]
+    except OSError:
+        return False 
+    return b"\x00" not in chunk
+
+class TextViewerDialog(QDialog):
+    def __init__(self, path: Path, parent=None, max_bytes: int = 2_000_000):
+        super().__init__(parent)
+        self.setWindowTitle(str(path))
+        self.resize(900, 600)
+
+        layout = QVBoxLayout(self)
+
+        header = QLabel(f"{path} (showing up to {max_bytes:,} bytes)")
+        header.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(header)
+
+        editor = QPlainTextEdit(self)
+        editor.setReadOnly(True)
+        editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        layout.addWidget(editor)
+
+        try:
+            data = path.read_bytes()[:max_bytes]
+            text = data.decode("utf-8", errors="replace")
+        except OSError as exc:
+            text = f"Failed to read file: {exc}"
+        editor.setPlainText(text)
+
+        btn_row = QHBoxLayout()
+        copy_btn = QPushButton("Copy path", self)
+        copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(str(path)))
+        btn_row.addWidget(copy_btn)
+        btn_row.addStretch()
+
+        close_btn = QPushButton("Close", self)
+        close_btn.clicked.connect(self.close)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
 
 # Worker class ----------------
 class Worker(QObject):
@@ -523,8 +594,12 @@ class MainWindow(QMainWindow):
         self.diagnostics_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
         self.open_blast_inputs_btn = QPushButton("Open blast_inputs.fasta")
-        self.open_blast_inputs_btn.clicked.connect(lambda: self._open_path(self._blast_inputs_fasta))
+        self.open_blast_inputs_btn.clicked.connect(lambda: self._open_path(self._blast_inputs_fasta, prefer_in_app=True))
         self.open_blast_inputs_btn.setEnabled(False)
+
+        self.open_blast_inputs_system_btn = QPushButton("Open blast_inputs.fasta (system)")
+        self.open_blast_inputs_system_btn.clicked.connect(lambda: self._open_path_system(self._blast_inputs_fasta))
+        self.open_blast_inputs_system_btn.setEnabled(False)
 
         self.open_asm_folder_btn = QPushButton("Open asm folder")
         self.open_asm_folder_btn.clicked.connect(lambda: self._open_path(self._asm_dir))
@@ -543,6 +618,7 @@ class MainWindow(QMainWindow):
         blast_layout = QVBoxLayout(blast_tab)
         blast_buttons = QHBoxLayout()
         blast_buttons.addWidget(self.open_blast_inputs_btn)
+        blast_buttons.addWidget(self.open_blast_inputs_system_btn) 
         blast_buttons.addWidget(self.open_asm_folder_btn)
         blast_buttons.addStretch()
         blast_layout.addLayout(blast_buttons)
@@ -563,21 +639,46 @@ class MainWindow(QMainWindow):
         self.output_tabs.addTab(diagnostics_tab, "Diagnostics")
 
         # ---- Detail panel ----
-        self.detail_sample_lbl = QLabel("sample_id: —")
-        self.detail_status_lbl = QLabel("status: —")
-        self.detail_reason_lbl = QLabel("reason: —")
-        self.detail_payload_lbl = QLabel("blast_payload: —")
-        self.detail_payload_ids_lbl = QLabel("payload_ids: —")
-        self.detail_overlap_lbl = QLabel("overlap: —")
+        self.detail_sample_lbl = QLabel("sample_id: ")
+        self.detail_status_lbl = QLabel("status: ")
+        self.detail_reason_lbl = QLabel("reason: ")
+        self.detail_payload_lbl = QLabel("blast_payload: ")
+        self.detail_payload_ids_lbl = QLabel("payload_ids: ")
+        self.detail_overlap_lbl = QLabel("overlap: ")
 
         self.detail_contigs_btn = QPushButton("Open contigs")
         self.detail_singlets_btn = QPushButton("Open singlets")
         self.detail_info_btn = QPushButton("Open cap.info")
-        for btn in (self.detail_contigs_btn, self.detail_singlets_btn, self.detail_info_btn):
+        self.detail_contigs_system_btn = QPushButton("Open contigs (system)")
+        self.detail_singlets_system_btn = QPushButton("Open singlets (system)")
+        self.detail_info_system_btn = QPushButton("Open cap.info (system)")
+        for btn in (
+            self.detail_contigs_btn,
+            self.detail_singlets_btn,
+            self.detail_info_btn,
+            self.detail_contigs_system_btn,
+            self.detail_singlets_system_btn,
+            self.detail_info_system_btn,
+        ): 
             btn.setEnabled(False)
-        self.detail_contigs_btn.clicked.connect(lambda: self._open_path(self._detail_paths.get("contigs")))
-        self.detail_singlets_btn.clicked.connect(lambda: self._open_path(self._detail_paths.get("singlets")))
-        self.detail_info_btn.clicked.connect(lambda: self._open_path(self._detail_paths.get("info")))
+        self.detail_contigs_btn.clicked.connect(
+            lambda: self._open_path(self._detail_paths.get("contigs"), prefer_in_app=True)
+        )
+        self.detail_singlets_btn.clicked.connect(
+            lambda: self._open_path(self._detail_paths.get("singlets"), prefer_in_app=True)
+        )
+        self.detail_info_btn.clicked.connect(
+            lambda: self._open_path(self._detail_paths.get("info"), prefer_in_app=True)
+        )
+        self.detail_contigs_system_btn.clicked.connect(
+            lambda: self._open_path_system(self._detail_paths.get("contigs"))
+        )
+        self.detail_singlets_system_btn.clicked.connect(
+            lambda: self._open_path_system(self._detail_paths.get("singlets"))
+        )
+        self.detail_info_system_btn.clicked.connect(
+            lambda: self._open_path_system(self._detail_paths.get("info"))
+        )
 
         detail_box = QGroupBox("Details")
         detail_layout = QVBoxLayout(detail_box)
@@ -590,6 +691,9 @@ class MainWindow(QMainWindow):
         detail_layout.addWidget(self.detail_contigs_btn)
         detail_layout.addWidget(self.detail_singlets_btn)
         detail_layout.addWidget(self.detail_info_btn)
+        detail_layout.addWidget(self.detail_contigs_system_btn)
+        detail_layout.addWidget(self.detail_singlets_system_btn)
+        detail_layout.addWidget(self.detail_info_system_btn)
         detail_layout.addStretch()
 
         self.output_splitter = QSplitter()
@@ -606,6 +710,7 @@ class MainWindow(QMainWindow):
         self._summary_rows: dict[str, dict[str, str]] = {}
         self._blast_rows: dict[str, dict[str, str]] = {}
         self._audit_rows: dict[str, dict[str, str]] = {}
+        self._active_viewer: Optional[QDialog] = None
 
         # connect to model's signal to auto-scroll to the bottom on new logs if the user is already at the bottom or near it 
         sb = self.log_view.verticalScrollBar() 
@@ -1343,14 +1448,68 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(0, _reenable)
 
-    def _open_path(self, path: Optional[Path]) -> None:
+    def _open_path(self, path: Optional[Path], prefer_in_app: bool = False) -> None:
         if not path:
             self._show_box(QMessageBox.Icon.Information, "No file", "No file is available for this selection.")
             return
         if not path.exists():
             self._show_box(QMessageBox.Icon.Warning, "Missing file", f"File not found:\n{path}")
             return
-        QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(path)))
+        if self._open_external_detached(path):
+            return
+
+        self._open_path_fallback(path, reason="Unable to open via system handler.")
+
+    def _open_external_detached(self, path: Path) -> bool:
+        if is_wsl():
+            if shutil.which("wslview"):
+                ok, _pid = QProcess.startDetached("wslview", [str(path)])
+                return ok
+            if shutil.which("explorer.exe") and shutil.which("wslpath"):
+                try:
+                    win_path = subprocess.check_output(
+                        ["wslpath", "-w", str(path)],
+                        text=True,
+                    ).strip()
+                except (OSError, subprocess.SubprocessError):
+                    win_path = ""
+                if win_path:
+                    ok, _pid = QProcess.startDetached("explorer.exe", [win_path])
+                    return ok
+
+        if sys.platform == "darwin" and shutil.which("open"):
+            ok, _pid = QProcess.startDetached("open", [str(path)])
+            return ok
+
+        if os.name == "nt" and shutil.which("explorer.exe"):
+            ok, _pid = QProcess.startDetached("explorer.exe", [str(path)])
+            return ok
+
+        if shutil.which("xdg-open"):
+            ok, _pid = QProcess.startDetached("xdg-open", [str(path)])
+            return ok
+
+        url = QUrl.fromLocalFile(str(path))
+        return QDesktopServices.openUrl(url)
+
+    def _open_text_viewer(self, path: Path) -> None:
+        dialog = TextViewerDialog(path, self)
+        dialog.setModal(True)
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self._active_viewer = dialog
+        dialog.finished.connect(lambda *_: setattr(self, "_active_viewer", None))
+        dialog.open()
+
+    def _open_path_fallback(self, path: Path, reason: str) -> None:
+        if path.is_file() and looks_texty(path):
+            self._open_text_viewer(path)
+            return
+
+        message = (
+            f"{reason}\n\n"
+            f"Path:\n{path}"
+        )
+        self._show_box(QMessageBox.Icon.Information, "Open manually", message)
 
     @Slot(object)
     def _close_after_worker_finished(self, _result=None) -> None: 
@@ -1379,6 +1538,7 @@ class MainWindow(QMainWindow):
             self._asm_dir = asm_dir
             self._blast_inputs_fasta = self._asm_dir / "blast_inputs.fasta"
             self.open_blast_inputs_btn.setEnabled(self._blast_inputs_fasta.exists())
+            self.open_blast_inputs_system_btn.setEnabled(self._blast_inputs_fasta.exists())
             self.open_asm_folder_btn.setEnabled(self._asm_dir.exists())
 
     def _load_summary_table(self, summary_path: Path) -> None:
@@ -1516,6 +1676,9 @@ class MainWindow(QMainWindow):
             self.detail_contigs_btn.setEnabled(self._detail_paths["contigs"].exists())
             self.detail_singlets_btn.setEnabled(self._detail_paths["singlets"].exists())
             self.detail_info_btn.setEnabled(self._detail_paths["info"].exists())
+            self.detail_contigs_system_btn.setEnabled(self._detail_paths["contigs"].exists())
+            self.detail_singlets_system_btn.setEnabled(self._detail_paths["singlets"].exists())
+            self.detail_info_system_btn.setEnabled(self._detail_paths["info"].exists())
 
     # closeEvent ----------------------------
     def closeEvent(self, event):
