@@ -689,22 +689,22 @@ class MainWindow(QMainWindow):
         ): 
             btn.setEnabled(False)
         self.detail_contigs_btn.clicked.connect(
-            lambda: self._open_path(self._detail_paths.get("contigs"), prefer_in_app=True)
+            lambda: self._open_detail_paths("contigs", prefer_in_app=True)
         )
         self.detail_singlets_btn.clicked.connect(
-            lambda: self._open_path(self._detail_paths.get("singlets"), prefer_in_app=True)
+            lambda: self._open_detail_paths("singlets", prefer_in_app=True)
         )
         self.detail_info_btn.clicked.connect(
-            lambda: self._open_path(self._detail_paths.get("info"), prefer_in_app=True)
+            lambda: self._open_detail_paths("info", prefer_in_app=True)
         )
         self.detail_contigs_system_btn.clicked.connect(
-            lambda: self._open_path_system(self._detail_paths.get("contigs"))
+            lambda: self._open_detail_paths("contigs", system=True)
         )
         self.detail_singlets_system_btn.clicked.connect(
-            lambda: self._open_path_system(self._detail_paths.get("singlets"))
+            lambda: self._open_detail_paths("singlets", system=True)
         )
         self.detail_info_system_btn.clicked.connect(
-            lambda: self._open_path_system(self._detail_paths.get("info"))
+            lambda: self._open_detail_paths("info", system=True) 
         )
 
         detail_box = QGroupBox("Details")
