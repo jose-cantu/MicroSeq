@@ -62,7 +62,7 @@ from microseq_tests.pipeline import (
     _suggest_pairing_patterns
 )
 from microseq_tests.vsearch_tools import resolve_vsearch 
-from microseq_tests.assembly.pairing import DupPolicy 
+from microseq_tests.assembly.pairing import DupPolicy, PairingCandidate, analyze_pairing_candidates 
 from microseq_tests.utility.utils import setup_logging, load_config
 
 
@@ -217,6 +217,151 @@ class TextBlobDialog(QDialog):
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
 
+class PairingPreviewDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        summary: str,
+        suggestions: str,
+        candidates: list[PairingCandidate],
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Pairing Preview")
+        self.resize(1100, 650)
+        self._candidates = candidates
+        self._rename_map: list[tuple[Path, Path]] = []
+
+        layout = QVBoxLayout(self)
+        header = QLabel(
+            f"{summary}\n"
+            "Pairs will still assemble, but naming is non-canonical; suggested renames improve reproducibility.\n"
+            f"Suggestions: {suggestions}"
+        )
+        header.setWordWrap(True)
+        header.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(header)
+
+        self.table = QTableWidget(0, 6, self)
+        self.table.setHorizontalHeaderLabels(
+            ["File", "Detected", "Sample ID", "Well", "Issues", "Suggested rename"]
+        )
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.table)
+
+        self._populate_table()
+
+        btn_row = QHBoxLayout()
+        copy_btn = QPushButton("Copy rename map", self)
+        copy_btn.clicked.connect(self._copy_rename_map)
+        btn_row.addWidget(copy_btn)
+
+        apply_btn = QPushButton("Apply suggested renames…", self)
+        apply_btn.clicked.connect(self._apply_renames)
+        btn_row.addWidget(apply_btn)
+
+        btn_row.addStretch()
+        close_btn = QPushButton("Close", self)
+        close_btn.clicked.connect(self.close)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+    def _populate_table(self) -> None:
+        self.table.setRowCount(0)
+        self._rename_map = []
+        for candidate in self._candidates:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            detected = candidate.orient or "-"
+            issues = "; ".join(candidate.issues) if candidate.issues else "-"
+            suggested = candidate.suggested_name or "-"
+
+            items = [
+                candidate.path.name,
+                detected,
+                candidate.sid or "-",
+                candidate.well or "-",
+                issues,
+                suggested,
+            ]
+            for col, value in enumerate(items):
+                item = QTableWidgetItem(value)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.table.setItem(row, col, item)
+
+            if candidate.suggested_name and candidate.path.name != candidate.suggested_name:
+                self._rename_map.append(
+                    (candidate.path, candidate.path.with_name(candidate.suggested_name))
+                )
+
+    def _copy_rename_map(self) -> None:
+        if not self._rename_map:
+            QApplication.clipboard().setText("No rename suggestions available.")
+            return
+        lines = ["source\ttarget"]
+        lines.extend(f"{src}\t{dest}" for src, dest in self._rename_map)
+        QApplication.clipboard().setText("\n".join(lines))
+
+    def _apply_renames(self) -> None:
+        if not self._rename_map:
+            QMessageBox.information(self, "No renames", "No suggested renames to apply.")
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Apply renames",
+            "Apply the suggested renames to the files on disk? This cannot be undone.",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        targets = [dest for _, dest in self._rename_map]
+        conflicts = {dest for dest in targets if dest.exists()}
+        target_counts = collections.Counter(targets)
+        duplicate_targets = {dest for dest, count in target_counts.items() if count > 1}
+        if conflicts or duplicate_targets:
+            details = []
+            if conflicts:
+                details.append(
+                    "Targets already exist:\n" + "\n".join(str(p) for p in sorted(conflicts))
+                )
+            if duplicate_targets:
+                details.append(
+                    "Duplicate target names:\n"
+                    + "\n".join(str(p) for p in sorted(duplicate_targets))
+                )
+            QMessageBox.warning(
+                self,
+                "Rename conflicts",
+                "Unable to apply renames due to conflicts.\n\n" + "\n\n".join(details),
+            )
+            return
+
+        errors: list[str] = []
+        for src, dest in self._rename_map:
+            try:
+                if src.exists():
+                    src.rename(dest)
+            except OSError as exc:
+                errors.append(f"{src} → {dest}: {exc}")
+
+        if errors:
+            QMessageBox.warning(
+                self,
+                "Rename errors",
+                "Some renames failed:\n" + "\n".join(errors),
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            "Renames complete",
+            "Suggested renames applied. Re-run Preview Pairs to refresh results.",
+        )
+        self.close()
+
+
 # Worker class ----------------
 class Worker(QObject):
     """Background runner living in its own QThread redirects every status message to the Python logging framework instead of a Qt signal this way a single log channel for whole application."""
@@ -320,11 +465,11 @@ class MainWindow(QMainWindow):
 
         # Create a single-line text input field for the forward read tokens 
         self.fwd_pattern_edit = QLineEdit()
-        self.fwd_pattern_edit.setPlaceholderText("Forward tokens (comma-separated, e.g. 27F,8F,515F)")
+        self.fwd_pattern_edit.setPlaceholderText("Forward primer labels (comma-separated, e.g. 27F,8F,515F)")
 
         # Create a single-line text input field for the reverse read tokens 
         self.rev_pattern_edit = QLineEdit()
-        self.rev_pattern_edit.setPlaceholderText("Reverse tokens (comma-separated, e.g. 1492R, 806R)")
+        self.rev_pattern_edit.setPlaceholderText("Reverse primer labels (comma-separated, e.g. 1492R, 806R)")
 
         self.detect_tokens_btn = QPushButton("Auto-detect Primers")
 
@@ -749,6 +894,7 @@ class MainWindow(QMainWindow):
         self._blast_rows: dict[str, dict[str, str]] = {}
         self._audit_rows: dict[str, dict[str, str]] = {}
         self._active_viewer: Optional[QDialog] = None
+        self._active_pairing_preview: Optional[QDialog] = None
 
         # connect to model's signal to auto-scroll to the bottom on new logs if the user is already at the bottom or near it 
         sb = self.log_view.verticalScrollBar() 
@@ -949,6 +1095,22 @@ class MainWindow(QMainWindow):
             rev = self._tokens_to_regex(self.rev_pattern_edit.text())
         return fwd, rev
 
+    def _current_token_list(self) -> list[str]:
+        if self.advanced_regex_chk.isChecked():
+            return []
+        tokens = [
+            token.strip()
+            for raw in (self.fwd_pattern_edit.text(), self.rev_pattern_edit.text())
+            for token in raw.split(",")
+        ]
+        cleaned = [tok for tok in tokens if tok]
+        if cleaned:
+            return cleaned
+        label = self.primer_set_combo.currentText()
+        fwd_tokens, rev_tokens = PRIMER_SETS.get(label, ([], []))
+        return [*fwd_tokens, *rev_tokens]
+
+
     def _ensure_vsearch_available(self) -> bool:
         if not (self.collapse_reps_chk.isChecked() or self.chimera_mode_combo.currentData() != "off"):
             return True
@@ -1004,8 +1166,8 @@ class MainWindow(QMainWindow):
         if not fwd_tokens and not rev_tokens:
             self._show_box(
                 QMessageBox.Icon.Information,
-                "No tokens found",
-                "No primer-like forward/reverse tokens were detected in the filenames."
+                "No primer labels found",
+                "No primer-like forward/reverse labels were detected in the filenames."
             )
             return 
         
@@ -1020,9 +1182,9 @@ class MainWindow(QMainWindow):
 
         self._show_box(
             QMessageBox.Icon.Information,
-            "Primers/tokens detected",
-            f"Forward primers/tokens: {', '.join(fwd_tokens) or '-'}\n"
-            f"Reverse primers/tokens: {', '.join(rev_tokens) or '-'}\n"
+            "Primers/primer labels detected",
+            f"Forward primers/primer labels: {', '.join(fwd_tokens) or '-'}\n"
+            f"Reverse primers/primer labels: {', '.join(rev_tokens) or '-'}\n"
         ) 
 
     def _scan_tokens(self, directory: Path) -> tuple[list[str], list[str]]:
@@ -1062,11 +1224,24 @@ class MainWindow(QMainWindow):
             enforce_same_well=self.enforce_well_chk.isChecked()
         )
         suggestions = _suggest_pairing_patterns(directory)
-        self._show_box(
-            QMessageBox.Icon.Information,
-            "Pairing Preview",
-            f"{summary}.\n\nSuggestions: {suggestions}"
+        candidates = analyze_pairing_candidates(
+            directory,
+            fwd,
+            rev,
+            known_tokens=self._current_token_list(),
+            enforce_same_well=self.enforce_well_chk.isChecked(),
         )
+        dialog = PairingPreviewDialog(
+            summary=summary,
+            suggestions=suggestions,
+            candidates=candidates,
+            parent=self,
+        )
+        # Avoid nested event loops from exec(); open() keeps the GUI responsive and
+        # aligns with the rest of the app's no-nested-event-loop stance that I will have moving foward given past issues.
+        self._active_pairing_preview = dialog
+        dialog.finished.connect(lambda *_: setattr(self, "_active_pairing_preview", None))
+        dialog.open()
 
     def _cleanup_input_staging(self) -> None:
         if self._input_staging:

@@ -34,7 +34,7 @@ from microseq_tests.trimming.fastq_to_fasta import (
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
 from microseq_tests.assembly.paired_assembly import assemble_pairs, _build_keep_separate_pairs 
 from microseq_tests.assembly.pairing import  (
-        DETECTORS, DupPolicy, _extract_well, _strip_well_token, extract_sid_orientation, make_pattern_detector) 
+        DETECTORS, DupPolicy, _extract_well, _strip_well_token, extract_sid_orientation, iter_seq_files, make_pattern_detector) 
 from microseq_tests.assembly.cap3_report import parse_cap3_reports
 from microseq_tests.assembly.cap3_profiles import resolve_cap3_profile
 from microseq_tests.blast.run_blast import run_blast
@@ -273,24 +273,24 @@ def _summarize_paired_candidates(
     sid_wells: dict[str, set[str]] = defaultdict(set)
     missing_well: set[str] = set() 
 
-    for suffix in ("*.fasta", "*.fastq", "*.ab1", "*.seq"):
-        for fp in sorted(directory.rglob(suffix)):
-            sid, orient = extract_sid_orientation(fp.name, detectors=detectors)
-            well = _extract_well(fp.name, pattern=well_pattern) if enforce_same_well else None
+    for fp in iter_seq_files(directory):
+        sid, orient = extract_sid_orientation(fp.name, detectors=detectors)
+        well = _extract_well(fp.name, pattern=well_pattern) if enforce_same_well else None 
+        if orient in ("F", "R"):
+            if not enforce_same_well:
+                sid = _strip_well_token(sid)
             key = sid if not enforce_same_well else (well or sid)
-            if orient in ("F", "R"):
-                counts[orient] += 1
-                sample_orients[key].add(orient)
-                if enforce_same_well:
-                    if well:
-                        sid_wells[sid].add(orient)
-                    else:
-                        missing_well.add(fp.name)
-                continue
-
-            counts["unknown"] += 1
-            if len(unknown) < 5:
-                unknown.append(fp.name)
+            counts[orient] += 1 
+            sample_orients[key].add(orient)
+            if enforce_same_well:
+                if well:
+                    sid_wells[sid].add(orient)
+                else:
+                    missing_well.add(fp.name)
+            continue 
+        counts["unknown"]  += 1 
+        if len(unknown) < 5:
+            unknown.append(fp.name) 
 
     missing = sorted(sid for sid, orients in sample_orients.items() if len(orients) == 1)
 

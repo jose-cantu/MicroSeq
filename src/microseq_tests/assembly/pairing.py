@@ -11,6 +11,7 @@ import logging # Print warning messages
 from collections import defaultdict # Creating specialized dictionaries dealing with None Values 
 from typing import Callable, Sequence, Union # FOr creating speicific type hints 
 from enum import Enum # Creating enumerable, constant values
+from dataclasses import dataclass 
 from Bio import SeqIO 
 
 # Inheriting from 'str' and "Enum" allows members to be compared directly to strings. For example, DupPolicy.Error = "error" will be True. 
@@ -90,6 +91,16 @@ DETECTORS: list[Detector] = [
     suffix_detector,
 ]
 
+SEQ_FILE_PATTERNS = ("*.fasta", "*.fastq", "*.ab1", "*.seq") 
+
+def iter_seq_files(directory: Path) -> list[Path]:
+    """Return sorted, de-duplicated sequence files using canonical suffix patterns."""
+
+    files: set[Path] = set()
+    for pattern in SEQ_FILE_PATTERNS:
+        files.update(directory.rglob(pattern))
+    return sorted(files)
+
 def _strip_token(name: str, token: str) -> str:
     """Remove token from name and tidy separators/extension."""
     base = name
@@ -154,6 +165,116 @@ def _pair_key(sid: str, well: str | None, enforce_same_well: bool) -> str:
     if enforce_same_well and well:
         return well 
     return sid 
+
+@dataclass
+class PairingCandidate:
+    """Per-file pairing diagnostics for GUI preview and reporting."""
+
+    path: Path
+    sid: str
+    orient: str | None
+    detector: str | None
+    well: str | None
+    issues: list[str]
+    suggested_name: str | None
+
+
+def _suggest_delimiter_fix(name: str, token_span: tuple[int, int]) -> str | None:
+    """Insert an underscore before a token if it lacks a delimiter."""
+
+    start, _ = token_span
+    if start <= 0:
+        return None
+    if name[start - 1] in ("_", "-"):
+        return None
+    return f"{name[:start]}_{name[start:]}"
+
+
+def analyze_pairing_candidates(
+    directory: Path,
+    fwd_pattern: str | None,
+    rev_pattern: str | None,
+    *,
+    known_tokens: Sequence[str] | None = None,
+    enforce_same_well: bool = False,
+    well_pattern: str | re.Pattern[str] | None = None,
+) -> list[PairingCandidate]:
+    """Analyze pairing inputs and return per-file diagnostics."""
+
+    detectors = list(DETECTORS)
+    if fwd_pattern and rev_pattern:
+        detectors = [make_pattern_detector(fwd_pattern, rev_pattern), *detectors]
+
+    fwd_rx = re.compile(f"({fwd_pattern})", re.I) if fwd_pattern else None
+    rev_rx = re.compile(f"({rev_pattern})", re.I) if rev_pattern else None
+    token_rx = None
+    if not (fwd_rx or rev_rx) and known_tokens:
+        escaped = "|".join(
+            re.escape(tok)
+            for tok in sorted(known_tokens, key=len, reverse=True)
+            if tok
+        )
+        if escaped:
+            token_rx = re.compile(f"({escaped})", re.I)
+    well_rx = _WELL_RX if well_pattern is None else well_pattern
+
+    candidates: list[PairingCandidate] = []
+    sid_wells: dict[str, set[str]] = defaultdict(set)
+    sid_entries: dict[str, list[PairingCandidate]] = defaultdict(list)
+
+    for fp in iter_seq_files(directory):
+        sid, orient, det_name = _detect_sid_orientation(fp.name, detectors)
+        if orient in ("F", "R") and not enforce_same_well:
+            sid = _strip_well_token(sid)
+
+        well = _extract_well(fp.name, pattern=well_rx)
+        issues: list[str] = []
+        suggested_name: str | None = None
+
+        if enforce_same_well and not well:
+            issues.append("missing plate well code (A1-H12)")
+
+        candidate_matches: list[re.Match[str]] = []
+        if fwd_rx:
+            candidate_matches.extend(list(fwd_rx.finditer(fp.name)))
+        if rev_rx:
+            candidate_matches.extend(list(rev_rx.finditer(fp.name)))
+        if not candidate_matches and token_rx:
+            candidate_matches.extend(list(token_rx.finditer(fp.name)))
+
+        if orient not in ("F", "R"):
+            issues.append("no forward/reverse primer label detected")
+
+        for match in candidate_matches:
+            suggested = _suggest_delimiter_fix(fp.name, match.span(1))
+            if suggested:
+                if "primer label present but not delimited by '_' or '-'" not in issues:
+                    issues.append("primer label present but not delimited by '_' or '-'")
+                if suggested_name is None:
+                    suggested_name = suggested
+
+        candidate = PairingCandidate(
+            path=fp,
+            sid=sid,
+            orient=orient if orient in ("F", "R") else None,
+            detector=det_name,
+            well=well,
+            issues=issues,
+            suggested_name=suggested_name,
+        )
+        candidates.append(candidate)
+        sid_entries[sid].append(candidate)
+        if well:
+            sid_wells[sid].add(well)
+
+    if not enforce_same_well:
+        for sid, wells in sid_wells.items():
+            if len(wells) > 1:
+                issue = f"well mismatch for sample ID ({', '.join(sorted(wells))})"
+                for candidate in sid_entries.get(sid, []):
+                    candidate.issues.append(issue)
+
+    return candidates
 
 # --------------- Public Helpers ---------------------------
 def extract_sid_orientation(name: str, *, detectors: Sequence[Detector] | None = None) -> tuple[str, str | None]: 
@@ -288,7 +409,8 @@ def group_pairs(
             _store_entry(key,sid, orient, rec_path, det_name, well)
 
     if path.is_dir(): 
-        for p in path.iterdir():
+        for p in iter_seq_files(path):
+            # Only process FASTA inputs here; other inputs must be converted upstream.
             # Check the file extension in a case-insensitive way.
             # If it's not a recognized FASTA extension, skip to the next file.
             if p.suffix.lower() not in fasta_exts:
