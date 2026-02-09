@@ -38,9 +38,15 @@ def quality_trim(input_file: PathLike, output_file: PathLike, *, threads: int=1,
 
     L.info("RUN Trimmomatic: %s", " ".join(cmd))
     try:
-        subprocess.run(cmd, check=True, stderr=subprocess.PIPE, text=True)
+        result = subprocess.run(cmd, check=True, stderr=subprocess.PIPE, text=True)
+        if result.stdout:
+            L.info("Trimmomatic stdout:\n%s", result.stdout)
+        if result.stderr:
+            L.warning("Trimmomatic stderr:\n%s", result.stderr) 
     except subprocess.CalledProcessError as e:
         L.error("Trimmomatic failed (exit %s):\n%s", e.returncode, e.stderr)
+        if e.stdout:
+            L.error("Trimmomatic stdout:\n%s", e.stdout)
         raise 
 
     out_path = Path(output_file).resolve()

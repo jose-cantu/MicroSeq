@@ -53,9 +53,21 @@ def de_novo_assembly(input_fasta: PathLike, output_dir: PathLike, *, threads: in
     L.info("RUN CAP3: %s (cwd=%s)", " ".join(cmd), out_dir)
 
     try:
-        subprocess.run(cmd, check=True, cwd=out_dir, stderr=subprocess.PIPE, text=True) 
+        result = subprocess.run(
+           cmd,
+           check=True,
+           cwd=out_dir,
+           capture_output=True,
+           text=True,
+        )
+        if result.stdout:
+            L.info("CAP3 stdout:\n%s", result.stdout)
+        if result.stderr:
+            L.warning("CAP3 stderr:\n%s", result.stderr)
     except subprocess.CalledProcessError as exc:
         L.error("CAP3 failed (exit %s):\n%s", exc.returncode, exc.stderr)
+        if exc.stdout:
+            L.error("CAP3 stdout:\n%s", exc.stdout)
         raise 
 
     contig_path = out_dir / f"{local_fasta.name}.cap.contigs"

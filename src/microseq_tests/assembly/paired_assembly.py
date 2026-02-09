@@ -212,6 +212,11 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
     out_dir.mkdir(parents=True, exist_ok=True)
     metadata_path = out_dir / "cap3_run_metadata.txt"
 
+    # ==========================
+    # Capturing CAP3 version discovery stdout/stderr so the log file shows what was reported 
+    # by `cap3 --version` or the conda fallback.
+    # ========================== 
+
     cap3_version = "unknown"
     try:
         version_result = subprocess.run(
@@ -220,9 +225,18 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
             capture_output=True,
             text=True,
         )
+        if version_result.stdout:
+            L.info("CAP3 --version stdout:\n%s", version_result.stdout.strip())
+        if version_result.stderr:
+            L.warning("CAP3 --version stderr:\n%s", version_result.stderr.strip())
         cap3_version = (version_result.stdout or version_result.stderr).strip() or "unknown"
     except (OSError, subprocess.CalledProcessError) as exc:
         L.warning("Failed to determine CAP3 version via --version: %s", exc)
+
+
+    # =======================
+    # Fallback here: capture the conda list output in logs when `cap3 --version` doesn't resolve version string and use that.
+    # ======================= 
 
     if cap3_version == "unknown":
         for cmd in ("conda", "mamba"):
@@ -235,6 +249,10 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
                 )
             except (OSError, subprocess.CalledProcessError):
                 continue
+            if version_result.stdout:
+                L.info("%s list cap3 stdout:\n%s", cmd, version_result.stdout.strip())
+            if version_result.stderr:
+                L.warning("%s list cap3 stderr:\n%s", cmd, version_result.stderr.strip()) 
             for line in version_result.stdout.splitlines():
                 if line.startswith("cap3"):
                     parts = line.split()
@@ -316,17 +334,24 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
             )
 
             try:
-                subprocess.run(
+                result = subprocess.run(
                     cmd, 
                     check=True,
                     cwd=sample_dir,
-                    stderr=subprocess.PIPE,
+                    capture_output=True,
                     text=True,
                 )
+                if result.stdout:
+                    L.info("CAP3 stdout for %s:\n%s", sample_key, result.stdout)
+                if result.stderr:
+                    L.warning("CAP3 stderr for %s:\n%s", sample_key, result.stderr)
             except subprocess.CalledProcessError as exc:
                 L.error("CAP3 failed for sample %s (exit %s):\n%s", sample_key, exc.returncode, exc.stderr
                 )
+                if exc.stdout:
+                    L.error("CAP3 stdout for %s:\n%s", sample_key, exc.stdout)
                 raise # stop the run here on raise 
+
             contig_path = sample_dir / f"{sample_key}_paired.fasta.cap.contigs"
             if not contig_path.exists():
                 raise FileNotFoundError(contig_path)

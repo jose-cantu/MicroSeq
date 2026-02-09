@@ -29,7 +29,7 @@ def run_vsearch(cmd: list[str], *, cwd: Path | None = None) -> None:
     full_cmd = [vsearch, *cmd]
     L.info("Running vsearch: %s", " ".join(full_cmd))
     try:
-        subprocess.run(
+        result = subprocess.run(
             full_cmd,
             check=True,
             cwd=cwd,
@@ -37,8 +37,14 @@ def run_vsearch(cmd: list[str], *, cwd: Path | None = None) -> None:
             stderr=subprocess.PIPE,
             text=True,
         )
+        if result.stdout:
+            L.info("vsearch stdout:\n%s", result.stdout)
+        if result.stderr:
+            L.warning("vsearch stderr:\n%s", result.stderr)
     except subprocess.CalledProcessError as exc:
         L.error("vsearch failed (exit %s):\n%s", exc.returncode, exc.stderr)
+        if exc.stdout:
+            L.error("vsearch stdout:\n%s", exc.stdout)
         raise
 
 
