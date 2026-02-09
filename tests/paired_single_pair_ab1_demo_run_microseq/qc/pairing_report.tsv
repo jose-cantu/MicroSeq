@@ -1,0 +1,2 @@
+sid	F_path	R_path	detector
+A+	/home/jason/MicroSeq/tests/paired_single_pair_ab1_demo_run_microseq/qc/paired_fasta/A+_27F_2026-01-29_C07_trimmed.fasta	/home/jason/MicroSeq/tests/paired_single_pair_ab1_demo_run_microseq/qc/paired_fasta/A+_1492R_2026-01-29_E07_trimmed.fasta	F:detector | R:detector

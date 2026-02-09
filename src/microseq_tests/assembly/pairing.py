@@ -267,7 +267,7 @@ def analyze_pairing_candidates(
         if well:
             sid_wells[sid].add(well)
 
-    if not enforce_same_well:
+    if enforce_same_well:
         for sid, wells in sid_wells.items():
             if len(wells) > 1:
                 issue = f"well mismatch for sample ID ({', '.join(sorted(wells))})"

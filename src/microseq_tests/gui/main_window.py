@@ -224,27 +224,31 @@ class PairingPreviewDialog(QDialog):
         summary: str,
         suggestions: str,
         candidates: list[PairingCandidate],
+        enforce_same_well: bool,
+        refresh_callback=None,
+        open_callback=None,
         parent=None,
     ):
         super().__init__(parent)
         self.setWindowTitle("Pairing Preview")
         self.resize(1100, 650)
         self._candidates = candidates
+        self._enforce_same_well = enforce_same_well
+        self._refresh_callback = refresh_callback
+        self._open_callback = open_callback
+        self._renamed_paths: set[Path] = set()
         self._rename_map: list[tuple[Path, Path]] = []
 
         layout = QVBoxLayout(self)
-        header = QLabel(
-            f"{summary}\n"
-            "Pairs will still assemble, but naming is non-canonical; suggested renames improve reproducibility.\n"
-            f"Suggestions: {suggestions}"
-        )
-        header.setWordWrap(True)
-        header.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(header)
+        self._header = QLabel()
+        self._header.setWordWrap(True)
+        self._header.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self._header)
+        self._set_header(summary, suggestions, candidates)
 
-        self.table = QTableWidget(0, 6, self)
+        self.table = QTableWidget(0, 7, self)
         self.table.setHorizontalHeaderLabels(
-            ["File", "Detected", "Sample ID", "Well", "Issues", "Suggested rename"]
+            ["File", "Detected", "Sample ID", "Well", "Issues", "Suggested rename", "Status"]
         )
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -258,6 +262,14 @@ class PairingPreviewDialog(QDialog):
         copy_btn.clicked.connect(self._copy_rename_map)
         btn_row.addWidget(copy_btn)
 
+        open_btn = QPushButton("Open containing folder", self)
+        open_btn.clicked.connect(self._open_containing_folder)
+        btn_row.addWidget(open_btn)
+
+        copy_cmd_btn = QPushButton("Copy rename commands", self)
+        copy_cmd_btn.clicked.connect(self._copy_rename_commands)
+        btn_row.addWidget(copy_cmd_btn)
+
         apply_btn = QPushButton("Apply suggested renames…", self)
         apply_btn.clicked.connect(self._apply_renames)
         btn_row.addWidget(apply_btn)
@@ -268,6 +280,31 @@ class PairingPreviewDialog(QDialog):
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
 
+    def _set_header(
+        self,
+        summary: str,
+        suggestions: str,
+        candidates: list[PairingCandidate],
+    ) -> None:
+        mismatch = any(
+            "well mismatch" in issue
+            for candidate in candidates
+            for issue in candidate.issues
+        )
+        if self._enforce_same_well and mismatch:
+            pairing_line = (
+                "Pairs will not assemble until well codes match for each sample ID.\n"
+            )
+        else:
+            pairing_line = (
+                "Pairs will still assemble, but naming is non-canonical; suggested renames improve reproducibility.\n"
+            )
+        self._header.setText(
+            f"{summary}\n"
+            f"{pairing_line}"
+            f"Suggestions: {suggestions}"
+        )
+
     def _populate_table(self) -> None:
         self.table.setRowCount(0)
         self._rename_map = []
@@ -277,6 +314,7 @@ class PairingPreviewDialog(QDialog):
             detected = candidate.orient or "-"
             issues = "; ".join(candidate.issues) if candidate.issues else "-"
             suggested = candidate.suggested_name or "-"
+            status = "Issue corrected" if candidate.path in self._renamed_paths and not candidate.issues else "Issue" if candidate.issues else "OK"
 
             items = [
                 candidate.path.name,
@@ -285,6 +323,7 @@ class PairingPreviewDialog(QDialog):
                 candidate.well or "-",
                 issues,
                 suggested,
+                status,
             ]
             for col, value in enumerate(items):
                 item = QTableWidgetItem(value)
@@ -302,6 +341,37 @@ class PairingPreviewDialog(QDialog):
             return
         lines = ["source\ttarget"]
         lines.extend(f"{src}\t{dest}" for src, dest in self._rename_map)
+        QApplication.clipboard().setText("\n".join(lines))
+
+    def _open_containing_folder(self) -> None:
+        if not self._candidates:
+            QMessageBox.information(self, "No files", "No files are available to open.")
+            return
+        folder = self._candidates[0].path.parent
+        if self._open_callback is not None:
+            ok = self._open_callback(folder)
+            if ok:
+                return
+        QMessageBox.information(
+            self,
+            "Open manually",
+            f"Unable to open folder via system handler:\n{folder}",
+        )
+
+    def _copy_rename_commands(self) -> None:
+        if not self._rename_map:
+            QApplication.clipboard().setText("No rename suggestions available.")
+            return
+        if os.name == "nt":
+            lines = [
+                f'Rename-Item -LiteralPath {shlex.quote(str(src))} -NewName {shlex.quote(dest.name)}'
+                for src, dest in self._rename_map
+            ]
+        else:
+            lines = [
+                f"mv -n -- {shlex.quote(str(src))} {shlex.quote(str(dest))}"
+                for src, dest in self._rename_map
+            ]
         QApplication.clipboard().setText("\n".join(lines))
 
     def _apply_renames(self) -> None:
@@ -351,6 +421,19 @@ class PairingPreviewDialog(QDialog):
                 self,
                 "Rename errors",
                 "Some renames failed:\n" + "\n".join(errors),
+            )
+            return
+
+        self._renamed_paths = {dest for _, dest in self._rename_map}
+        if self._refresh_callback is not None:
+            summary, suggestions, candidates = self._refresh_callback()
+            self._candidates = candidates
+            self._set_header(summary, suggestions, candidates)
+            self._populate_table()
+            QMessageBox.information(
+                self,
+                "Renames complete",
+                "Suggested renames applied. Preview refreshed.",
             )
             return
 
@@ -1217,31 +1300,40 @@ class MainWindow(QMainWindow):
 
         directory = self._input_path if self._input_path.is_dir() else self._input_path.parent 
         fwd, rev = self._current_patterns()
-        summary = _summarize_paired_candidates(
-            directory,
-            fwd,
-            rev,
-            enforce_same_well=self.enforce_well_chk.isChecked()
-        )
-        suggestions = _suggest_pairing_patterns(directory)
-        candidates = analyze_pairing_candidates(
-            directory,
-            fwd,
-            rev,
-            known_tokens=self._current_token_list(),
-            enforce_same_well=self.enforce_well_chk.isChecked(),
-        )
+        def _refresh_preview():
+            summary_text = _summarize_paired_candidates(
+                directory,
+                fwd,
+                rev,
+                enforce_same_well=self.enforce_well_chk.isChecked()
+            )
+            suggestions_text = _suggest_pairing_patterns(directory)
+            candidates_list = analyze_pairing_candidates(
+                directory,
+                fwd,
+                rev,
+                known_tokens=self._current_token_list(),
+                enforce_same_well=self.enforce_well_chk.isChecked(),
+            )
+            return summary_text, suggestions_text, candidates_list
+
+        summary, suggestions, candidates = _refresh_preview() 
         dialog = PairingPreviewDialog(
             summary=summary,
             suggestions=suggestions,
             candidates=candidates,
+            enforce_same_well=self.enforce_well_chk.isChecked(),
+            refresh_callback=_refresh_preview,
+            open_callback=self._open_external_detached,
             parent=self,
         )
-        # Avoid nested event loops from exec(); open() keeps the GUI responsive and
+        # Avoid nested event loops from exec();  keep this as show() to avoid the GUI being unresponsive from minimizing the window from preview_pairs 
         # aligns with the rest of the app's no-nested-event-loop stance that I will have moving foward given past issues.
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.setWindowModality(Qt.WindowModality.NonModal)
         self._active_pairing_preview = dialog
-        dialog.finished.connect(lambda *_: setattr(self, "_active_pairing_preview", None))
-        dialog.open()
+        dialog.destroyed.connect(lambda *_: setattr(self, "_active_pairing_preview", None))
+        dialog.show()
 
     def _cleanup_input_staging(self) -> None:
         if self._input_staging:
