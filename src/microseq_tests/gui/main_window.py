@@ -270,6 +270,10 @@ class PairingPreviewDialog(QDialog):
         copy_cmd_btn.clicked.connect(self._copy_rename_commands)
         btn_row.addWidget(copy_cmd_btn)
 
+        export_btn = QPushButton("Export rename script…", self)
+        export_btn.clicked.connect(self._export_rename_script)
+        btn_row.addWidget(export_btn)
+
         apply_btn = QPushButton("Apply suggested renames…", self)
         apply_btn.clicked.connect(self._apply_renames)
         btn_row.addWidget(apply_btn)
@@ -374,6 +378,67 @@ class PairingPreviewDialog(QDialog):
             ]
         QApplication.clipboard().setText("\n".join(lines))
 
+    def _rename_conflicts(self) -> tuple[set[Path], set[Path]]:
+        targets = [dest for _, dest in self._rename_map]
+        conflicts = {dest for dest in targets if dest.exists()}
+        target_counts = collections.Counter(targets)
+        duplicate_targets = {dest for dest, count in target_counts.items() if count > 1}
+        return conflicts, duplicate_targets
+
+    def _export_rename_script(self) -> None:
+        if not self._rename_map:
+            QMessageBox.information(self, "No renames", "No suggested renames to export.")
+            return
+        conflicts, duplicate_targets = self._rename_conflicts()
+        if conflicts or duplicate_targets:
+            details = []
+            if conflicts:
+                details.append(
+                    "Targets already exist:\n" + "\n".join(str(p) for p in sorted(conflicts))
+                )
+            if duplicate_targets:
+                details.append(
+                    "Duplicate target names:\n"
+                    + "\n".join(str(p) for p in sorted(duplicate_targets))
+                )
+            QMessageBox.warning(
+                self,
+                "Rename conflicts",
+                "Unable to export renames due to conflicts.\n\n" + "\n\n".join(details),
+            )
+            return
+
+        default_path = None
+        if self._candidates:
+            default_path = str(self._candidates[0].path.parent / "rename_map.tsv")
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export rename script",
+            default_path or "",
+            "TSV (*.tsv);;Shell script (*.sh);;All files (*)",
+        )
+        if not path:
+            return
+        out_path = Path(path)
+        if out_path.suffix.lower() == ".sh":
+            if os.name == "nt":
+                lines = [
+                    f'Rename-Item -LiteralPath {shlex.quote(str(src))} -NewName {shlex.quote(dest.name)}'
+                    for src, dest in self._rename_map
+                ]
+            else:
+                lines = [
+                    f"mv -n -- {shlex.quote(str(src))} {shlex.quote(str(dest))}"
+                    for src, dest in self._rename_map
+                ]
+            out_path.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + "\n".join(lines) + "\n", encoding="utf-8")
+        else:
+            lines = ["source\ttarget"]
+            lines.extend(f"{src}\t{dest}" for src, dest in self._rename_map)
+            out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        QMessageBox.information(self, "Export complete", f"Rename script written to:\n{out_path}")
+
     def _apply_renames(self) -> None:
         if not self._rename_map:
             QMessageBox.information(self, "No renames", "No suggested renames to apply.")
@@ -386,10 +451,7 @@ class PairingPreviewDialog(QDialog):
         if confirm != QMessageBox.StandardButton.Yes:
             return
 
-        targets = [dest for _, dest in self._rename_map]
-        conflicts = {dest for dest in targets if dest.exists()}
-        target_counts = collections.Counter(targets)
-        duplicate_targets = {dest for dest, count in target_counts.items() if count > 1}
+        conflicts, duplicate_targets = self._rename_conflicts()
         if conflicts or duplicate_targets:
             details = []
             if conflicts:
@@ -822,9 +884,21 @@ class MainWindow(QMainWindow):
         self.summary_filter = QComboBox()
         self.summary_filter.addItem("All statuses", userData=None)
 
-        self.summary_table = QTableWidget(0, 6)
+        self.summary_table = QTableWidget(0, 11)
         self.summary_table.setHorizontalHeaderLabels(
-            ["sample_id", "status", "contigs_count", "singlets_count", "overlaps_saved", "overlaps_removed"]
+            [
+                "sample_id",
+                "status",
+                "contigs_count",
+                "singlets_count",
+                "overlaps_saved",
+                "overlaps_removed",
+                "merge_status",
+                "merge_overlap_len",
+                "merge_identity",
+                "merge_qualities",
+                "merge_warning",
+            ]
         )
         self.summary_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.summary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -838,9 +912,9 @@ class MainWindow(QMainWindow):
         self.blast_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.blast_table.itemSelectionChanged.connect(self._update_detail_panel)
 
-        self.diagnostics_table = QTableWidget(0, 5)
+        self.diagnostics_table = QTableWidget(0, 6)
         self.diagnostics_table.setHorizontalHeaderLabels(
-            ["sample_id", "overlap_len", "overlap_identity", "overlap_quality", "status"]
+            ["sample_id", "overlap_len", "overlap_identity", "overlap_quality", "orientation", "status"]
         )
         self.diagnostics_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.diagnostics_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -1330,6 +1404,7 @@ class MainWindow(QMainWindow):
         # Avoid nested event loops from exec();  keep this as show() to avoid the GUI being unresponsive from minimizing the window from preview_pairs 
         # aligns with the rest of the app's no-nested-event-loop stance that I will have moving foward given past issues.
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.setModal(False)
         dialog.setWindowModality(Qt.WindowModality.NonModal)
         self._active_pairing_preview = dialog
         dialog.destroyed.connect(lambda *_: setattr(self, "_active_pairing_preview", None))
@@ -1912,6 +1987,15 @@ class MainWindow(QMainWindow):
             self.open_blast_inputs_system_btn.setEnabled(self._blast_inputs_fasta.exists())
             self.open_asm_folder_btn.setEnabled(self._asm_dir.exists())
 
+    @staticmethod
+    def _fmt_table_value(value: object) -> str:
+        if value is None:
+            return ""
+        text = str(value)
+        if text.lower() == "nan":
+            return ""
+        return text
+
     def _load_summary_table(self, summary_path: Path) -> None:
         if not summary_path.exists():
             return
@@ -1932,12 +2016,17 @@ class MainWindow(QMainWindow):
         for row_idx, row in df.iterrows():
             self.summary_table.insertRow(row_idx)
             row_values = [
-                str(row.get("sample_id", "")),
-                str(row.get("status", "")),
-                str(row.get("contigs_count", "")),
-                str(row.get("singlets_count", "")),
-                str(row.get("overlaps_saved", "")),
-                str(row.get("overlaps_removed", "")),
+                self._fmt_table_value(row.get("sample_id", "")),
+                self._fmt_table_value(row.get("status", "")),
+                self._fmt_table_value(row.get("contigs_count", "")),
+                self._fmt_table_value(row.get("singlets_count", "")),
+                self._fmt_table_value(row.get("overlaps_saved", "")),
+                self._fmt_table_value(row.get("overlaps_removed", "")),
+                self._fmt_table_value(row.get("merge_status", "")),
+                self._fmt_table_value(row.get("merge_overlap_len", "")),
+                self._fmt_table_value(row.get("merge_identity", "")),
+                self._fmt_table_value(row.get("merge_qualities", "")),
+                self._fmt_table_value(row.get("merge_warning", "")),
             ]
             for col, value in enumerate(row_values):
                 item = QTableWidgetItem(value)
@@ -1954,6 +2043,11 @@ class MainWindow(QMainWindow):
                 "singlets_count": row_values[3],
                 "overlaps_saved": row_values[4],
                 "overlaps_removed": row_values[5],
+                "merge_status": row_values[6],
+                "merge_overlap_len": row_values[7],
+                "merge_identity": row_values[8],
+                "merge_qualities": row_values[9],
+                "merge_warning": row_values[10],
             }
         for status in sorted(df["status"].dropna().unique()):
             self.summary_filter.addItem(status, userData=status)
@@ -1968,10 +2062,10 @@ class MainWindow(QMainWindow):
         for row_idx, row in df.iterrows():
             self.blast_table.insertRow(row_idx)
             row_values = [
-                str(row.get("sample_id", "")),
-                str(row.get("blast_payload", "")),
-                str(row.get("reason", "")),
-                str(row.get("payload_ids", "")),
+                self._fmt_table_value(row.get("sample_id", "")),
+                self._fmt_table_value(row.get("blast_payload", "")),
+                self._fmt_table_value(row.get("reason", "")),
+                self._fmt_table_value(row.get("payload_ids", "")),
             ]
             for col, value in enumerate(row_values):
                 item = QTableWidgetItem(value)
@@ -1993,11 +2087,12 @@ class MainWindow(QMainWindow):
         for row_idx, row in df.iterrows():
             self.diagnostics_table.insertRow(row_idx)
             row_values = [
-                str(row.get("sample_id", "")),
-                str(row.get("overlap_len", "")),
-                str(row.get("overlap_identity", "")),
-                str(row.get("overlap_quality", "")),
-                str(row.get("status", "")),
+                self._fmt_table_value(row.get("sample_id", "")),
+                self._fmt_table_value(row.get("overlap_len", "")),
+                self._fmt_table_value(row.get("overlap_identity", "")),
+                self._fmt_table_value(row.get("overlap_quality", "")),
+                self._fmt_table_value(row.get("orientation", "")),
+                self._fmt_table_value(row.get("status", "")),
             ]
             for col, value in enumerate(row_values):
                 item = QTableWidgetItem(value)
@@ -2007,7 +2102,8 @@ class MainWindow(QMainWindow):
                 "overlap_len": row_values[1],
                 "overlap_identity": row_values[2],
                 "overlap_quality": row_values[3],
-                "status": row_values[4],
+                "orientation": row_values[4],
+                "status": row_values[5],
             }
         self._configure_table_view(self.diagnostics_table)
 
@@ -2095,7 +2191,8 @@ class MainWindow(QMainWindow):
                 "overlap: "
                 f"{audit.get('status', '—')} (len {audit.get('overlap_len', '—')}, "
                 f"id {audit.get('overlap_identity', '—')}, "
-                f"q {audit.get('overlap_quality', '—')})"
+                f"q {audit.get('overlap_quality', '—')}, "
+                f"orient {audit.get('orientation', '—')})"
             )
         else:
             statuses = [audit.get("status", "—") for audit in audit_values if audit]

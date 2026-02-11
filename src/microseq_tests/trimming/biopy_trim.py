@@ -1,135 +1,139 @@
-# src/microseq_tests/trimming/biopy_trim.py 
+# src/microseq_tests/trimming/biopy_trim.py
 from __future__ import annotations
-from pathlib import Path
-from typing import List, Optional, Iterable 
-from Bio import SeqIO                         
-import logging 
-from importlib import import_module
 
-from microseq_tests.trimming.expected_errors import expected_errors, qeff_from_mee_per_kb 
+from importlib import import_module
+import logging
+from pathlib import Path
+from typing import Iterable, List, Optional
+
+from Bio import SeqIO
 
 L = logging.getLogger(__name__)
 
+TRIM_SUMMARY_COLUMNS = [
+    "file",
+    "reads",
+    "avg_len",
+    "avg_q",
+    "qc_status",
+    "primer_trimmed",
+    "primer_bases_trimmed",
+    "primer_trim_len_avg",
+    "primer_bases_trimmed_total",
+    "primer_mismatch_avg",
+    "primer_hit",
+    "primer_offset_avg",
+    "primer_orientation",
+    "primer_orientation_source",
+    "primer_iupac_mode",
+]
 
-# ------- helper functions ----------------------
-def _tick_safe(bar, inc: int = 1) -> None: 
-    """ Calls bar.update(inc) only if bar exposes that attribute."""
+
+def build_trim_summary_row(
+    *,
+    file_name: str,
+    reads: int,
+    avg_len: float,
+    avg_q: float,
+    qc_status: str,
+) -> list[str]:
+    row = ["" for _ in TRIM_SUMMARY_COLUMNS]
+    row[0] = file_name
+    row[1] = str(reads)
+    row[2] = f"{avg_len:.1f}"
+    row[3] = f"{avg_q:.2f}"
+    row[4] = qc_status
+    return row
+
+
+def _tick_safe(bar, inc: int = 1) -> None:
     if hasattr(bar, "update"):
-        bar.update(inc)  # safety guard 
+        bar.update(inc)
 
 
-# ----------------------------------------------------------------------
-# Single‑read sliding‑window trim
-# ----------------------------------------------------------------------
 def dynamic_trim(record, win: int = 5, q: int = 20):
-    """
-    Return trimmed SeqRecord or None if the read never reaches quality q. 
-    """
     quals: List[int] = record.letter_annotations["phred_quality"]
     n = len(quals)
     if n < win:
-        return None                            # too short
+        return None
 
-    # 5′ -> 3′
-    left = next(
-        (i for i in range(n - win + 1)
-         if sum(quals[i:i + win]) / win >= q),
-        None,
-    )
+    left = next((i for i in range(n - win + 1) if sum(quals[i : i + win]) / win >= q), None)
     if left is None:
         return None
 
-    # 3′ -> 5′
-    right = next(
-        (j for j in range(n, win - 1, -1)
-         if sum(quals[j - win:j]) / win >= q),
-        None,
-    )
+    right = next((j for j in range(n, win - 1, -1) if sum(quals[j - win : j]) / win >= q), None)
     if right is None or right <= left:
         return None
 
-    return record[left:right]                 # trimmed SeqRecord
+    return record[left:right]
 
 
-# ────────────────────────────────────────────────────────────────────────
-# helper that does the real trimming work (keeps outer function compact)
-# ────────────────────────────────────────────────────────────────────────
 def _trim_all(
     fastqs: Iterable[Path],
     *,
     window_size: int,
     per_base_q: int,
     file_q_threshold: float,
-    mee_max: float | None, 
+    mee_max: float | None,
     mee_min_len: int | None,
     min_reads_kept: int | None,
-    max_drop_fraction: float | None, 
+    max_drop_fraction: float | None,
     passed_dir: Path,
     failed_dir: Path,
     stats_root: Path,
     comb: Optional[open],
     bar,
 ) -> None:
-    """
-      Core loop: trims each FASTQ, writes per-read stats, dispatches files
-    to passed_dir / failed_dir, and updates the progress bar once
-    per input file.
-    """ 
+    _ = (mee_max, mee_min_len, min_reads_kept, max_drop_fraction)
     for fq in fastqs:
-        base         = fq.stem
-        stats_path   = stats_root / f"{base}_avg_qual.txt"
+        base = fq.stem
+        stats_path = stats_root / f"{base}_avg_qual.txt"
         trimmed_path = passed_dir / f"{base}_trimmed.fastq"
-        
+
         reads = bases = qsum = 0
-        mee_sum = 0.0
-        dropped_len = 0 
-        dropped_mee = 0 
         trimmed_recs = []
-        
+
         for rec in SeqIO.parse(fq, "fastq"):
             trimmed = dynamic_trim(rec, window_size, per_base_q)
             if not trimmed:
                 continue
             ph = trimmed.letter_annotations["phred_quality"]
-            mee = expected_errors(ph)
             reads += 1
             bases += len(trimmed)
-            qsum  += sum(ph)
-            mee_sum += mee 
+            qsum += sum(ph)
             trimmed_recs.append(trimmed)
-            
-        avg_q   = qsum  / bases if bases else 0
+
+        avg_q = qsum / bases if bases else 0
         avg_len = bases / reads if reads else 0
-        avg_mee = mee_sum / reads if reads else 0 
-        avg_mee_per_kb = (1000 * mee_sum / bases) if bases else 0 
-        avg_qeff = qeff_from_mee_per_kb(avg_mee_per_kb)
-        mee_qc_label = _mee_qc_label(avg_mee_per_kb)
-        
-        # per-read stats
-        with open(stats_path, "w") as fh:
+
+        with stats_path.open("w", encoding="utf-8") as fh:
             for r in trimmed_recs:
                 ph = r.letter_annotations["phred_quality"]
-                mee = expected_errors(ph) 
-                fh.write(f"{r.id}\t{len(r)}\t{sum(ph)/len(ph):.2f}\t{mee:.3f}\n")
-                
-        # pass / fail per file
-        if avg_q < file_q_threshold: 
+                fh.write(f"{r.id}\t{len(r)}\t{sum(ph)/len(ph):.2f}\n")
+
+        if avg_q < file_q_threshold:
             (failed_dir / fq.name).write_bytes(fq.read_bytes())
             (failed_dir / stats_path.name).write_bytes(stats_path.read_bytes())
             L.info("[FAIL] %s  (avgQ %.2f)", fq.name, avg_q)
+            qc_status = "fail"
         else:
             SeqIO.write(trimmed_recs, trimmed_path, "fastq")
             L.info("[PASS] %s -> %s (avgQ %.2f)", fq.name, trimmed_path, avg_q)
-            if comb:
-                comb.write(f"{fq.name}\t{reads}\t{avg_len:.1f}\t{avg_q:.2f}\t{avg_mee:.3f}\t"
-                f"{avg_mee_per_kb:.3f}\t{avg_qeff:.2f}\t{mee_qc_label}\n" 
+            qc_status = "pass"
+
+        if comb:
+            row = build_trim_summary_row(
+                file_name=fq.name,
+                reads=reads,
+                avg_len=avg_len,
+                avg_q=avg_q,
+                qc_status=qc_status,
             )
-                
-        _tick_safe(bar) # exactly one tick per FASTQ  
-        
-# ────────────────────────────────────────────────────────────────────────
-# public folder-level driver
-# ────────────────────────────────────────────────────────────────────────
+            comb.write("\t".join(row) + "\n")
+
+        _tick_safe(bar)
+
+
 def trim_folder(
     input_dir: str | Path,
     output_dir: str | Path,
@@ -140,81 +144,61 @@ def trim_folder(
     mee_max: float | None = None,
     mee_min_len: int | None = None,
     min_reads_kept: int | None = None,
-    max_drop_fraction: float | None = None, 
+    max_drop_fraction: float | None = None,
     combined_tsv: str | Path | None = None,
-    threads: int = 1,                          # kept for API parity; unused
+    threads: int = 1,
     **kwargs,
 ) -> None:
-    """
-    Quality-trim every *.fastq in input_dir and write results under
-    output_dir:
-
-      ├── passed_qc_fastq/
-      ├── failed_qc_fastq/
-      └── per-read stat files + combined TSV
-
-    A single outer progress bar ticks once per FASTQ.  Works both with
-    a real tqdm bar and with the dummy bar used by the test-suite’s
-    monkey-patch.
-    """
-    input_dir  = Path(input_dir)
+    _ = (threads, kwargs)
+    input_dir = Path(input_dir)
     output_dir = Path(output_dir)
     passed_dir = output_dir.parent / "passed_qc_fastq"
     failed_dir = output_dir.parent / "failed_qc_fastq"
     for p in (output_dir, passed_dir, failed_dir):
         p.mkdir(parents=True, exist_ok=True)
-     
-     # combined summary 
+
     comb: Optional[open] = None
     if combined_tsv:
-        comb = open(combined_tsv, "a")
-        if comb.tell() == 0:                   # new file -> header
-            comb.write("file\treads\tavg_len\tavg_q\tavg_mee\tavg_mee_per_kb\tavg_qeff\tmee_qc_label\n")
-            
+        comb = open(combined_tsv, "a", encoding="utf-8")
+        if comb.tell() == 0:
+            comb.write("\t".join(TRIM_SUMMARY_COLUMNS) + "\n")
+
     fastqs = sorted(input_dir.glob("*.fastq"))
-    
-    # late-bind progress helper so pytest can monkey-patch it
+
     prog = import_module("microseq_tests.utility.progress")
-    cm_or_gen   = prog.stage_bar(len(fastqs), desc="trim", unit="file")
-    
+    cm_or_gen = prog.stage_bar(len(fastqs), desc="trim", unit="file")
+
     def _run(bar):
         _trim_all(
-                fastqs,
-                window_size=window_size,
-                per_base_q=per_base_q,
-                file_q_threshold=file_q_threshold,
-                mee_max=mee_max,
-                mee_min_len=mee_min_len,
-                min_reads_kept=min_reads_kept,
-                max_drop_fraction=max_drop_fraction, 
-                passed_dir=passed_dir,
-                failed_dir=failed_dir,
-                stats_root=output_dir,
-                comb=comb,
-                bar=bar,   # inside _trim_all still call bar.update 
-            )
-    if hasattr(cm_or_gen, "__enter__"):  # proper-context manager 
-        with cm_or_gen as bar:
-            _run(bar) 
+            fastqs,
+            window_size=window_size,
+            per_base_q=per_base_q,
+            file_q_threshold=file_q_threshold,
+            mee_max=mee_max,
+            mee_min_len=mee_min_len,
+            min_reads_kept=min_reads_kept,
+            max_drop_fraction=max_drop_fraction,
+            passed_dir=passed_dir,
+            failed_dir=failed_dir,
+            stats_root=output_dir,
+            comb=comb,
+            bar=bar,
+        )
 
-    else:                        # generator or bare bar 
+    if hasattr(cm_or_gen, "__enter__"):
+        with cm_or_gen as bar:
+            _run(bar)
+    else:
         try:
-            bar = next(cm_or_gen) # unwrap generator 
+            bar = next(cm_or_gen)
         except StopIteration:
-            bar = cm_or_gen 
-        _run(bar) 
+            bar = cm_or_gen
+        _run(bar)
 
         if hasattr(cm_or_gen, "close"):
-            cm_or_gen.close() 
+            cm_or_gen.close()
         if hasattr(bar, "close") and bar is not cm_or_gen:
             bar.close()
-            
+
     if comb:
         comb.close()
-
-def _mee_qc_label(avg_mee_per_kb: float) -> str:
-    if avg_mee_per_kb <= 2:
-        return "clean"
-    if avg_mee_per_kb <= 5:
-        return "watch"
-    return "review"

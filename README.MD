@@ -55,7 +55,7 @@ In short: MicroSeq is the only open-source package that ingests raw Sanger or FA
 * **Quality‑control & trimming**
 
   * AB1 -> FASTQ (`microseq ab1-to-fastq`)
-  * FASTQ QC (Phred, length, expected errors, adapters) with Trimmomatic / BioPython (`microseq trim`).
+  * FASTQ QC (Phred, length, adapters) with Trimmomatic / BioPython (`microseq trim`).
 * **De‑novo assembly** using *CAP3* (`microseq assembly`).
 * **Chimera checking + replicate collapse** using vsearch (it's optional to use). It enables reference based chimera filterting and dereplication before BLAST when desired. I am currently working on implmenting library dereplication across all samples, global clustering so OTU clustering across all samples, and finally denovo chimera detection . 
 * **Taxonomic classification**
@@ -71,21 +71,11 @@ In short: MicroSeq is the only open-source package that ingests raw Sanger or FA
 * **Portable**  – pure‑Python (≥3.10) + external binaries already in Conda env (BLAST+, TaxonKit, CAP3).
 * **GUI preview** (`microseq-gui`) – drag‑and‑drop queue, live log pane, progress
   bar with ETA.  Running QC or the full pipeline now writes
-  `qc/trim_summary.tsv` automatically. It includes avg Phred, avg expected errors, and avg MEE per kb, and qeff/label summaries. The window provides **Run QC** and
+  `qc/trim_summary.tsv` automatically. It includes avg Phred, read-length, and primer-trim telemetry columns while merge decisions are driven by overlap-local evidence. The window provides **Run QC** and
   **Full pipeline** buttons to execute the entire workflow (trim -> BLAST ->
   taxonomy -> optional BIOM generation) with a single click.
 
-> Note: Expected errors (EE/MEE) are reported as telemetry for long Sanger reads and should be interpreted in a length-aware way. Prefer EE per kb (avg_mee_per_kb) and the derived Phred-equivalent score (qeff) as QC flags rather than strict hard gates. As a starting heuristic, consider reviewing/inspecting traces (and possibly resequencing) w hen avg_mee_per_kb is > 5 after trimming, especially if species-level BLAST calls are near your identity cutoff or the top-hit margin is small.
-> MicroSeq now assigns a `mee_qc_label` based on avg_mee_per_kb: `clean` (≤2), `watch` (2–5), and `review` (>5). This is simply meant as an extra QC heuristic only. Extra details in how this is used is in the docs. 
-
-Approximate mapping between mean Phred (or qeff) and EE per kb (length-normalized):
-
-| Mean Q | EE per kb (approx) |
-| --- | --- |
-| 30 | 1 |
-| 27 | 2 |
-| 23 | 5 |
-| 20 |10 | 
+> Note: MicroSeq uses overlap-local criteria (end-anchored overlap length/identity and policy-controlled overlap quality) for paired merge confidence in Sanger workflows.
 
 ## Chimera checking and replicate collapse | vsearch 
 

@@ -22,3 +22,23 @@ databases:
     taxonomy: ${MICROSEQ_DB_HOME}/ncbi/taxonomy.tsv
 metadata:
   sample_id_normaliser: strip_suffix_legacy
+primer_trim:
+  enabled: false
+  max_mismatch: 2
+  max_search: 60
+  max_primer_offset: 10
+  iupac_mode: true
+  forward_primers: []
+  reverse_primers: []
+merge_two_reads:
+  min_overlap: 100
+  min_identity: 0.8
+overlap_eval:
+  min_overlap: 100
+  min_identity: 0.8
+  min_quality: 20.0
+  quality_mode: warning
+  ambiguity_identity_delta: 0.0
+  high_conflict_q_threshold: 30
+  high_conflict_action: flag
+  cap3_validate_pair_support: true

@@ -59,6 +59,13 @@ def parse_cap3_reports(
                     "clip_r_left": None,
                     "clip_r_right": None,
                     "status": "pair_missing",
+                    "merge_status": None,
+                    "merge_overlap_len": None,
+                    "merge_identity": None,
+                    "merge_qualities": None,
+                    "merge_warning": None,
+                    "merge_high_conflict_mismatches": None,
+                    "cap3_validation": None,
                 }
             )
             continue
@@ -66,6 +73,8 @@ def parse_cap3_reports(
         info_path = sample_dir / f"{sample_key}_paired.fasta.cap.info"
         contigs_path = sample_dir / f"{sample_key}_paired.fasta.cap.contigs"
         singlets_path = sample_dir / f"{sample_key}_paired.fasta.cap.singlets"
+        merge_report_path = sample_dir / f"{sample_key}_paired.merge_report.tsv"
+        cap3_validation_path = sample_dir / f"{sample_key}_paired.cap3_validation.txt"
 
         overlaps_saved = 0
         overlaps_removed = 0
@@ -87,7 +96,7 @@ def parse_cap3_reports(
                         clip_f_left, clip_f_right = left, right
                     elif orient == "R":
                         clip_r_left, clip_r_right = left, right
-        else:
+        elif not merge_report_path.exists():
             L.warning("Missing CAP3 info file for %s", sample_key)
 
         contigs_count = _count_fasta_records(contigs_path)
@@ -99,6 +108,31 @@ def parse_cap3_reports(
             status = "singlets_only"
         else:
             status = "cap3_no_output"
+
+        merge_status = None
+        merge_overlap_len = None
+        merge_identity = None
+        merge_qualities = None
+        merge_warning = None
+        merge_high_conflict_mismatches = None
+        cap3_validation = None
+        if merge_report_path.exists():
+            lines = merge_report_path.read_text(encoding="utf-8").splitlines()
+            if len(lines) >= 2:
+                headers = lines[0].split("\t")
+                values = lines[1].split("\t")
+                report = dict(zip(headers, values, strict=False))
+                merge_status = report.get("merge_status")
+                merge_overlap_len = report.get("overlap_len")
+                merge_identity = report.get("identity")
+                merge_qualities = report.get("qualities")
+                merge_warning = report.get("merge_warning")
+                merge_high_conflict_mismatches = report.get("high_conflict_mismatches")
+
+        if cap3_validation_path.exists():
+            cap3_validation = cap3_validation_path.read_text(encoding="utf-8").strip() or None
+            if cap3_validation == "failed":
+                status = "cap3_unverified"
 
         if overlap_status:
             audit_status = overlap_status.get(sample_key)
@@ -117,6 +151,13 @@ def parse_cap3_reports(
                 "clip_r_left": clip_r_left,
                 "clip_r_right": clip_r_right,
                 "status": status,
+                "merge_status": merge_status,
+                "merge_overlap_len": merge_overlap_len,
+                "merge_identity": merge_identity,
+                "merge_qualities": merge_qualities,
+                "merge_warning": merge_warning,
+                "merge_high_conflict_mismatches": merge_high_conflict_mismatches,
+                "cap3_validation": cap3_validation,
             }
         )
 
@@ -133,6 +174,13 @@ def parse_cap3_reports(
             "clip_r_left",
             "clip_r_right",
             "status",
+            "merge_status",
+            "merge_overlap_len",
+            "merge_identity",
+            "merge_qualities",
+            "merge_warning",
+            "merge_high_conflict_mismatches",
+            "cap3_validation",
         ]
         with output_tsv.open("w", encoding="utf-8") as fh:
             fh.write("\t".join(headers) + "\n")

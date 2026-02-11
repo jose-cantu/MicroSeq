@@ -30,9 +30,14 @@ from microseq_tests.trimming.biopy_trim import trim_folder as biopy_trim
 from microseq_tests.trimming.fastq_to_fasta import (
     fastq_folder_to_fasta as fastq_to_fasta,
 )
+from microseq_tests.trimming.primer_trim import trim_primer_fastqs, update_trim_summary
 
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
 from microseq_tests.assembly.paired_assembly import assemble_pairs, _build_keep_separate_pairs 
+from microseq_tests.assembly.overlap_utils import (
+    iter_end_anchored_overlaps,
+    select_best_overlap,
+)
 from microseq_tests.assembly.pairing import  (
         DETECTORS, DupPolicy, _extract_well, _strip_well_token, extract_sid_orientation, iter_seq_files, make_pattern_detector) 
 from microseq_tests.assembly.cap3_report import parse_cap3_reports
@@ -117,6 +122,37 @@ def run_trim(
         input_path = Path(input_path) 
         trim_dir = work / "qc"
         trim_fastq_inputs(input_path, trim_dir, summary_tsv=summary_tsv) 
+
+    primer_cfg = load_config().get("primer_trim", {})
+    if primer_cfg.get("enabled"):
+        forward_primers = primer_cfg.get("forward_primers", [])
+        reverse_primers = primer_cfg.get("reverse_primers", [])
+        max_mismatch = int(primer_cfg.get("max_mismatch", 2))
+        max_search = int(primer_cfg.get("max_search", 60))
+        if forward_primers or reverse_primers:
+            primer_trim_dir = work / "passed_qc_fastq_primer_trim"
+            primer_report = work / "qc" / "primer_trim_report.tsv"
+            def _orientation_resolver(filename: str) -> str | None:
+                _sid, orient = extract_sid_orientation(filename)
+                return orient
+
+            primer_results = trim_primer_fastqs(
+                trim_dir,
+                primer_trim_dir,
+                forward_primers=forward_primers,
+                reverse_primers=reverse_primers,
+                max_mismatch=max_mismatch,
+                max_search=max_search,
+                max_primer_offset=int(primer_cfg.get("max_primer_offset", 10)),
+                iupac_mode=bool(primer_cfg.get("iupac_mode", True)),
+                report_path=primer_report,
+                orientation_resolver=_orientation_resolver,
+            )
+            if summary_tsv:
+                update_trim_summary(Path(summary_tsv), primer_results)
+            trim_dir = primer_trim_dir
+        else:
+            L.warning("Primer trim enabled but no primers configured; skipping primer trimming.")
 
     fastq_to_fasta(trim_dir, work / "qc" / "trimmed.fasta")
     L.info("Trim finished -> %s", work / "qc" / "trimmed.fasta")
@@ -509,49 +545,104 @@ def _evaluate_overlap(
     }
 
 
+def _resolve_overlap_thresholds(cfg: dict | None = None) -> tuple[int, float, float]:
+    config = cfg if cfg is not None else load_config()
+    overlap_cfg = config.get("overlap_eval", {})
+    merge_cfg = config.get("merge_two_reads", {})
+    min_overlap = int(overlap_cfg.get("min_overlap", merge_cfg.get("min_overlap", 100)))
+    min_identity = float(overlap_cfg.get("min_identity", merge_cfg.get("min_identity", 0.8)))
+    min_quality = float(overlap_cfg.get("min_quality", 20.0))
+    return min_overlap, min_identity, min_quality
+
+
+def _classify_overlap_status(
+    overlap_len: int,
+    identity: float,
+    overlap_quality: float | None,
+    *,
+    min_overlap: int,
+    min_identity: float,
+    min_quality: float,
+    quality_mode: str = "warning",
+) -> str:
+    if overlap_len < min_overlap:
+        return "overlap_too_short"
+    if identity < min_identity:
+        return "overlap_identity_low"
+    if quality_mode == "blocking" and (overlap_quality is None or overlap_quality < min_quality):
+        return "overlap_quality_low"
+    return "ok"
+
 def _write_overlap_audit(
     paired_samples: dict[str, dict[str, list[Path]]],
     output_tsv: Path,
+    *,
+    min_overlap: int | None = None,
+    min_identity: float | None = None,
+    min_quality: float | None = None,
+    quality_mode: str = "warning",
 ) -> dict[str, str]:
+    if min_overlap is None or min_identity is None or min_quality is None:
+        cfg_overlap, cfg_identity, cfg_quality = _resolve_overlap_thresholds()
+        min_overlap = cfg_overlap if min_overlap is None else min_overlap
+        min_identity = cfg_identity if min_identity is None else min_identity
+        min_quality = cfg_quality if min_quality is None else min_quality
+
     output_tsv.parent.mkdir(parents=True, exist_ok=True)
     status_map: dict[str, str] = {}
     with output_tsv.open("w", encoding="utf-8") as fh:
-        fh.write("sample_id\toverlap_len\toverlap_identity\toverlap_quality\tstatus\n")
+        fh.write("sample_id\toverlap_len\toverlap_identity\toverlap_quality\torientation\tstatus\n")
         for sample_id, entries in sorted(paired_samples.items()):
             if not entries["F"] or not entries["R"]:
                 status = "overlap_missing_reads"
                 status_map[sample_id] = status
-                fh.write(f"{sample_id}\t0\t0\t\t{status}\n")
+                fh.write(f"{sample_id}\t0\t0\t\t\t{status}\n")
                 continue
             fwd_path = entries["F"][0]
             rev_path = entries["R"][0]
             if not fwd_path.exists() or not rev_path.exists():
                 status = "overlap_missing_reads"
                 status_map[sample_id] = status
-                fh.write(f"{sample_id}\t0\t0\t\t{status}\n")
+                fh.write(f"{sample_id}\t0\t0\t\t\t{status}\n")
                 continue
             fwd_record = _read_first_record(fwd_path, "fasta")
             rev_record = _read_first_record(rev_path, "fasta")
             if fwd_record is None or rev_record is None:
                 status = "overlap_missing_reads"
                 status_map[sample_id] = status
-                fh.write(f"{sample_id}\t0\t0\t\t{status}\n")
+                fh.write(f"{sample_id}\t0\t0\t\t\t{status}\n")
                 continue
 
             fwd_qual = _load_qual_record(Path(f"{fwd_path}.qual"), fwd_record.id)
             rev_qual = _load_qual_record(Path(f"{rev_path}.qual"), rev_record.id)
-            audit = _evaluate_overlap(
+            overlap_candidates = iter_end_anchored_overlaps(
                 str(fwd_record.seq),
                 str(rev_record.seq),
                 fwd_qual,
                 rev_qual,
             )
-            status = str(audit["status"])
+            overlap = select_best_overlap(
+                overlap_candidates,
+                min_overlap=min_overlap,
+                min_identity=min_identity,
+                min_quality=min_quality,
+                quality_mode=quality_mode,
+            )
+            status = _classify_overlap_status(
+                overlap.overlap_len,
+                overlap.identity,
+                overlap.overlap_quality,
+                min_overlap=min_overlap,
+                min_identity=min_identity,
+                min_quality=min_quality,
+                quality_mode=quality_mode,
+            )
             status_map[sample_id] = status
-            overlap_quality = audit["overlap_quality"]
+            overlap_quality = overlap.overlap_quality
             fh.write(
-                f"{sample_id}\t{audit['overlap_len']}\t{audit['identity']:.4f}\t"
-                f"{'' if overlap_quality is None else f'{overlap_quality:.2f}'}\t{status}\n"
+                f"{sample_id}\t{overlap.overlap_len}\t{overlap.identity:.4f}\t"
+                f"{'' if overlap_quality is None else f'{overlap_quality:.2f}'}\t"
+                f"{overlap.orientation}\t{status}\n"
             )
     return status_map
 
@@ -718,6 +809,10 @@ def run_full_pipeline(
     on_progress(0)
 
     cfg = load_config()
+    overlap_min_overlap, overlap_min_identity, overlap_min_quality = _resolve_overlap_thresholds(cfg)
+    overlap_quality_mode = str(cfg.get("overlap_eval", {}).get("quality_mode", "warning")).strip().lower()
+    if overlap_quality_mode not in {"blocking", "warning"}:
+        overlap_quality_mode = "warning"
     chimera_db_path: Path | None = None
     if chimera_mode != "off":
         if chimera_db:
@@ -805,7 +900,9 @@ def run_full_pipeline(
             on_progress(pct)
 
             on_stage("Convert")
-            fastq_dir = out_dir / "passed_qc_fastq"
+            fastq_dir = out_dir / "passed_qc_fastq_primer_trim"
+            if not any(fastq_dir.glob("*.fastq")):
+                fastq_dir = out_dir / "passed_qc_fastq"
             if not any(fastq_dir.glob("*.fastq")):
                 fastq_dir = out_dir / "qc"
             run_fastq_to_fasta(fastq_dir, paths["trimmed_fasta"])
@@ -867,7 +964,14 @@ def run_full_pipeline(
         overlap_status = None
         if overlap_audit and paths["overlap_audit"]:
             if Path(assembly_input).is_dir():
-                overlap_status = _write_overlap_audit(paired_samples, paths["overlap_audit"])
+                overlap_status = _write_overlap_audit(
+                    paired_samples,
+                    paths["overlap_audit"],
+                    min_overlap=overlap_min_overlap,
+                    min_identity=overlap_min_identity,
+                    min_quality=overlap_min_quality,
+                    quality_mode=overlap_quality_mode,
+                )
             else:
                 L.warning("Overlap audit skipped; paired input is not a directory: %s", assembly_input)
 
@@ -920,11 +1024,13 @@ def run_full_pipeline(
 
         # 2 – Merge FASTQs to FASTA
         on_stage("Convert")
-        fastq_dir = out_dir / "qc"
+        fastq_dir = out_dir / "passed_qc_fastq_primer_trim"
         if not any(fastq_dir.glob("*.fastq")):
             alt = out_dir / "passed_qc_fastq"
             if alt.exists() and any(alt.glob("*.fastq")):
                 fastq_dir = alt
+            else:
+                fastq_dir = out_dir / "qc"
         run_fastq_to_fasta(fastq_dir, paths["fasta"])
         if thr and thr.isInterruptionRequested():
             raise RuntimeError("Cancelled")

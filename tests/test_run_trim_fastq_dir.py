@@ -4,6 +4,7 @@ import pytest
 from pathlib import Path
 import microseq_tests.pipeline as mp
 import microseq_tests.trimming.quality_trim as qt
+from microseq_tests.trimming.biopy_trim import TRIM_SUMMARY_COLUMNS, trim_folder
 
 # --- Test Suite Summary ---
 # This pytest suite validates the 'trim_fastq_inputs' and 'run_trim' functions from the
@@ -65,15 +66,15 @@ def test_trim_fastq_inputs_directory_fastq(monkeypatch, tmp_path):
     assert all(not dest.exists() for _, dest in trimmed_calls) 
 
     # Summary rows per source file plus combined aggregate with header 
-    summary_lines = summary.read_text().strip().splitlines() 
-    assert summary_lines[0] == "file\treads\tavg_len\tavg_q\tavg_mee\tavg_mee_per_kb\tavg_qeff\tmee_qc_label" 
+    summary_lines = summary.read_text().splitlines() 
+    assert summary_lines[0] == "\t".join(TRIM_SUMMARY_COLUMNS) 
 
     # Because inputs are lexicographically sorted ("a", "b") etc. then just assert exact row order 
-    assert summary_lines[1] == "a.fastq\t1\t4.0\t0.00\t4.000\t1000.000\t0.00\treview"
-    assert summary_lines[2] == "b.fastq\t1\t4.0\t0.00\t4.000\t1000.000\t0.00\treview" # per file row 
+    assert summary_lines[1].startswith("a.fastq\t1\t4.0\t0.00\tpass")
+    assert summary_lines[2].startswith("b.fastq\t1\t4.0\t0.00\tpass") # per file row 
    
     # Global weighted row: R=2, B=1*4 + 1*4 = 8 ⇒ L̄=8/2=4.0; Q̄ = (0*8)/8 = 0.00 
-    assert summary_lines[3] == "_combined\t2\t4.0\t0.00\t4.000\t1000.000\t0.00\treview" 
+    assert summary_lines[3].startswith("_combined\t2\t4.0\t0.00\tcombined") 
 
     # Creating combined file does not recreate source fastqs 
     assert sorted(p.name for p in input_dir.iterdir()) == ["a.fastq", "b.fastq"] 
@@ -83,9 +84,9 @@ def test_trim_fastq_inputs_directory_fastq(monkeypatch, tmp_path):
 
     # Running again appends rows w/o duplicating header 
     qt.trim_fastq_inputs(input_dir, tmp_path / "qc", summary_tsv=summary) 
-    summary_lines = summary.read_text().strip().splitlines() 
-    assert summary_lines.count("file\treads\tavg_len\tavg_q\tavg_mee\tavg_mee_per_kb\tavg_qeff\tmee_qc_label") == 1 
-    assert summary_lines.count("_combined\t2\t4.0\t0.00\t4.000\t1000.000\t0.00\treview") == 2
+    summary_lines = summary.read_text().splitlines() 
+    assert summary_lines.count("\t".join(TRIM_SUMMARY_COLUMNS)) == 1 
+    assert sum(line.startswith("_combined\t2\t4.0\t0.00\tcombined") for line in summary_lines) == 2
 
     # verify concatenation order is stable 
     assert combined.startswith("@r") and combined.count("@r") == 2 
@@ -127,7 +128,7 @@ def test_run_trim_uses_helper(monkeypatch, tmp_path):
     assert helper_calls == [(input_dir, tmp_path / "qc", summary)]
     assert fasta_calls == [(tmp_path / "qc", tmp_path / "qc" / "trimmed.fasta")] 
 
-def test_trim_fastq_inputs_with_mee_telemetry(monkeypatch, tmp_path):
+def test_trim_fastq_inputs_summary_telemetry(monkeypatch, tmp_path):
     input_dir = tmp_path / "input"
     input_dir.mkdir()
 
@@ -155,8 +156,52 @@ def test_trim_fastq_inputs_with_mee_telemetry(monkeypatch, tmp_path):
     assert combined.count("@good") == 1
     assert combined.count("@bad") == 1
 
-    summary_lines = summary.read_text().strip().splitlines()
-    assert summary_lines[0] == "file\treads\tavg_len\tavg_q\tavg_mee\tavg_mee_per_kb\tavg_qeff\tmee_qc_label"
-    assert summary_lines[1] == "a.fastq\t2\t4.0\t20.00\t2.000\t500.050\t3.01\treview"
-    assert summary_lines[2] == "_combined\t2\t4.0\t20.00\t2.000\t500.050\t3.01\treview"
+    summary_lines = summary.read_text().splitlines()
+    assert summary_lines[0] == "\t".join(TRIM_SUMMARY_COLUMNS)
+    assert summary_lines[1].startswith("a.fastq\t2\t4.0\t20.00\tpass")
+    assert summary_lines[2].startswith("_combined\t2\t4.0\t20.00\tcombined")
 
+
+
+def test_trim_summary_column_count_quality_trim(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "a.fastq").write_text("@r\nACGT\n+\n!!!!\n")
+
+    def fake_quality_trim(src: Path, dest: Path, **_: object) -> Path:
+        dest.write_text("@r\nACGT\n+\n!!!!\n")
+        return dest
+
+    monkeypatch.setattr(qt, "quality_trim", fake_quality_trim)
+
+    summary = tmp_path / "summary.tsv"
+    qt.trim_fastq_inputs(input_dir, tmp_path / "qc", summary_tsv=summary)
+
+    lines = summary.read_text(encoding="utf-8").splitlines()
+    header_cols = lines[0].split("\t")
+    assert header_cols == TRIM_SUMMARY_COLUMNS
+    for row in lines[1:]:
+        assert len(row.split("\t")) == len(header_cols)
+
+
+def test_trim_summary_column_count_biopy_trim(tmp_path):
+    input_dir = tmp_path / "in"
+    output_dir = tmp_path / "out"
+    input_dir.mkdir()
+    for name in ("a.fastq", "b.fastq"):
+        (input_dir / name).write_text("@r1\nAACGT\n+\n!!!!!\n")
+
+    summary = tmp_path / "biopy_summary.tsv"
+    trim_folder(
+        input_dir,
+        output_dir,
+        window_size=1,
+        per_base_q=0,
+        combined_tsv=summary,
+    )
+
+    lines = summary.read_text(encoding="utf-8").splitlines()
+    header_cols = lines[0].split("\t")
+    assert header_cols == TRIM_SUMMARY_COLUMNS
+    for row in lines[1:]:
+        assert len(row.split("\t")) == len(header_cols)

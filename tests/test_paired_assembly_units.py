@@ -40,9 +40,17 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 from microseq_tests.assembly.cap3_report import parse_cap3_reports
+from microseq_tests.assembly.overlap_utils import (
+    OverlapCandidate,
+    best_pairwise_overlap,
+    iter_end_anchored_overlaps,
+    select_best_overlap,
+)
 from microseq_tests.assembly.paired_assembly import _write_combined_fasta
+from microseq_tests.assembly.two_read_merge import merge_two_reads
 from microseq_tests.pipeline import (
     _build_blast_inputs,
+    _classify_overlap_status,
     _collect_pairing_catalog,
     _evaluate_overlap,
 )
@@ -246,3 +254,220 @@ def test_overlap_audit_classification() -> None:
     )
     assert identity_low["status"] == "overlap_identity_low"
 
+
+def test_overlap_helper_prefers_end_overlap_over_internal_match() -> None:
+    fwd = "A" * 60 + "GATTACA" + "C" * 60
+    rev = "N" * 40 + "GATTACA" + "N" * 40
+
+    overlap = best_pairwise_overlap(fwd, rev)
+    status = _classify_overlap_status(
+        overlap.overlap_len,
+        overlap.identity,
+        overlap.overlap_quality,
+        min_overlap=30,
+        min_identity=0.9,
+        min_quality=20.0,
+        quality_mode="warning",
+    )
+
+    assert status in {"overlap_too_short", "overlap_identity_low"}
+
+
+def test_overlap_selection_prefers_long_feasible_candidate() -> None:
+    fwd = "A" * 55 + "C" * 44 + "G"
+    rev = "A" + "A" * 55 + "C" * 44
+
+    candidates = iter_end_anchored_overlaps(fwd, rev)
+    assert len(candidates) >= 2
+
+    chosen = select_best_overlap(
+        candidates,
+        min_overlap=60,
+        min_identity=0.9,
+        min_quality=20.0,
+        quality_mode="warning",
+    )
+
+    assert chosen.overlap_len == 100
+    assert chosen.identity == pytest.approx(0.98)
+
+
+def test_merge_two_reads_sets_qualities_absent_warning_and_cap_info(tmp_path: Path) -> None:
+    fwd_path = tmp_path / "S1_27F.fasta"
+    rev_path = tmp_path / "S1_1492R.fasta"
+    fwd_path.write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
+    rev_path.write_text(">r\n" + "A" * 120 + "\n", encoding="utf-8")
+
+    contig_path, report = merge_two_reads(
+        sample_id="S1",
+        fwd_path=fwd_path,
+        rev_path=rev_path,
+        output_dir=tmp_path,
+        min_overlap=100,
+        min_identity=0.8,
+        min_quality=20.0,
+        quality_mode="warning",
+    )
+
+    assert contig_path is not None
+    assert report.merge_warning == "qualities_absent"
+    cap_info = tmp_path / "S1_paired.fasta.cap.info"
+    assert cap_info.exists()
+
+
+def test_parse_cap3_reports_merge_only_no_missing_info_warning(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    asm_dir = tmp_path / "asm"
+    sample_dir = asm_dir / "sample1"
+    sample_dir.mkdir(parents=True)
+
+    (sample_dir / "sample1_paired.merge_report.tsv").write_text(
+        "sample_id\torientation\toverlap_len\tidentity\tmismatches\tcontig_len\tmerge_status\tqualities\tmerge_warning\n"
+        "sample1\tforward\t120\t0.9900\t1\t125\tmerged\tabsent\tqualities_absent\n",
+        encoding="utf-8",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        rows = parse_cap3_reports(asm_dir, ["sample1"])
+
+    assert "Missing CAP3 info file" not in caplog.text
+    row = rows[0]
+    assert row["merge_qualities"] == "absent"
+    assert row["merge_warning"] == "qualities_absent"
+
+
+def test_merge_two_reads_blocking_rejects_missing_qualities(tmp_path: Path) -> None:
+    fwd_path = tmp_path / "S1_27F.fasta"
+    rev_path = tmp_path / "S1_1492R.fasta"
+    fwd_path.write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
+    rev_path.write_text(">r\n" + "A" * 120 + "\n", encoding="utf-8")
+
+    contig_path, report = merge_two_reads(
+        sample_id="S1",
+        fwd_path=fwd_path,
+        rev_path=rev_path,
+        output_dir=tmp_path,
+        min_overlap=100,
+        min_identity=0.8,
+        min_quality=20.0,
+        quality_mode="blocking",
+    )
+
+    assert contig_path is None
+    assert report.merge_status == "quality_low"
+    assert report.qualities == "absent"
+
+
+def test_merge_two_reads_uses_iupac_for_low_quality_tie(tmp_path: Path) -> None:
+    fwd_path = tmp_path / "S1_27F.fasta"
+    rev_path = tmp_path / "S1_1492R.fasta"
+    fwd_seq = "A" * 119 + "C"
+    rev_seq = "A" * 119 + "T"
+    fwd_path.write_text(f">f\n{fwd_seq}\n", encoding="utf-8")
+    rev_path.write_text(f">r\n{rev_seq}\n", encoding="utf-8")
+
+    f_qual = SeqRecord(Seq(fwd_seq), id="f", description="")
+    r_qual = SeqRecord(Seq(rev_seq), id="r", description="")
+    f_qual.letter_annotations["phred_quality"] = [10] * len(fwd_seq)
+    r_qual.letter_annotations["phred_quality"] = [10] * len(rev_seq)
+    SeqIO.write([f_qual], Path(f"{fwd_path}.qual"), "qual")
+    SeqIO.write([r_qual], Path(f"{rev_path}.qual"), "qual")
+
+    contig_path, report = merge_two_reads(
+        sample_id="S1",
+        fwd_path=fwd_path,
+        rev_path=rev_path,
+        output_dir=tmp_path,
+        min_overlap=100,
+        min_identity=0.8,
+        min_quality=5.0,
+        quality_mode="warning",
+    )
+
+    assert contig_path is not None
+    merged = next(SeqIO.parse(contig_path, "fasta"))
+    assert str(merged.seq).endswith("Y")
+    assert report.merge_status == "merged"
+
+
+def test_select_best_overlap_marks_ambiguous_top_candidates() -> None:
+    candidates = [
+        OverlapCandidate("forward", "A" * 120, "A" * 120, 0, 120, 1, 119 / 120, 30.0),
+        OverlapCandidate("revcomp", "A" * 120, "A" * 120, 0, 120, 1, 119 / 120, 25.0),
+    ]
+
+    chosen = select_best_overlap(
+        candidates,
+        min_overlap=100,
+        min_identity=0.8,
+        min_quality=20.0,
+        quality_mode="warning",
+    )
+
+    assert chosen.status == "ambiguous_overlap"
+
+
+def test_merge_two_reads_routes_high_conflict_to_cap3(tmp_path: Path) -> None:
+    fwd_path = tmp_path / "S1_27F.fasta"
+    rev_path = tmp_path / "S1_1492R.fasta"
+    fwd_seq = "A" * 119 + "C"
+    rev_seq = "A" * 119 + "T"
+    fwd_path.write_text(f">f\n{fwd_seq}\n", encoding="utf-8")
+    rev_path.write_text(f">r\n{rev_seq}\n", encoding="utf-8")
+
+    f_qual = SeqRecord(Seq(fwd_seq), id="f", description="")
+    r_qual = SeqRecord(Seq(rev_seq), id="r", description="")
+    f_qual.letter_annotations["phred_quality"] = [40] * len(fwd_seq)
+    r_qual.letter_annotations["phred_quality"] = [40] * len(rev_seq)
+    SeqIO.write([f_qual], Path(f"{fwd_path}.qual"), "qual")
+    SeqIO.write([r_qual], Path(f"{rev_path}.qual"), "qual")
+
+    contig_path, report = merge_two_reads(
+        sample_id="S1",
+        fwd_path=fwd_path,
+        rev_path=rev_path,
+        output_dir=tmp_path,
+        min_overlap=100,
+        min_identity=0.8,
+        min_quality=5.0,
+        quality_mode="warning",
+        high_conflict_q_threshold=30,
+        high_conflict_action="route_cap3",
+    )
+
+    assert contig_path is None
+    assert report.merge_status == "high_conflict"
+    assert report.high_conflict_mismatches == 1
+
+
+def test_merge_two_reads_flags_high_conflict_on_merge(tmp_path: Path) -> None:
+    fwd_path = tmp_path / "S1_27F.fasta"
+    rev_path = tmp_path / "S1_1492R.fasta"
+    fwd_seq = "A" * 119 + "C"
+    rev_seq = "A" * 119 + "T"
+    fwd_path.write_text(f">f\n{fwd_seq}\n", encoding="utf-8")
+    rev_path.write_text(f">r\n{rev_seq}\n", encoding="utf-8")
+
+    f_qual = SeqRecord(Seq(fwd_seq), id="f", description="")
+    r_qual = SeqRecord(Seq(rev_seq), id="r", description="")
+    f_qual.letter_annotations["phred_quality"] = [40] * len(fwd_seq)
+    r_qual.letter_annotations["phred_quality"] = [40] * len(rev_seq)
+    SeqIO.write([f_qual], Path(f"{fwd_path}.qual"), "qual")
+    SeqIO.write([r_qual], Path(f"{rev_path}.qual"), "qual")
+
+    contig_path, report = merge_two_reads(
+        sample_id="S1",
+        fwd_path=fwd_path,
+        rev_path=rev_path,
+        output_dir=tmp_path,
+        min_overlap=100,
+        min_identity=0.8,
+        min_quality=5.0,
+        quality_mode="warning",
+        high_conflict_q_threshold=30,
+        high_conflict_action="flag",
+    )
+
+    assert contig_path is not None
+    assert report.merge_status == "merged"
+    assert report.high_conflict_mismatches == 1
+    assert "high_conflict" in report.merge_warning

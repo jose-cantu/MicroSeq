@@ -12,10 +12,12 @@ from typing import Iterable, Sequence
 import re
 
 from Bio import SeqIO 
+from Bio.Seq import Seq
 
 from microseq_tests.utility.utils import load_config 
 
 from .pairing import DupPolicy, group_pairs 
+from .two_read_merge import merge_two_reads, MergeInputError
 
 L = logging.getLogger(__name__) 
 
@@ -62,6 +64,29 @@ def _build_keep_separate_pairs(forward: list[Path], reverse: list[Path]) -> list
     return pairs 
 
 
+
+
+
+def _contains_read_or_revcomp(contig_seq: str, read_seq: str) -> bool:
+    read = read_seq.upper()
+    contig = contig_seq.upper()
+    if read in contig:
+        return True
+    return str(Seq(read).reverse_complement()) in contig
+
+
+def _validate_cap3_contig_support(contig_path: Path, fwd_path: Path, rev_path: Path) -> bool:
+    """Require at least one CAP3 contig to contain both source reads (or rev-complements)."""
+    fwd = next(SeqIO.parse(fwd_path, "fasta"), None)
+    rev = next(SeqIO.parse(rev_path, "fasta"), None)
+    if fwd is None or rev is None:
+        return False
+
+    for contig in SeqIO.parse(contig_path, "fasta"):
+        cseq = str(contig.seq)
+        if _contains_read_or_revcomp(cseq, str(fwd.seq)) and _contains_read_or_revcomp(cseq, str(rev.seq)):
+            return True
+    return False
 
 def _write_combined_fasta(sources: Iterable[Path], destination: Path, *, use_qual: bool = True) -> None: 
     """ 
@@ -205,6 +230,20 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
 
     """
     cfg = load_config() 
+    overlap_cfg = cfg.get("overlap_eval", {})
+    merge_cfg = cfg.get("merge_two_reads", {})
+    merge_min_overlap = int(overlap_cfg.get("min_overlap", merge_cfg.get("min_overlap", 100)))
+    merge_min_identity = float(overlap_cfg.get("min_identity", merge_cfg.get("min_identity", 0.8)))
+    merge_min_quality = float(overlap_cfg.get("min_quality", 20.0))
+    quality_mode = str(overlap_cfg.get("quality_mode", "warning")).strip().lower()
+    if quality_mode not in {"blocking", "warning"}:
+        quality_mode = "warning"
+    ambiguity_identity_delta = float(overlap_cfg.get("ambiguity_identity_delta", 0.0))
+    high_conflict_q_threshold = int(overlap_cfg.get("high_conflict_q_threshold", 30))
+    high_conflict_action = str(overlap_cfg.get("high_conflict_action", "flag")).strip().lower()
+    if high_conflict_action not in {"flag", "route_cap3"}:
+        high_conflict_action = "flag"
+    cap3_validate_pair_support = bool(overlap_cfg.get("cap3_validate_pair_support", False))
     cap3_exe = cfg["tools"]["cap3"]
 
     in_dir = Path(input_dir).resolve() 
@@ -302,27 +341,64 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
         # Find the location of the orientation based on the file name 
         entries = pairs[sid]
 
-        tasks: list[tuple[str, list[Path]]] = [] 
+        tasks: list[tuple[str, list[Path], Path | None, Path | None]] = [] 
         if dup_policy == DupPolicy.KEEP_SEPARATE:
             f_sources = _as_path_list(entries["F"])
             r_sources = _as_path_list(entries["R"])
             primer_pairs = _build_keep_separate_pairs(f_sources, r_sources)
             for idx, (fwd, rev) in enumerate(primer_pairs, start=1):
                 sample_key = sid if len(primer_pairs) == 1 else f"{sid}_{idx}"
-                tasks.append((sample_key, [fwd, rev]))
+                tasks.append((sample_key, [fwd, rev], fwd, rev))
         else:
+            f_sources = _as_path_list(entries["F"])
+            r_sources = _as_path_list(entries["R"])
             sources = list(_iter_paths(entries["F"])) + list(_iter_paths(entries["R"]))
-            tasks.append((sid, sources))
+            fwd_path = f_sources[0] if len(f_sources) == 1 else None
+            rev_path = r_sources[0] if len(r_sources) == 1 else None
+            tasks.append((sid, sources, fwd_path, rev_path))
 
         if not tasks:
             raise RuntimeError("pairing produced no tasks")
 
-        for sample_key, sources in tasks: 
+        for sample_key, sources, fwd_path, rev_path in tasks: 
             sample_dir = out_dir / sample_key 
             sample_dir.mkdir(parents=True, exist_ok=True) 
             sample_fasta = sample_dir / f"{sample_key}_paired.fasta" 
 
             _write_combined_fasta(sources, sample_fasta, use_qual=use_qual) 
+
+            if fwd_path and rev_path and len(sources) == 2:
+                try:
+                    contig_path, report = merge_two_reads(
+                        sample_id=sample_key,
+                        fwd_path=fwd_path,
+                        rev_path=rev_path,
+                        output_dir=sample_dir,
+                        min_overlap=merge_min_overlap,
+                        min_identity=merge_min_identity,
+                        min_quality=merge_min_quality,
+                        quality_mode=quality_mode,
+                        ambiguity_identity_delta=ambiguity_identity_delta,
+                        high_conflict_q_threshold=high_conflict_q_threshold,
+                        high_conflict_action=high_conflict_action,
+                    )
+                except MergeInputError as exc:
+                    L.warning("Skipping merge_two_reads for %s: %s", sample_key, exc)
+                    metadata_lines.append(
+                        f"{sample_key}\tmerge_two_reads_skipped_non_singleton "
+                        f"f_n={exc.f_count if exc.f_count is not None else 'na'} "
+                        f"r_n={exc.r_count if exc.r_count is not None else 'na'} reason={exc}"
+                    )
+                else:
+                    metadata_lines.append(
+                        f"{sample_key}\tmerge_two_reads orientation={report.orientation} "
+                        f"overlap={report.overlap_len} identity={report.identity:.4f}"
+                    )
+                    if contig_path:
+                        contig_paths.append(contig_path)
+                        continue
+                    if report.merge_status == "quality_low" and quality_mode == "blocking":
+                        continue
 
             cmd = [cap3_exe, sample_fasta.name]
             if cap3_options:
@@ -355,6 +431,25 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
             contig_path = sample_dir / f"{sample_key}_paired.fasta.cap.contigs"
             if not contig_path.exists():
                 raise FileNotFoundError(contig_path)
+
+            if cap3_validate_pair_support and fwd_path and rev_path and len(sources) == 2:
+                if not _validate_cap3_contig_support(contig_path, fwd_path, rev_path):
+                    L.warning("CAP3 output for %s could not be verified to contain both reads; skipping contig", sample_key)
+                    singlets_path = sample_dir / f"{sample_key}_paired.fasta.cap.singlets"
+                    fwd_record = next(SeqIO.parse(fwd_path, "fasta"), None)
+                    rev_record = next(SeqIO.parse(rev_path, "fasta"), None)
+                    singlet_records = [rec for rec in (fwd_record, rev_record) if rec is not None]
+                    if singlet_records:
+                        SeqIO.write(singlet_records, singlets_path, "fasta")
+                    try:
+                        contig_path.unlink()
+                    except FileNotFoundError:
+                        pass
+                    (sample_dir / f"{sample_key}_paired.cap3_validation.txt").write_text("failed\n", encoding="utf-8")
+                    metadata_lines.append(f"{sample_key}	cap3_validation=failed")
+                    continue
+                (sample_dir / f"{sample_key}_paired.cap3_validation.txt").write_text("verified\n", encoding="utf-8")
+                metadata_lines.append(f"{sample_key}	cap3_validation=verified")
 
             contig_paths.append(contig_path)
             L.info("Cap3 paired assembly finished for %s and for contigs: %s", sample_key, contig_path) 
