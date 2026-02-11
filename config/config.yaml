@@ -39,6 +39,7 @@ overlap_eval:
   min_quality: 20.0
   quality_mode: warning
   ambiguity_identity_delta: 0.0
+  ambiguity_quality_epsilon: 0.1
   high_conflict_q_threshold: 30
   high_conflict_action: flag
-  cap3_validate_pair_support: true
+  cap3_validate_pair_support: false

@@ -240,6 +240,35 @@ def test_parse_cap3_reports_and_missing_samples(tmp_path: Path) -> None:
     assert missing_row["singlets_count"] == 0
 
 
+
+
+def test_parse_cap3_reports_rejected_validation_marks_unverified(tmp_path: Path) -> None:
+    asm_dir = tmp_path / "asm"
+    sample_dir = asm_dir / "sample1"
+    sample_dir.mkdir(parents=True)
+
+    _write_fasta(sample_dir / "sample1_paired.fasta.cap.contigs", [SeqRecord(Seq("ACGT"), id="c1", description="")])
+    (sample_dir / "sample1_paired.cap3_validation.txt").write_text("rejected\n", encoding="utf-8")
+
+    rows = parse_cap3_reports(asm_dir, ["sample1"])
+    row = rows[0]
+    assert row["cap3_validation"] == "rejected"
+    assert row["status"] == "cap3_unverified"
+
+
+def test_parse_cap3_reports_unknown_validation_keeps_assembled_status(tmp_path: Path) -> None:
+    asm_dir = tmp_path / "asm"
+    sample_dir = asm_dir / "sample1"
+    sample_dir.mkdir(parents=True)
+
+    _write_fasta(sample_dir / "sample1_paired.fasta.cap.contigs", [SeqRecord(Seq("ACGT"), id="c1", description="")])
+    (sample_dir / "sample1_paired.cap3_validation.txt").write_text("unknown\n", encoding="utf-8")
+
+    rows = parse_cap3_reports(asm_dir, ["sample1"])
+    row = rows[0]
+    assert row["cap3_validation"] == "unknown"
+    assert row["status"] == "assembled"
+
 def test_overlap_audit_classification() -> None:
     short = _evaluate_overlap("A" * 10, "A" * 10, None, None, min_overlap=20)
     assert short["status"] == "overlap_too_short"
@@ -321,8 +350,8 @@ def test_parse_cap3_reports_merge_only_no_missing_info_warning(tmp_path: Path, c
     sample_dir.mkdir(parents=True)
 
     (sample_dir / "sample1_paired.merge_report.tsv").write_text(
-        "sample_id\torientation\toverlap_len\tidentity\tmismatches\tcontig_len\tmerge_status\tqualities\tmerge_warning\n"
-        "sample1\tforward\t120\t0.9900\t1\t125\tmerged\tabsent\tqualities_absent\n",
+        "sample_id	orientation	overlap_len	identity	mismatches	contig_len	merge_status	qualities	merge_warning	high_conflict_mismatches\n"
+        "sample1	forward	120	0.9900	1	125	merged	absent	qualities_absent	2\n",
         encoding="utf-8",
     )
 
@@ -333,6 +362,7 @@ def test_parse_cap3_reports_merge_only_no_missing_info_warning(tmp_path: Path, c
     row = rows[0]
     assert row["merge_qualities"] == "absent"
     assert row["merge_warning"] == "qualities_absent"
+    assert row["merge_high_conflict_mismatches"] == "2"
 
 
 def test_merge_two_reads_blocking_rejects_missing_qualities(tmp_path: Path) -> None:
@@ -389,7 +419,7 @@ def test_merge_two_reads_uses_iupac_for_low_quality_tie(tmp_path: Path) -> None:
     assert report.merge_status == "merged"
 
 
-def test_select_best_overlap_marks_ambiguous_top_candidates() -> None:
+def test_select_best_overlap_uses_quality_to_resolve_top_candidates() -> None:
     candidates = [
         OverlapCandidate("forward", "A" * 120, "A" * 120, 0, 120, 1, 119 / 120, 30.0),
         OverlapCandidate("revcomp", "A" * 120, "A" * 120, 0, 120, 1, 119 / 120, 25.0),
@@ -403,8 +433,44 @@ def test_select_best_overlap_marks_ambiguous_top_candidates() -> None:
         quality_mode="warning",
     )
 
+    assert chosen.status == "ok"
+    assert chosen.orientation == "forward"
+
+
+
+
+def test_select_best_overlap_marks_ambiguous_when_quality_tied() -> None:
+    candidates = [
+        OverlapCandidate("forward", "A" * 120, "A" * 120, 0, 120, 1, 119 / 120, 30.0),
+        OverlapCandidate("revcomp", "A" * 120, "A" * 120, 0, 120, 1, 119 / 120, 30.0),
+    ]
+
+    chosen = select_best_overlap(
+        candidates,
+        min_overlap=100,
+        min_identity=0.8,
+        min_quality=20.0,
+        quality_mode="warning",
+    )
+
     assert chosen.status == "ambiguous_overlap"
 
+
+def test_select_best_overlap_marks_ambiguous_without_quality_when_identity_tied() -> None:
+    candidates = [
+        OverlapCandidate("forward", "A" * 120, "A" * 120, 0, 120, 1, 119 / 120, None),
+        OverlapCandidate("revcomp", "A" * 120, "A" * 120, 0, 120, 1, 119 / 120, None),
+    ]
+
+    chosen = select_best_overlap(
+        candidates,
+        min_overlap=100,
+        min_identity=0.8,
+        min_quality=20.0,
+        quality_mode="warning",
+    )
+
+    assert chosen.status == "ambiguous_overlap"
 
 def test_merge_two_reads_routes_high_conflict_to_cap3(tmp_path: Path) -> None:
     fwd_path = tmp_path / "S1_27F.fasta"
@@ -471,3 +537,28 @@ def test_merge_two_reads_flags_high_conflict_on_merge(tmp_path: Path) -> None:
     assert report.merge_status == "merged"
     assert report.high_conflict_mismatches == 1
     assert "high_conflict" in report.merge_warning
+
+
+def test_merge_two_reads_report_includes_high_conflict_column(tmp_path: Path) -> None:
+    fwd_path = tmp_path / "S1_27F.fasta"
+    rev_path = tmp_path / "S1_1492R.fasta"
+    fwd_path.write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
+    rev_path.write_text(">r\n" + "A" * 120 + "\n", encoding="utf-8")
+
+    merge_two_reads(
+        sample_id="S1",
+        fwd_path=fwd_path,
+        rev_path=rev_path,
+        output_dir=tmp_path,
+        min_overlap=100,
+        min_identity=0.8,
+        min_quality=20.0,
+        quality_mode="warning",
+    )
+
+    report_path = tmp_path / "S1_paired.merge_report.tsv"
+    lines = report_path.read_text(encoding="utf-8").splitlines()
+    header_cols = lines[0].split("\t")
+    value_cols = lines[1].split("\t")
+    assert header_cols[-1] == "high_conflict_mismatches"
+    assert len(header_cols) == len(value_cols)

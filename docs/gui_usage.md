@@ -124,7 +124,7 @@ reverse_orientation_only_ab1_demo_run_microseq/
   - *_avg_qual.txt is the per‑read length and Phred average value.
   - trim_summary.tsv is the combined metrics file for all reads, with core quality/length metrics and primer-trim telemetry columns.
   - trimmed.fasta is the final FASTA used for assembly or BLAST that you can manually hand off to NCBI website for example.
-  - Expected-error fields are telemetry only; merge confidence is primarily determined by overlap-local metrics (length/identity/quality policy). 
+  - Merge confidence is primarily determined by overlap-local metrics (length/identity/quality policy). 
   - CLI users can enforce retention with `--min-reads-kept` to fail files that lose too many reads during QC. 
 * passed_qc_fastq/ quality filter outcome with default at (≥ Q20); these are individual FASTQ files that passed that metric. 
 * failed_qc_fastq/ quality filter outcome with default at (≥ Q20); these are individual files that failed that metric whose average quality was below the threshold. 
@@ -134,7 +134,7 @@ reverse_orientation_only_ab1_demo_run_microseq/
 
 # QC telemetry vs merge decisions in MicroSeq
 
-MicroSeq trims reads first (sliding‑window or Trimmomatic). Expected-error fields remain in `trim_summary.tsv` for transparency, but merge decisions are based on overlap-local evidence.
+MicroSeq trims reads first (sliding‑window or Trimmomatic). `trim_summary.tsv` records quality/length metrics and primer-trim telemetry, while merge decisions are based on overlap-local evidence.
 
 ### What MicroSeq reports
 

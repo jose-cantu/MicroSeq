@@ -172,6 +172,7 @@ def merge_two_reads(
     min_quality: float = 20.0,
     quality_mode: str = "warning",
     ambiguity_identity_delta: float = 0.0,
+    ambiguity_quality_epsilon: float = 0.1,
     high_conflict_q_threshold: int = 30,
     high_conflict_action: str = "flag",
 ) -> tuple[Path | None, MergeReport]:
@@ -204,6 +205,7 @@ def merge_two_reads(
         min_quality=min_quality,
         quality_mode=quality_mode,
         ambiguity_identity_delta=ambiguity_identity_delta,
+        ambiguity_quality_epsilon=ambiguity_quality_epsilon,
     )
     rev_qual_for_consensus = rev_qual
     if overlap.orientation == "revcomp" and rev_qual is not None:
@@ -362,7 +364,7 @@ def merge_two_reads(
 
 def _write_merge_report(path: Path, report: MergeReport) -> None:
     path.write_text(
-        "sample_id\torientation\toverlap_len\tidentity\tmismatches\tcontig_len\tmerge_status\tqualities\tmerge_warning\n"
+        "sample_id\torientation\toverlap_len\tidentity\tmismatches\tcontig_len\tmerge_status\tqualities\tmerge_warning\thigh_conflict_mismatches\n"
         f"{report.sample_id}\t{report.orientation}\t{report.overlap_len}\t{report.identity:.4f}\t"
         f"{report.mismatches}\t{report.contig_len}\t{report.merge_status}\t{report.qualities}\t{report.merge_warning}\t{report.high_conflict_mismatches}\n",
         encoding="utf-8",

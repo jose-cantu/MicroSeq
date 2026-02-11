@@ -8,11 +8,10 @@ import logging # print warning messages
 from os import PathLike
 import subprocess 
 from pathlib import Path 
-from typing import Iterable, Sequence
+from typing import Iterable, Sequence, Literal
 import re
 
 from Bio import SeqIO 
-from Bio.Seq import Seq
 
 from microseq_tests.utility.utils import load_config 
 
@@ -67,26 +66,57 @@ def _build_keep_separate_pairs(forward: list[Path], reverse: list[Path]) -> list
 
 
 
-def _contains_read_or_revcomp(contig_seq: str, read_seq: str) -> bool:
-    read = read_seq.upper()
-    contig = contig_seq.upper()
-    if read in contig:
-        return True
-    return str(Seq(read).reverse_complement()) in contig
+def _parse_ace_contig_members(ace_path: Path) -> list[set[str]]:
+    """Return per-contig read membership sets parsed from a CAP3 ACE file."""
+    memberships: list[set[str]] = []
+    current: set[str] | None = None
+
+    if not ace_path.exists():
+        return memberships
+
+    with ace_path.open("r", encoding="utf-8") as fh:
+        for raw_line in fh:
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("CO "):
+                if current is not None:
+                    memberships.append(current)
+                current = set()
+                continue
+            if current is None:
+                continue
+            if line.startswith("AF "):
+                parts = line.split()
+                if len(parts) >= 2:
+                    current.add(parts[1])
+
+    if current is not None:
+        memberships.append(current)
+
+    return memberships
 
 
-def _validate_cap3_contig_support(contig_path: Path, fwd_path: Path, rev_path: Path) -> bool:
-    """Require at least one CAP3 contig to contain both source reads (or rev-complements)."""
+def _validate_cap3_contig_support(
+    contig_path: Path,
+    fwd_path: Path,
+    rev_path: Path,
+) -> Literal["verified", "rejected", "unknown"]:
+    """Validate CAP3 pair support from ACE membership for both source read IDs."""
     fwd = next(SeqIO.parse(fwd_path, "fasta"), None)
     rev = next(SeqIO.parse(rev_path, "fasta"), None)
     if fwd is None or rev is None:
-        return False
+        return "unknown"
 
-    for contig in SeqIO.parse(contig_path, "fasta"):
-        cseq = str(contig.seq)
-        if _contains_read_or_revcomp(cseq, str(fwd.seq)) and _contains_read_or_revcomp(cseq, str(rev.seq)):
-            return True
-    return False
+    ace_path = contig_path.with_suffix(".ace")
+    memberships = _parse_ace_contig_members(ace_path)
+    if not memberships:
+        return "unknown"
+
+    for member_ids in memberships:
+        if fwd.id in member_ids and rev.id in member_ids:
+            return "verified"
+    return "rejected"
 
 def _write_combined_fasta(sources: Iterable[Path], destination: Path, *, use_qual: bool = True) -> None: 
     """ 
@@ -239,6 +269,7 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
     if quality_mode not in {"blocking", "warning"}:
         quality_mode = "warning"
     ambiguity_identity_delta = float(overlap_cfg.get("ambiguity_identity_delta", 0.0))
+    ambiguity_quality_epsilon = float(overlap_cfg.get("ambiguity_quality_epsilon", 0.1))
     high_conflict_q_threshold = int(overlap_cfg.get("high_conflict_q_threshold", 30))
     high_conflict_action = str(overlap_cfg.get("high_conflict_action", "flag")).strip().lower()
     if high_conflict_action not in {"flag", "route_cap3"}:
@@ -379,6 +410,7 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
                         min_quality=merge_min_quality,
                         quality_mode=quality_mode,
                         ambiguity_identity_delta=ambiguity_identity_delta,
+                        ambiguity_quality_epsilon=ambiguity_quality_epsilon,
                         high_conflict_q_threshold=high_conflict_q_threshold,
                         high_conflict_action=high_conflict_action,
                     )
@@ -433,8 +465,13 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
                 raise FileNotFoundError(contig_path)
 
             if cap3_validate_pair_support and fwd_path and rev_path and len(sources) == 2:
-                if not _validate_cap3_contig_support(contig_path, fwd_path, rev_path):
-                    L.warning("CAP3 output for %s could not be verified to contain both reads; skipping contig", sample_key)
+                validation = _validate_cap3_contig_support(contig_path, fwd_path, rev_path)
+                marker_path = sample_dir / f"{sample_key}_paired.cap3_validation.txt"
+                marker_path.write_text(f"{validation}\n", encoding="utf-8")
+                metadata_lines.append(f"{sample_key}	cap3_validation={validation}")
+
+                if validation == "rejected":
+                    L.warning("CAP3 output for %s rejected by ACE membership check; skipping contig", sample_key)
                     singlets_path = sample_dir / f"{sample_key}_paired.fasta.cap.singlets"
                     fwd_record = next(SeqIO.parse(fwd_path, "fasta"), None)
                     rev_record = next(SeqIO.parse(rev_path, "fasta"), None)
@@ -445,11 +482,12 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
                         contig_path.unlink()
                     except FileNotFoundError:
                         pass
-                    (sample_dir / f"{sample_key}_paired.cap3_validation.txt").write_text("failed\n", encoding="utf-8")
-                    metadata_lines.append(f"{sample_key}	cap3_validation=failed")
                     continue
-                (sample_dir / f"{sample_key}_paired.cap3_validation.txt").write_text("verified\n", encoding="utf-8")
-                metadata_lines.append(f"{sample_key}	cap3_validation=verified")
+                if validation == "unknown":
+                    L.warning(
+                        "CAP3 output for %s could not be validated (ACE missing/unreadable); keeping contig",
+                        sample_key,
+                    )
 
             contig_paths.append(contig_path)
             L.info("Cap3 paired assembly finished for %s and for contigs: %s", sample_key, contig_path) 

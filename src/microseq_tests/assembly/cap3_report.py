@@ -131,7 +131,7 @@ def parse_cap3_reports(
 
         if cap3_validation_path.exists():
             cap3_validation = cap3_validation_path.read_text(encoding="utf-8").strip() or None
-            if cap3_validation == "failed":
+            if cap3_validation in {"failed", "rejected"}:
                 status = "cap3_unverified"
 
         if overlap_status:

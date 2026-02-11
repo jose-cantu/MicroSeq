@@ -403,7 +403,7 @@ def test_assemble_pairs_blocking_quality_low_skips_cap3_fallback(tmp_path: Path,
     monkeypatch.setattr(paired_assembly.subprocess, "run", fake_run)
 
     paths = paired_assembly.assemble_pairs(in_dir, out_dir)
-    assert paths == []
+    assert len(paths) == 0
     assert all("--version" in cmd for cmd in calls)
 
 
@@ -538,7 +538,7 @@ def test_assemble_pairs_high_conflict_route_runs_cap3(tmp_path: Path, monkeypatc
     assert any(len(cmd) > 1 and cmd[1].endswith("_paired.fasta") for cmd in calls)
 
 
-def test_assemble_pairs_cap3_validation_failed_marks_unverified(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_assemble_pairs_cap3_validation_missing_ace_marks_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     in_dir = tmp_path / "input"
     out_dir = tmp_path / "output"
     in_dir.mkdir()
@@ -583,11 +583,11 @@ def test_assemble_pairs_cap3_validation_failed_marks_unverified(tmp_path: Path, 
     monkeypatch.setattr(paired_assembly.subprocess, "run", fake_run)
 
     paths = paired_assembly.assemble_pairs(in_dir, out_dir)
-    assert paths == []
+    assert len(paths) == 1
     marker = out_dir / "S1" / "S1_paired.cap3_validation.txt"
     assert marker.exists()
-    assert marker.read_text(encoding="utf-8").strip() == "failed"
-    assert (out_dir / "S1" / "S1_paired.fasta.cap.singlets").exists()
+    assert marker.read_text(encoding="utf-8").strip() == "unknown"
+    assert (out_dir / "S1" / "S1_paired.fasta.cap.contigs").exists()
 
 
 def test_assemble_pairs_cap3_validation_verified(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -625,8 +625,15 @@ def test_assemble_pairs_cap3_validation_verified(tmp_path: Path, monkeypatch: py
             return Result()
 
         contig = Path(cwd, f"{cmd[1]}.cap.contigs")
-        # include fwd and revcomp(rev)=A*120 so both reads are represented
-        contig.write_text(">contig\n" + "A" * 240 + "\n", encoding="utf-8")
+        contig.write_text(">contig\n" + "A" * 80 + "\n", encoding="utf-8")
+        ace = Path(cwd, f"{cmd[1]}.cap.ace")
+        ace.write_text(
+            "AS 1 2\n"
+            "CO Contig1 80 2 1 U\n"
+            "AF a U 1\n"
+            "AF b C 1\n",
+            encoding="utf-8",
+        )
 
         class Result:
             returncode = 0
@@ -642,3 +649,114 @@ def test_assemble_pairs_cap3_validation_verified(tmp_path: Path, monkeypatch: py
     marker = out_dir / "S1" / "S1_paired.cap3_validation.txt"
     assert marker.exists()
     assert marker.read_text(encoding="utf-8").strip() == "verified"
+
+
+def test_assemble_pairs_cap3_validation_accepts_clipped_contig_when_ace_membership_present(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+
+    (in_dir / "S1_27F.fasta").write_text(">a\n" + "A" * 120 + "\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">b\n" + "T" * 120 + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        paired_assembly,
+        "load_config",
+        lambda: {
+            "tools": {"cap3": "/bin/true"},
+            "overlap_eval": {
+                "min_overlap": 200,
+                "min_identity": 1.0,
+                "min_quality": 20.0,
+                "quality_mode": "warning",
+                "cap3_validate_pair_support": True,
+            },
+        },
+    )
+
+    def fake_run(cmd, check, cwd=None, **kwargs):
+        if "--version" in cmd:
+            class Result:
+                returncode = 0
+                stdout = "CAP3 test"
+                stderr = ""
+
+            return Result()
+
+        contig = Path(cwd, f"{cmd[1]}.cap.contigs")
+        contig.write_text(">contig\n" + "A" * 40 + "\n", encoding="utf-8")
+        ace = Path(cwd, f"{cmd[1]}.cap.ace")
+        ace.write_text(
+            "AS 1 2\n"
+            "CO Contig1 40 2 1 U\n"
+            "AF a U 1\n"
+            "AF b C 1\n",
+            encoding="utf-8",
+        )
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(paired_assembly.subprocess, "run", fake_run)
+
+    paths = paired_assembly.assemble_pairs(in_dir, out_dir)
+    assert len(paths) == 1
+    marker = out_dir / "S1" / "S1_paired.cap3_validation.txt"
+    assert marker.exists()
+    assert marker.read_text(encoding="utf-8").strip() == "verified"
+
+
+def test_assemble_pairs_cap3_validation_unknown_keeps_contig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+
+    (in_dir / "S1_27F.fasta").write_text(">a\n" + "A" * 120 + "\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">b\n" + "T" * 120 + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        paired_assembly,
+        "load_config",
+        lambda: {
+            "tools": {"cap3": "/bin/true"},
+            "overlap_eval": {
+                "min_overlap": 200,
+                "min_identity": 1.0,
+                "min_quality": 20.0,
+                "quality_mode": "warning",
+                "cap3_validate_pair_support": True,
+            },
+        },
+    )
+
+    def fake_run(cmd, check, cwd=None, **kwargs):
+        if "--version" in cmd:
+            class Result:
+                returncode = 0
+                stdout = "CAP3 test"
+                stderr = ""
+
+            return Result()
+
+        contig = Path(cwd, f"{cmd[1]}.cap.contigs")
+        contig.write_text(">contig\n" + "A" * 80 + "\n", encoding="utf-8")
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(paired_assembly.subprocess, "run", fake_run)
+
+    paths = paired_assembly.assemble_pairs(in_dir, out_dir)
+    assert len(paths) == 1
+    marker = out_dir / "S1" / "S1_paired.cap3_validation.txt"
+    assert marker.exists()
+    assert marker.read_text(encoding="utf-8").strip() == "unknown"
+    assert (out_dir / "S1" / "S1_paired.fasta.cap.contigs").exists()

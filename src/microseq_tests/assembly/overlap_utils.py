@@ -200,12 +200,21 @@ def _is_ambiguous_top_pair(
     second: OverlapCandidate,
     *,
     identity_delta: float,
+    quality_epsilon: float,
 ) -> bool:
-    """Return True when top candidates are not uniquely best by primary metrics."""
+    """Return True when top candidates are not uniquely best by overlap metrics."""
     if first.overlap_len != second.overlap_len:
         return False
     if first.mismatches != second.mismatches:
         return False
+
+    first_q = first.overlap_quality
+    second_q = second.overlap_quality
+    if first_q is not None or second_q is not None:
+        if first_q is None or second_q is None:
+            return False
+        return abs(first_q - second_q) <= quality_epsilon
+
     return abs(first.identity - second.identity) <= identity_delta
 
 
@@ -237,6 +246,7 @@ def select_best_overlap(
     min_quality: float,
     quality_mode: str = "warning",
     ambiguity_identity_delta: float = 0.0,
+    ambiguity_quality_epsilon: float = 0.1,
 ) -> OverlapResult:
     feasible = [
         c
@@ -257,6 +267,7 @@ def select_best_overlap(
             chosen,
             ranked[1],
             identity_delta=ambiguity_identity_delta,
+            quality_epsilon=ambiguity_quality_epsilon,
         ):
             result = chosen.as_result()
             return OverlapResult(
