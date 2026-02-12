@@ -1,25 +1,44 @@
 cap3_executable	cap3
 cap3_version	cap3 10.2011
 sample_id	cap3_command
+1	merge_two_reads orientation=revcomp overlap=653 identity=0.2864
 1	cap3 1_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-10	cap3 10_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+10	merge_two_reads orientation=revcomp overlap=675 identity=0.8370
+11	merge_two_reads orientation=revcomp overlap=996 identity=0.2711
 11	cap3 11_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+12	merge_two_reads orientation=revcomp overlap=989 identity=0.2720
 12	cap3 12_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+13	merge_two_reads orientation=revcomp overlap=512 identity=0.2891
 13	cap3 13_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+14	merge_two_reads orientation=forward overlap=1020 identity=0.2598
 14	cap3 14_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+15	merge_two_reads orientation=forward overlap=995 identity=0.2583
 15	cap3 15_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+16	merge_two_reads orientation=forward overlap=1038 identity=0.2697
 16	cap3 16_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+17	merge_two_reads orientation=revcomp overlap=1063 identity=0.2672
 17	cap3 17_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+2	merge_two_reads orientation=revcomp overlap=1070 identity=0.2589
 2	cap3 2_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+23	merge_two_reads orientation=revcomp overlap=1085 identity=0.2581
 23	cap3 23_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+24	merge_two_reads orientation=revcomp overlap=1036 identity=0.2529
 24	cap3 24_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+25	merge_two_reads orientation=revcomp overlap=1000 identity=0.2600
 25	cap3 25_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+26	merge_two_reads orientation=revcomp overlap=1055 identity=0.2777
 26	cap3 26_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-27	cap3 27_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+27	merge_two_reads orientation=revcomp overlap=743 identity=0.8116
+3	merge_two_reads orientation=revcomp overlap=1022 identity=0.2554
 3	cap3 3_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+4	merge_two_reads orientation=revcomp overlap=803 identity=0.2690
 4	cap3 4_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+5	merge_two_reads orientation=revcomp overlap=961 identity=0.2570
 5	cap3 5_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+6	merge_two_reads orientation=forward overlap=994 identity=0.2565
 6	cap3 6_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+7	merge_two_reads orientation=forward overlap=781 identity=0.2574
 7	cap3 7_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-8	cap3 8_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+8	merge_two_reads orientation=revcomp overlap=711 identity=0.8073
+9	merge_two_reads orientation=revcomp overlap=1014 identity=0.2623
 9	cap3 9_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100

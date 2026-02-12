@@ -1,4 +1,5 @@
 cap3_executable	cap3
 cap3_version	cap3 10.2011
 sample_id	cap3_command
+A+	merge_two_reads orientation=forward overlap=1081 identity=0.2831
 A+	cap3 A+_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100

@@ -1,2 +1,2 @@
-sample_id	overlaps_saved	overlaps_removed	contigs_count	singlets_count	clip_f_left	clip_f_right	clip_r_left	clip_r_right	status
-A+	1	1	0	2					overlap_identity_low
+sample_id	overlaps_saved	overlaps_removed	contigs_count	singlets_count	clip_f_left	clip_f_right	clip_r_left	clip_r_right	status	merge_status	merge_overlap_len	merge_identity	merge_qualities	merge_warning	merge_high_conflict_mismatches	cap3_validation
+A+	1	1	0	2					overlap_identity_low	identity_low	1081	0.2831	absent		0	

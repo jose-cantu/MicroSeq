@@ -1,23 +1,23 @@
-sample_id	overlap_len	overlap_identity	overlap_quality	status
-1	630	0.5730	32.94	overlap_identity_low
-10	950	0.5726	45.16	overlap_identity_low
-11	949	0.5743	32.61	overlap_identity_low
-12	919	0.5691	41.64	overlap_identity_low
-13	491	0.5988	31.24	overlap_identity_low
-14	966	0.5611	41.52	overlap_identity_low
-15	938	0.5821	41.76	overlap_identity_low
-16	961	0.5661	40.27	overlap_identity_low
-17	976	0.5809	39.10	overlap_identity_low
-2	1001	0.5654	42.26	overlap_identity_low
-23	1000	0.5700	40.20	overlap_identity_low
-24	970	0.5742	43.52	overlap_identity_low
-25	933	0.6024	42.21	overlap_identity_low
-26	981	0.5892	44.90	overlap_identity_low
-27	993	0.5861	44.46	overlap_identity_low
-3	985	0.5807	39.06	overlap_identity_low
-4	782	0.5524	35.48	overlap_identity_low
-5	904	0.5686	22.11	overlap_identity_low
-6	925	0.5741	32.83	overlap_identity_low
-7	767	0.5958	29.41	overlap_identity_low
-8	982	0.5743	43.69	overlap_identity_low
-9	946	0.5729	42.56	overlap_identity_low
+sample_id	overlap_len	overlap_identity	overlap_quality	orientation	status
+1	653	0.2864	23.69	revcomp	overlap_identity_low
+10	675	0.8370	30.88	revcomp	ok
+11	996	0.2711	28.54	revcomp	overlap_identity_low
+12	989	0.2720	37.60	revcomp	overlap_identity_low
+13	512	0.2891	31.46	revcomp	overlap_identity_low
+14	1020	0.2598	41.94	forward	overlap_identity_low
+15	995	0.2583	41.83	forward	overlap_identity_low
+16	1038	0.2697	39.26	forward	overlap_identity_low
+17	1063	0.2672	32.29	revcomp	overlap_identity_low
+2	1070	0.2589	33.81	revcomp	overlap_identity_low
+23	1085	0.2581	33.44	revcomp	overlap_identity_low
+24	1036	0.2529	37.98	revcomp	overlap_identity_low
+25	1000	0.2600	35.23	revcomp	overlap_identity_low
+26	1055	0.2777	37.67	revcomp	overlap_identity_low
+27	743	0.8116	29.86	revcomp	ok
+3	1022	0.2554	34.45	revcomp	overlap_identity_low
+4	803	0.2690	25.73	revcomp	overlap_identity_low
+5	961	0.2570	20.38	revcomp	overlap_identity_low
+6	994	0.2565	32.33	forward	overlap_identity_low
+7	781	0.2574	26.88	forward	overlap_identity_low
+8	711	0.8073	29.39	revcomp	ok
+9	1014	0.2623	37.07	revcomp	overlap_identity_low

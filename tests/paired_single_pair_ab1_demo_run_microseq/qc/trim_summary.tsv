@@ -1,3 +1,3 @@
-file	reads	avg_len	avg_q	avg_mee	avg_mee_per_kb	avg_qeff	mee_qc_label
-A+_1492R_2026-01-29_E07.fastq	1	1089.0	46.82	7.917	7.270	21.38	review
-A+_27F_2026-01-29_C07.fastq	1	1081.0	46.81	11.562	10.695	19.71	review
+file	reads	avg_len	avg_q	qc_status	primer_trimmed	primer_bases_trimmed	primer_trim_len_avg	primer_bases_trimmed_total	primer_mismatch_avg	primer_hit	primer_offset_avg	primer_orientation	primer_orientation_source	primer_iupac_mode
+A+_1492R_2026-01-29_E07.fastq	1	1089.0	46.82	pass										
+A+_27F_2026-01-29_C07.fastq	1	1081.0	46.81	pass										

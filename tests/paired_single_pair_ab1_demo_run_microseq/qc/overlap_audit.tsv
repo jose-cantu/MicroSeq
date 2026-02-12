@@ -1,2 +1,2 @@
-sample_id	overlap_len	overlap_identity	overlap_quality	status
-A+	1001	0.5814	43.90	overlap_identity_low
+sample_id	overlap_len	overlap_identity	overlap_quality	orientation	status
+A+	1081	0.2831		forward	overlap_identity_low

@@ -1,0 +1,2 @@
+sample_id	orientation	overlap_len	identity	mismatches	contig_len	merge_status	qualities	merge_warning	high_conflict_mismatches
+A+	forward	1081	0.2831	775	0	identity_low	absent		0
