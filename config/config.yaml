@@ -31,6 +31,8 @@ primer_trim:
   forward_primers: []
   reverse_primers: []
 merge_two_reads:
+  overlap_engine: auto
+  anchor_tolerance_bases: 30
   min_overlap: 100
   min_identity: 0.8
 overlap_eval:

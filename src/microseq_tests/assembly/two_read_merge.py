@@ -10,10 +10,12 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 from microseq_tests.assembly.overlap_utils import (
+    AlignedOverlapCandidate,
     OverlapResult,
     iter_end_anchored_overlaps,
     select_best_overlap,
 )
+from microseq_tests.assembly.overlap_backends import compute_overlap_candidates, resolve_overlap_engine
 
 _IUPAC_PAIR_MAP = {
     frozenset({"A", "G"}): "R",
@@ -41,6 +43,7 @@ class MergeInputError(ValueError):
 @dataclass(frozen=True)
 class MergeReport:
     sample_id: str
+    overlap_engine: str
     orientation: str
     overlap_len: int
     identity: float
@@ -175,6 +178,8 @@ def merge_two_reads(
     ambiguity_quality_epsilon: float = 0.1,
     high_conflict_q_threshold: int = 30,
     high_conflict_action: str = "flag",
+    overlap_engine: str = "ungapped",
+    anchor_tolerance_bases: int = 30,
 ) -> tuple[Path | None, MergeReport]:
     f_count = _count_fasta_records(fwd_path)
     r_count = _count_fasta_records(rev_path)
@@ -192,12 +197,45 @@ def merge_two_reads(
     rev_qual = _read_qual(Path(f"{rev_path}.qual"), rev_record.id)
     qualities = "present" if fwd_qual is not None and rev_qual is not None else "absent"
 
-    candidates = iter_end_anchored_overlaps(
-        str(fwd_record.seq),
-        str(rev_record.seq),
-        fwd_qual,
-        rev_qual,
-    )
+    resolved_overlap_engine = resolve_overlap_engine(overlap_engine)
+    if resolved_overlap_engine == "ungapped":
+        candidates = iter_end_anchored_overlaps(
+            str(fwd_record.seq),
+            str(rev_record.seq),
+            fwd_qual,
+            rev_qual,
+        )
+    else:
+        backend_results = compute_overlap_candidates(
+            str(fwd_record.seq),
+            str(rev_record.seq),
+            fwd_qual,
+            rev_qual,
+            engine=resolved_overlap_engine,
+            end_anchor_tolerance=anchor_tolerance_bases,
+        )
+        candidates = [
+            AlignedOverlapCandidate(
+                orientation=result.orientation,
+                overlap_len=result.overlap_len,
+                mismatches=result.mismatches,
+                identity=result.identity,
+                overlap_quality=result.overlap_quality,
+                aligned_fwd=result.aligned_fwd,
+                aligned_rev=result.aligned_rev,
+                indels=result.indels,
+                cigar=result.cigar,
+                overlap_span_cols=result.overlap_span_cols,
+                terminal_gap_cols=result.terminal_gap_cols,
+                internal_indels=result.internal_indels,
+                fwd_overlap_start=result.fwd_overlap_start,
+                fwd_overlap_end=result.fwd_overlap_end,
+                rev_overlap_start=result.rev_overlap_start,
+                rev_overlap_end=result.rev_overlap_end,
+                end_anchored=result.end_anchored,
+            )
+            for result in backend_results
+        ]
     overlap: OverlapResult = select_best_overlap(
         candidates,
         min_overlap=min_overlap,
@@ -220,6 +258,7 @@ def merge_two_reads(
         SeqIO.write([fwd_record, rev_record], singlets_path, "fasta")
         report = MergeReport(
             sample_id,
+            resolved_overlap_engine,
             overlap.orientation,
             overlap.overlap_len,
             overlap.identity,
@@ -238,6 +277,7 @@ def merge_two_reads(
         SeqIO.write([fwd_record, rev_record], singlets_path, "fasta")
         report = MergeReport(
             sample_id,
+            resolved_overlap_engine,
             overlap.orientation,
             overlap.overlap_len,
             overlap.identity,
@@ -252,10 +292,30 @@ def merge_two_reads(
         _write_merge_report(report_path, report)
         return None, report
 
+    if overlap.status == "not_end_anchored":
+        SeqIO.write([fwd_record, rev_record], singlets_path, "fasta")
+        report = MergeReport(
+            sample_id,
+            resolved_overlap_engine,
+            overlap.orientation,
+            overlap.overlap_len,
+            overlap.identity,
+            overlap.mismatches,
+            0,
+            "not_end_anchored",
+            qualities,
+            "",
+            0,
+        )
+        _write_stub_cap_info(cap_info_path)
+        _write_merge_report(report_path, report)
+        return None, report
+
     if overlap.identity < min_identity:
         SeqIO.write([fwd_record, rev_record], singlets_path, "fasta")
         report = MergeReport(
             sample_id,
+            resolved_overlap_engine,
             overlap.orientation,
             overlap.overlap_len,
             overlap.identity,
@@ -277,6 +337,7 @@ def merge_two_reads(
         SeqIO.write([fwd_record, rev_record], singlets_path, "fasta")
         report = MergeReport(
             sample_id,
+            resolved_overlap_engine,
             overlap.orientation,
             overlap.overlap_len,
             overlap.identity,
@@ -317,6 +378,7 @@ def merge_two_reads(
         merge_warning_tokens.append("high_conflict")
         report = MergeReport(
             sample_id,
+            resolved_overlap_engine,
             overlap.orientation,
             overlap.overlap_len,
             overlap.identity,
@@ -347,6 +409,7 @@ def merge_two_reads(
 
     report = MergeReport(
         sample_id,
+        resolved_overlap_engine,
         overlap.orientation,
         overlap.overlap_len,
         overlap.identity,
@@ -364,8 +427,8 @@ def merge_two_reads(
 
 def _write_merge_report(path: Path, report: MergeReport) -> None:
     path.write_text(
-        "sample_id\torientation\toverlap_len\tidentity\tmismatches\tcontig_len\tmerge_status\tqualities\tmerge_warning\thigh_conflict_mismatches\n"
-        f"{report.sample_id}\t{report.orientation}\t{report.overlap_len}\t{report.identity:.4f}\t"
+        "sample_id\toverlap_engine\torientation\toverlap_len\tidentity\tmismatches\tcontig_len\tmerge_status\tqualities\tmerge_warning\thigh_conflict_mismatches\n"
+        f"{report.sample_id}\t{report.overlap_engine}\t{report.orientation}\t{report.overlap_len}\t{report.identity:.4f}\t"
         f"{report.mismatches}\t{report.contig_len}\t{report.merge_status}\t{report.qualities}\t{report.merge_warning}\t{report.high_conflict_mismatches}\n",
         encoding="utf-8",
     )

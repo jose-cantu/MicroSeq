@@ -60,6 +60,7 @@ def parse_cap3_reports(
                     "clip_r_right": None,
                     "status": "pair_missing",
                     "merge_status": None,
+                    "merge_overlap_engine": None,
                     "merge_overlap_len": None,
                     "merge_identity": None,
                     "merge_qualities": None,
@@ -110,6 +111,7 @@ def parse_cap3_reports(
             status = "cap3_no_output"
 
         merge_status = None
+        merge_engine = None
         merge_overlap_len = None
         merge_identity = None
         merge_qualities = None
@@ -123,6 +125,7 @@ def parse_cap3_reports(
                 values = lines[1].split("\t")
                 report = dict(zip(headers, values, strict=False))
                 merge_status = report.get("merge_status")
+                merge_engine = report.get("overlap_engine")
                 merge_overlap_len = report.get("overlap_len")
                 merge_identity = report.get("identity")
                 merge_qualities = report.get("qualities")
@@ -152,6 +155,7 @@ def parse_cap3_reports(
                 "clip_r_right": clip_r_right,
                 "status": status,
                 "merge_status": merge_status,
+                "merge_overlap_engine": merge_engine,
                 "merge_overlap_len": merge_overlap_len,
                 "merge_identity": merge_identity,
                 "merge_qualities": merge_qualities,
@@ -175,6 +179,7 @@ def parse_cap3_reports(
             "clip_r_right",
             "status",
             "merge_status",
+            "merge_overlap_engine",
             "merge_overlap_len",
             "merge_identity",
             "merge_qualities",

@@ -912,9 +912,20 @@ class MainWindow(QMainWindow):
         self.blast_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.blast_table.itemSelectionChanged.connect(self._update_detail_panel)
 
-        self.diagnostics_table = QTableWidget(0, 6)
+        self.diagnostics_table = QTableWidget(0, 10)
         self.diagnostics_table.setHorizontalHeaderLabels(
-            ["sample_id", "overlap_len", "overlap_identity", "overlap_quality", "orientation", "status"]
+            [
+                "sample_id",
+                "overlap_len",
+                "overlap_identity",
+                "overlap_quality",
+                "orientation",
+                "status",
+                "best_identity",
+                "best_identity_orientation",
+                "anchoring_feasible",
+                "overlap_engine",
+            ]
         )
         self.diagnostics_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.diagnostics_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -974,6 +985,7 @@ class MainWindow(QMainWindow):
         self.detail_payload_lbl = QLabel("blast_payload: ")
         self.detail_payload_ids_lbl = QLabel("payload_ids: ")
         self.detail_overlap_lbl = QLabel("overlap: ")
+        self.detail_assembly_engine_lbl = QLabel("assembly path: ")
 
         self.detail_contigs_btn = QPushButton("Open contigs")
         self.detail_singlets_btn = QPushButton("Open singlets")
@@ -1017,6 +1029,7 @@ class MainWindow(QMainWindow):
         detail_layout.addWidget(self.detail_payload_lbl)
         detail_layout.addWidget(self.detail_payload_ids_lbl)
         detail_layout.addWidget(self.detail_overlap_lbl)
+        detail_layout.addWidget(self.detail_assembly_engine_lbl)
         detail_layout.addWidget(self.detail_contigs_btn)
         detail_layout.addWidget(self.detail_singlets_btn)
         detail_layout.addWidget(self.detail_info_btn)
@@ -2093,6 +2106,10 @@ class MainWindow(QMainWindow):
                 self._fmt_table_value(row.get("overlap_quality", "")),
                 self._fmt_table_value(row.get("orientation", "")),
                 self._fmt_table_value(row.get("status", "")),
+                self._fmt_table_value(row.get("best_identity", "")),
+                self._fmt_table_value(row.get("best_identity_orientation", "")),
+                self._fmt_table_value(row.get("anchoring_feasible", "")),
+                self._fmt_table_value(row.get("overlap_engine", "")),
             ]
             for col, value in enumerate(row_values):
                 item = QTableWidgetItem(value)
@@ -2104,6 +2121,10 @@ class MainWindow(QMainWindow):
                 "overlap_quality": row_values[3],
                 "orientation": row_values[4],
                 "status": row_values[5],
+                "best_identity": row_values[6],
+                "best_identity_orientation": row_values[7],
+                "anchoring_feasible": row_values[8],
+                "overlap_engine": row_values[9],
             }
         self._configure_table_view(self.diagnostics_table)
 
@@ -2184,6 +2205,25 @@ class MainWindow(QMainWindow):
         self.detail_payload_lbl.setText(f"blast_payload: {self._join_values(payload_vals)}")
         self.detail_payload_ids_lbl.setText(f"payload_ids: {self._join_values(payload_ids_vals)}")
 
+        engine_vals: list[str] = []
+        for sid in sample_ids:
+            srow = self._summary_rows.get(sid, {})
+            merge_status = srow.get("merge_status", "")
+            status = srow.get("status", "")
+            if merge_status == "merged":
+                engine_vals.append("merged_two_reads")
+            elif merge_status == "high_conflict":
+                engine_vals.append("merged_two_reads -> CAP3 fallback (high_conflict)")
+            elif merge_status in {"identity_low", "overlap_too_short", "quality_low", "ambiguous_overlap"}:
+                engine_vals.append(f"merged_two_reads attempted ({merge_status}) -> CAP3 fallback")
+            elif status == "assembled":
+                engine_vals.append("CAP3 assembled")
+            elif status == "singlets_only":
+                engine_vals.append("CAP3 singlets_only")
+            else:
+                engine_vals.append("paired flow (see merge_status + status)")
+        self.detail_assembly_engine_lbl.setText(f"assembly path: {self._join_values(engine_vals)}")
+
         audit_values = [self._audit_rows.get(sid, {}) for sid in sample_ids]
         if len(sample_ids) == 1 and audit_values and audit_values[0]:
             audit = audit_values[0]
@@ -2192,7 +2232,10 @@ class MainWindow(QMainWindow):
                 f"{audit.get('status', '—')} (len {audit.get('overlap_len', '—')}, "
                 f"id {audit.get('overlap_identity', '—')}, "
                 f"q {audit.get('overlap_quality', '—')}, "
-                f"orient {audit.get('orientation', '—')})"
+                f"orient {audit.get('orientation', '—')}, "
+                f"best-id {audit.get('best_identity', '—')} @ {audit.get('best_identity_orientation', '—')}, "
+                f"anchored {audit.get('anchoring_feasible', '—')}, "
+                f"engine {audit.get('overlap_engine', '—')})"
             )
         else:
             statuses = [audit.get("status", "—") for audit in audit_values if audit]

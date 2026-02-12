@@ -35,9 +35,12 @@ from microseq_tests.trimming.primer_trim import trim_primer_fastqs, update_trim_
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
 from microseq_tests.assembly.paired_assembly import assemble_pairs, _build_keep_separate_pairs 
 from microseq_tests.assembly.overlap_utils import (
+    AlignedOverlapCandidate,
     iter_end_anchored_overlaps,
     select_best_overlap,
+    pick_best_identity_candidate,
 )
+from microseq_tests.assembly.overlap_backends import compute_overlap_candidates, resolve_overlap_engine
 from microseq_tests.assembly.pairing import  (
         DETECTORS, DupPolicy, _extract_well, _strip_well_token, extract_sid_orientation, iter_seq_files, make_pattern_detector) 
 from microseq_tests.assembly.cap3_report import parse_cap3_reports
@@ -549,6 +552,8 @@ def _resolve_overlap_thresholds(cfg: dict | None = None) -> tuple[int, float, fl
     config = cfg if cfg is not None else load_config()
     overlap_cfg = config.get("overlap_eval", {})
     merge_cfg = config.get("merge_two_reads", {})
+    overlap_engine = resolve_overlap_engine(str(merge_cfg.get("overlap_engine", "ungapped")))
+    anchor_tolerance_bases = int(merge_cfg.get("anchor_tolerance_bases", 30))
     min_overlap = int(overlap_cfg.get("min_overlap", merge_cfg.get("min_overlap", 100)))
     min_identity = float(overlap_cfg.get("min_identity", merge_cfg.get("min_identity", 0.8)))
     min_quality = float(overlap_cfg.get("min_quality", 20.0))
@@ -582,6 +587,11 @@ def _write_overlap_audit(
     min_quality: float | None = None,
     quality_mode: str = "warning",
 ) -> dict[str, str]:
+    config = load_config()
+    merge_cfg = config.get("merge_two_reads", {})
+    overlap_engine = resolve_overlap_engine(str(merge_cfg.get("overlap_engine", "ungapped")))
+    anchor_tolerance_bases = int(merge_cfg.get("anchor_tolerance_bases", 30))
+
     if min_overlap is None or min_identity is None or min_quality is None:
         cfg_overlap, cfg_identity, cfg_quality = _resolve_overlap_thresholds()
         min_overlap = cfg_overlap if min_overlap is None else min_overlap
@@ -591,36 +601,71 @@ def _write_overlap_audit(
     output_tsv.parent.mkdir(parents=True, exist_ok=True)
     status_map: dict[str, str] = {}
     with output_tsv.open("w", encoding="utf-8") as fh:
-        fh.write("sample_id\toverlap_len\toverlap_identity\toverlap_quality\torientation\tstatus\n")
+        fh.write(
+            "sample_id\toverlap_len\toverlap_identity\toverlap_quality\torientation\tstatus"
+            "\tbest_identity\tbest_identity_orientation\tanchoring_feasible\toverlap_engine\n"
+        )
         for sample_id, entries in sorted(paired_samples.items()):
             if not entries["F"] or not entries["R"]:
                 status = "overlap_missing_reads"
                 status_map[sample_id] = status
-                fh.write(f"{sample_id}\t0\t0\t\t\t{status}\n")
+                fh.write(f"{sample_id}\t0\t0\t\t\t{status}\t0\t\tno\t{overlap_engine}\n")
                 continue
             fwd_path = entries["F"][0]
             rev_path = entries["R"][0]
             if not fwd_path.exists() or not rev_path.exists():
                 status = "overlap_missing_reads"
                 status_map[sample_id] = status
-                fh.write(f"{sample_id}\t0\t0\t\t\t{status}\n")
+                fh.write(f"{sample_id}\t0\t0\t\t\t{status}\t0\t\tno\t{overlap_engine}\n")
                 continue
             fwd_record = _read_first_record(fwd_path, "fasta")
             rev_record = _read_first_record(rev_path, "fasta")
             if fwd_record is None or rev_record is None:
                 status = "overlap_missing_reads"
                 status_map[sample_id] = status
-                fh.write(f"{sample_id}\t0\t0\t\t\t{status}\n")
+                fh.write(f"{sample_id}\t0\t0\t\t\t{status}\t0\t\tno\t{overlap_engine}\n")
                 continue
 
             fwd_qual = _load_qual_record(Path(f"{fwd_path}.qual"), fwd_record.id)
             rev_qual = _load_qual_record(Path(f"{rev_path}.qual"), rev_record.id)
-            overlap_candidates = iter_end_anchored_overlaps(
-                str(fwd_record.seq),
-                str(rev_record.seq),
-                fwd_qual,
-                rev_qual,
-            )
+            if overlap_engine == "ungapped":
+                overlap_candidates = iter_end_anchored_overlaps(
+                    str(fwd_record.seq),
+                    str(rev_record.seq),
+                    fwd_qual,
+                    rev_qual,
+                )
+            else:
+                backend = compute_overlap_candidates(
+                    str(fwd_record.seq),
+                    str(rev_record.seq),
+                    fwd_qual,
+                    rev_qual,
+                    engine=overlap_engine,
+                    end_anchor_tolerance=anchor_tolerance_bases,
+                )
+                overlap_candidates = [
+                    AlignedOverlapCandidate(
+                        orientation=r.orientation,
+                        overlap_len=r.overlap_len,
+                        mismatches=r.mismatches,
+                        identity=r.identity,
+                        overlap_quality=r.overlap_quality,
+                        aligned_fwd=r.aligned_fwd,
+                        aligned_rev=r.aligned_rev,
+                        indels=r.indels,
+                        cigar=r.cigar,
+                        overlap_span_cols=r.overlap_span_cols,
+                        terminal_gap_cols=r.terminal_gap_cols,
+                        internal_indels=r.internal_indels,
+                        fwd_overlap_start=r.fwd_overlap_start,
+                        fwd_overlap_end=r.fwd_overlap_end,
+                        rev_overlap_start=r.rev_overlap_start,
+                        rev_overlap_end=r.rev_overlap_end,
+                        end_anchored=r.end_anchored,
+                    )
+                    for r in backend
+                ]
             overlap = select_best_overlap(
                 overlap_candidates,
                 min_overlap=min_overlap,
@@ -628,21 +673,42 @@ def _write_overlap_audit(
                 min_quality=min_quality,
                 quality_mode=quality_mode,
             )
-            status = _classify_overlap_status(
-                overlap.overlap_len,
-                overlap.identity,
-                overlap.overlap_quality,
-                min_overlap=min_overlap,
-                min_identity=min_identity,
-                min_quality=min_quality,
-                quality_mode=quality_mode,
+            best_identity = pick_best_identity_candidate(overlap_candidates, min_overlap=min_overlap)
+            has_anchor_info = any(hasattr(c, "end_anchored") for c in overlap_candidates)
+            anchored_and_feasible = any(
+                getattr(c, "end_anchored", True)
+                and c.overlap_len >= min_overlap
+                and c.identity >= min_identity
+                and (
+                    quality_mode != "blocking"
+                    or (c.overlap_quality is not None and c.overlap_quality >= min_quality)
+                )
+                for c in overlap_candidates
             )
+            if has_anchor_info and not anchored_and_feasible:
+                status = "not_end_anchored"
+            elif overlap.status in {"not_end_anchored", "ambiguous_overlap"}:
+                status = overlap.status
+            else:
+                status = _classify_overlap_status(
+                    overlap.overlap_len,
+                    overlap.identity,
+                    overlap.overlap_quality,
+                    min_overlap=min_overlap,
+                    min_identity=min_identity,
+                    min_quality=min_quality,
+                    quality_mode=quality_mode,
+                )
             status_map[sample_id] = status
             overlap_quality = overlap.overlap_quality
+            best_identity_val = overlap.identity if best_identity is None else best_identity.identity
+            best_identity_orientation = overlap.orientation if best_identity is None else best_identity.orientation
+            anchoring_feasible = "yes" if (not has_anchor_info or anchored_and_feasible) else "no"
             fh.write(
                 f"{sample_id}\t{overlap.overlap_len}\t{overlap.identity:.4f}\t"
                 f"{'' if overlap_quality is None else f'{overlap_quality:.2f}'}\t"
-                f"{overlap.orientation}\t{status}\n"
+                f"{overlap.orientation}\t{status}\t{best_identity_val:.4f}\t{best_identity_orientation}"
+                f"\t{anchoring_feasible}\t{overlap_engine}\n"
             )
     return status_map
 

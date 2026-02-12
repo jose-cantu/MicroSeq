@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Sequence
 
 from Bio.Seq import Seq
 
@@ -39,6 +40,38 @@ class OverlapCandidate:
             overlap_quality=self.overlap_quality,
             aligned_fwd=aligned_fwd,
             aligned_rev=aligned_rev,
+        )
+
+
+@dataclass(frozen=True)
+class AlignedOverlapCandidate:
+    orientation: str
+    overlap_len: int
+    mismatches: int
+    identity: float
+    overlap_quality: float | None
+    aligned_fwd: str
+    aligned_rev: str
+    indels: int = 0
+    cigar: str = ""
+    overlap_span_cols: int = 0
+    terminal_gap_cols: int = 0
+    internal_indels: int = 0
+    fwd_overlap_start: int = 0
+    fwd_overlap_end: int = 0
+    rev_overlap_start: int = 0
+    rev_overlap_end: int = 0
+    end_anchored: bool = True
+
+    def as_result(self) -> OverlapResult:
+        return OverlapResult(
+            orientation=self.orientation,
+            overlap_len=self.overlap_len,
+            identity=self.identity,
+            mismatches=self.mismatches,
+            overlap_quality=self.overlap_quality,
+            aligned_fwd=self.aligned_fwd,
+            aligned_rev=self.aligned_rev,
         )
 
 
@@ -179,7 +212,7 @@ def _quality_sort_value(overlap_quality: float | None) -> tuple[int, float]:
     return (1, overlap_quality)
 
 
-def _candidate_sort_key(candidate: OverlapCandidate) -> tuple[int, int, tuple[int, float], float]:
+def _candidate_sort_key(candidate: OverlapCandidate | AlignedOverlapCandidate) -> tuple[int, int, tuple[int, float], float]:
     """Sort overlaps by longest overlap, then fewest mismatches, then quality, then identity."""
     return (
         candidate.overlap_len,
@@ -189,15 +222,27 @@ def _candidate_sort_key(candidate: OverlapCandidate) -> tuple[int, int, tuple[in
     )
 
 
-def _pick_best_candidate(candidates: list[OverlapCandidate]) -> OverlapCandidate | None:
+def _pick_best_candidate(candidates: Sequence[OverlapCandidate | AlignedOverlapCandidate]) -> OverlapCandidate | AlignedOverlapCandidate | None:
     if not candidates:
         return None
     return max(candidates, key=_candidate_sort_key)
 
 
+def pick_best_identity_candidate(
+    candidates: Sequence[OverlapCandidate | AlignedOverlapCandidate],
+    *,
+    min_overlap: int = 0,
+) -> OverlapCandidate | AlignedOverlapCandidate | None:
+    """Return the candidate with highest identity (ties -> longer overlap, fewer mismatches)."""
+    filtered = [c for c in candidates if c.overlap_len >= min_overlap]
+    if not filtered:
+        return None
+    return max(filtered, key=lambda c: (c.identity, c.overlap_len, -c.mismatches, _quality_sort_value(c.overlap_quality)))
+
+
 def _is_ambiguous_top_pair(
-    first: OverlapCandidate,
-    second: OverlapCandidate,
+    first: OverlapCandidate | AlignedOverlapCandidate,
+    second: OverlapCandidate | AlignedOverlapCandidate,
     *,
     identity_delta: float,
     quality_epsilon: float,
@@ -219,13 +264,15 @@ def _is_ambiguous_top_pair(
 
 
 def _is_feasible_candidate(
-    candidate: OverlapCandidate,
+    candidate: OverlapCandidate | AlignedOverlapCandidate,
     *,
     min_overlap: int,
     min_identity: float,
     min_quality: float,
     quality_mode: str,
 ) -> bool:
+    if hasattr(candidate, "end_anchored") and not getattr(candidate, "end_anchored"):
+        return False
     if candidate.overlap_len < min_overlap:
         return False
     if candidate.identity < min_identity:
@@ -239,7 +286,7 @@ def _is_feasible_candidate(
 
 
 def select_best_overlap(
-    candidates: list[OverlapCandidate],
+    candidates: Sequence[OverlapCandidate | AlignedOverlapCandidate],
     *,
     min_overlap: int,
     min_identity: float,
@@ -285,6 +332,18 @@ def select_best_overlap(
     best_overall = _pick_best_candidate(candidates)
     if best_overall is None:
         return OverlapResult("forward", 0, 0.0, 0, None, "", "")
+    if hasattr(best_overall, "end_anchored") and not getattr(best_overall, "end_anchored"):
+        result = best_overall.as_result()
+        return OverlapResult(
+            result.orientation,
+            result.overlap_len,
+            result.identity,
+            result.mismatches,
+            result.overlap_quality,
+            result.aligned_fwd,
+            result.aligned_rev,
+            "not_end_anchored",
+        )
     return best_overall.as_result()
 
 

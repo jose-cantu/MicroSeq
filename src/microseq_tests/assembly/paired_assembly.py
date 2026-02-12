@@ -17,6 +17,7 @@ from microseq_tests.utility.utils import load_config
 
 from .pairing import DupPolicy, group_pairs 
 from .two_read_merge import merge_two_reads, MergeInputError
+from .overlap_backends import resolve_overlap_engine
 
 L = logging.getLogger(__name__) 
 
@@ -264,6 +265,9 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
     merge_cfg = cfg.get("merge_two_reads", {})
     merge_min_overlap = int(overlap_cfg.get("min_overlap", merge_cfg.get("min_overlap", 100)))
     merge_min_identity = float(overlap_cfg.get("min_identity", merge_cfg.get("min_identity", 0.8)))
+    merge_overlap_engine = str(merge_cfg.get("overlap_engine", "ungapped")).strip().lower()
+    merge_overlap_engine_resolved = resolve_overlap_engine(merge_overlap_engine)
+    merge_anchor_tolerance_bases = int(merge_cfg.get("anchor_tolerance_bases", 30))
     merge_min_quality = float(overlap_cfg.get("min_quality", 20.0))
     quality_mode = str(overlap_cfg.get("quality_mode", "warning")).strip().lower()
     if quality_mode not in {"blocking", "warning"}:
@@ -413,6 +417,8 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
                         ambiguity_quality_epsilon=ambiguity_quality_epsilon,
                         high_conflict_q_threshold=high_conflict_q_threshold,
                         high_conflict_action=high_conflict_action,
+                        overlap_engine=merge_overlap_engine,
+                        anchor_tolerance_bases=merge_anchor_tolerance_bases,
                     )
                 except MergeInputError as exc:
                     L.warning("Skipping merge_two_reads for %s: %s", sample_key, exc)
@@ -423,15 +429,34 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
                     )
                 else:
                     metadata_lines.append(
-                        f"{sample_key}\tmerge_two_reads orientation={report.orientation} "
-                        f"overlap={report.overlap_len} identity={report.identity:.4f}"
+                        f"{sample_key}\tmerge_two_reads engine={merge_overlap_engine_resolved} "
+                        f"orientation={report.orientation} overlap={report.overlap_len} identity={report.identity:.4f}"
                     )
                     if contig_path:
+                        L.info(
+                            "Paired assembler path for %s: merge_two_reads accepted (%s)",
+                            sample_key,
+                            report.merge_status,
+                        )
                         contig_paths.append(contig_path)
                         continue
+                    L.info(
+                        "Paired assembler path for %s: merge_two_reads=%s; fallback to CAP3",
+                        sample_key,
+                        report.merge_status,
+                    )
                     if report.merge_status == "quality_low" and quality_mode == "blocking":
+                        L.info(
+                            "Paired assembler path for %s: quality_mode=blocking keeps singlets, CAP3 skipped",
+                            sample_key,
+                        )
                         continue
 
+            if not (fwd_path and rev_path and len(sources) == 2):
+                L.info(
+                    "Paired assembler path for %s: merge_two_reads unavailable (non-singleton or missing pair); using CAP3",
+                    sample_key,
+                )
             cmd = [cap3_exe, sample_fasta.name]
             if cap3_options:
                 cmd.extend(cap3_options)

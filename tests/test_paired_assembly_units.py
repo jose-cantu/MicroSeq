@@ -6,6 +6,7 @@ import sys
 import types
 
 import pytest
+import importlib
 
 """
 This test suite validates the 'microseq_tests' pipeline for Sanger sequencing 
@@ -41,6 +42,7 @@ from Bio.SeqRecord import SeqRecord
 
 from microseq_tests.assembly.cap3_report import parse_cap3_reports
 from microseq_tests.assembly.overlap_utils import (
+    AlignedOverlapCandidate,
     OverlapCandidate,
     best_pairwise_overlap,
     iter_end_anchored_overlaps,
@@ -48,27 +50,32 @@ from microseq_tests.assembly.overlap_utils import (
 )
 from microseq_tests.assembly.paired_assembly import _write_combined_fasta
 from microseq_tests.assembly.two_read_merge import merge_two_reads
+from microseq_tests.assembly.overlap_backends import compute_overlap_candidates, resolve_overlap_engine
 from microseq_tests.pipeline import (
     _build_blast_inputs,
     _classify_overlap_status,
     _collect_pairing_catalog,
     _evaluate_overlap,
+    _write_overlap_audit,
 )
 from microseq_tests.assembly.pairing import DupPolicy
 from microseq_tests.utility import io_utils
 
 
 def _write_fasta(path: Path, records: list[SeqRecord]) -> None:
+    """Write SeqRecord entries to a FASTA file, creating parent directories as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     SeqIO.write(records, path, "fasta")
 
 
 def _write_qual(path: Path, records: list[SeqRecord]) -> None:
+    """Write SeqRecord entries to a QUAL file, creating parent directories as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     SeqIO.write(records, path, "qual")
 
 
 def test_write_fasta_and_qual_from_fastq(tmp_path: Path) -> None:
+    """Verify FASTQ conversion writes paired FASTA and QUAL records with matching lengths."""
     fastq_path = tmp_path / "reads.fastq"
     fasta_path = tmp_path / "reads.fasta"
     records = [
@@ -91,6 +98,7 @@ def test_write_fasta_and_qual_from_fastq(tmp_path: Path) -> None:
 
 
 def test_write_fasta_and_qual_from_fastq_mismatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure FASTQ conversion raises when sequence and quality lengths differ."""
     fastq_path = tmp_path / "reads.fastq"
     fasta_path = tmp_path / "reads.fasta"
     bad_record = SeqRecord(Seq("ACGT"), id="bad", description="")
@@ -106,6 +114,7 @@ def test_write_fasta_and_qual_from_fastq_mismatch(tmp_path: Path, monkeypatch: p
 
 
 def test_write_combined_fasta_with_missing_qual(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Confirm combined FASTA writing logs warnings and omits missing QUAL inputs safely."""
     fasta_a = tmp_path / "a.fasta"
     fasta_b = tmp_path / "b.fasta"
     dest = tmp_path / "combined.fasta"
@@ -131,6 +140,7 @@ def test_write_combined_fasta_with_missing_qual(tmp_path: Path, caplog: pytest.L
 
 
 def test_build_blast_inputs_manifest(tmp_path: Path) -> None:
+    """Validate BLAST input FASTA/TSV manifest labeling for contigs, singlets, and missing pairs."""
     asm_dir = tmp_path / "asm"
     output_fasta = tmp_path / "blast_inputs.fasta"
     output_tsv = tmp_path / "blast_inputs.tsv"
@@ -170,6 +180,7 @@ def test_build_blast_inputs_manifest(tmp_path: Path) -> None:
 
 
 def test_collect_pairing_catalog_missing_samples(tmp_path: Path) -> None:
+    """Check pairing catalog groups complete pairs and marks incomplete samples as missing."""
     rec = SeqRecord(Seq("ACGT"), id="seq1", description="")
     rec.letter_annotations["phred_quality"] = [30, 30, 30, 30]
     _write_fasta(tmp_path / "S1_27F.fasta", [rec])
@@ -192,6 +203,7 @@ def test_collect_pairing_catalog_missing_samples(tmp_path: Path) -> None:
 
 
 def test_parse_cap3_reports_and_missing_samples(tmp_path: Path) -> None:
+    """Verify CAP3 report parsing captures metrics and emits missing-sample placeholder rows."""
     asm_dir = tmp_path / "asm"
     sample_dir = asm_dir / "sample1"
     sample_dir.mkdir(parents=True)
@@ -243,6 +255,7 @@ def test_parse_cap3_reports_and_missing_samples(tmp_path: Path) -> None:
 
 
 def test_parse_cap3_reports_rejected_validation_marks_unverified(tmp_path: Path) -> None:
+    """Ensure rejected CAP3 validation marks assembled output as unverified."""
     asm_dir = tmp_path / "asm"
     sample_dir = asm_dir / "sample1"
     sample_dir.mkdir(parents=True)
@@ -257,6 +270,7 @@ def test_parse_cap3_reports_rejected_validation_marks_unverified(tmp_path: Path)
 
 
 def test_parse_cap3_reports_unknown_validation_keeps_assembled_status(tmp_path: Path) -> None:
+    """Ensure unknown CAP3 validation preserves assembled status."""
     asm_dir = tmp_path / "asm"
     sample_dir = asm_dir / "sample1"
     sample_dir.mkdir(parents=True)
@@ -270,6 +284,7 @@ def test_parse_cap3_reports_unknown_validation_keeps_assembled_status(tmp_path: 
     assert row["status"] == "assembled"
 
 def test_overlap_audit_classification() -> None:
+    """Confirm overlap audit classification handles short and low-identity cases."""
     short = _evaluate_overlap("A" * 10, "A" * 10, None, None, min_overlap=20)
     assert short["status"] == "overlap_too_short"
 
@@ -284,7 +299,40 @@ def test_overlap_audit_classification() -> None:
     assert identity_low["status"] == "overlap_identity_low"
 
 
+
+
+def test_overlap_audit_writes_best_identity_columns(tmp_path: Path) -> None:
+    """Ensure overlap audit TSV includes and populates best-identity helper columns."""
+    fwd = tmp_path / "S1_27F.fasta"
+    rev = tmp_path / "S1_1492R.fasta"
+    fwd.write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
+    rev.write_text(">r\n" + "A" * 119 + "T\n", encoding="utf-8")
+
+    paired = {"S1": {"F": [fwd], "R": [rev]}}
+    out = tmp_path / "overlap_audit.tsv"
+    _write_overlap_audit(paired, out, min_overlap=50, min_identity=0.5, min_quality=20.0, quality_mode="warning")
+
+    lines = out.read_text(encoding="utf-8").splitlines()
+    header = lines[0].split("\t")
+    values = lines[1].split("\t")
+    assert "best_identity" in header
+    assert "best_identity_orientation" in header
+    row = dict(zip(header, values))
+    assert float(row["best_identity"]) >= float(row["overlap_identity"])
+
+
+def test_overlap_audit_missing_reads_rows_have_10_columns(tmp_path: Path) -> None:
+    """Verify missing-read audit rows preserve the expected fixed column width."""
+    out = tmp_path / "overlap_audit.tsv"
+    paired = {"S1": {"F": [], "R": []}}
+    _write_overlap_audit(paired, out)
+    header = out.read_text(encoding="utf-8").splitlines()[0].split("\t")
+    values = out.read_text(encoding="utf-8").splitlines()[1].split("\t")
+    assert len(header) == 10
+    assert len(values) == 10
+
 def test_overlap_helper_prefers_end_overlap_over_internal_match() -> None:
+    """Ensure overlap helper does not accept internal motif matches as valid terminal overlaps."""
     fwd = "A" * 60 + "GATTACA" + "C" * 60
     rev = "N" * 40 + "GATTACA" + "N" * 40
 
@@ -302,7 +350,287 @@ def test_overlap_helper_prefers_end_overlap_over_internal_match() -> None:
     assert status in {"overlap_too_short", "overlap_identity_low"}
 
 
+def test_gapped_backend_revcomp_indel_passes_where_ungapped_fails() -> None:
+    # revcomp(seq_rev) has a 1bp internal deletion relative to fwd.
+    """Check gapped backend can recover a revcomp overlap with an internal indel missed by ungapped mode."""
+    fwd = "CAGATTTTCATATTATGCAGAAAATCTACT"
+    rev = str(Seq("CAGATTTTCATATTATGCAGAAATCTACT").reverse_complement())
+
+    ungapped = iter_end_anchored_overlaps(fwd, rev)
+    chosen_ungapped = select_best_overlap(
+        ungapped,
+        min_overlap=15,
+        min_identity=0.95,
+        min_quality=20.0,
+        quality_mode="warning",
+    )
+    assert chosen_ungapped.identity < 0.95
+
+    gapped = compute_overlap_candidates(fwd, rev, None, None, engine="biopython")
+    chosen_gapped = select_best_overlap(
+        [
+            AlignedOverlapCandidate(
+                orientation=c.orientation,
+                overlap_len=c.overlap_len,
+                mismatches=c.mismatches,
+                identity=c.identity,
+                overlap_quality=c.overlap_quality,
+                aligned_fwd=c.aligned_fwd,
+                aligned_rev=c.aligned_rev,
+                indels=c.indels,
+                cigar=c.cigar,
+            )
+            for c in gapped
+        ],
+        min_overlap=15,
+        min_identity=0.85,
+        min_quality=20.0,
+        quality_mode="warning",
+    )
+    assert chosen_gapped.orientation == "revcomp"
+    assert chosen_gapped.identity >= 0.85
+
+
+def test_backend_parity_biopython_vs_edlib_if_available() -> None:
+    """Compare best-candidate orientation and approximate identity between Biopython and Edlib backends."""
+    edlib = pytest.importorskip("edlib")
+    assert edlib is not None
+    fwd = "AAACCCGGGTTT"
+    rev = str(Seq("AAACCCGGGTT").reverse_complement())
+    b = compute_overlap_candidates(fwd, rev, None, None, engine="biopython")
+    e = compute_overlap_candidates(fwd, rev, None, None, engine="edlib")
+    b_best = max(b, key=lambda c: (c.identity, c.overlap_len))
+    e_best = max(e, key=lambda c: (c.identity, c.overlap_len))
+    assert b_best.orientation == e_best.orientation
+    assert abs(b_best.identity - e_best.identity) < 0.15
+
+
+def test_resolve_overlap_engine_auto_prefers_edlib_when_available() -> None:
+    """Verify auto backend selection prefers Edlib when the dependency is importable."""
+    edlib = pytest.importorskip("edlib")
+    assert edlib is not None
+    assert resolve_overlap_engine("auto") == "edlib"
+
+
+def test_overlap_audit_uses_not_end_anchored_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure overlap audit marks non-terminal matches as not_end_anchored."""
+    motif = "GATTACAGATTACA"
+    fwd = tmp_path / "S4_27F.fasta"
+    rev = tmp_path / "S4_1492R.fasta"
+    fwd.write_text(f">f\nAAAA{motif}CCCC\n", encoding="utf-8")
+    rev_oriented = f"TTTT{motif}GGGG"
+    rev.write_text(f">r\n{str(Seq(rev_oriented).reverse_complement())}\n", encoding="utf-8")
+
+    paired = {"S4": {"F": [fwd], "R": [rev]}}
+    out = tmp_path / "overlap_audit.tsv"
+    monkeypatch.setattr(
+        "microseq_tests.pipeline.load_config",
+        lambda: {
+            "merge_two_reads": {"overlap_engine": "biopython", "anchor_tolerance_bases": 2, "min_overlap": 100, "min_identity": 0.8},
+            "overlap_eval": {"min_overlap": 100, "min_identity": 0.8, "min_quality": 20.0},
+        },
+    )
+    _write_overlap_audit(paired, out, min_overlap=10, min_identity=0.80, min_quality=20.0, quality_mode="warning")
+    row = dict(zip(out.read_text(encoding="utf-8").splitlines()[0].split("\t"), out.read_text(encoding="utf-8").splitlines()[1].split("\t")))
+    assert row["status"] == "not_end_anchored"
+
+
+def test_edlib_geometry_union_if_available() -> None:
+    """Validate Edlib candidates retain full union geometry when flanking overhangs are present."""
+    edlib = pytest.importorskip("edlib")
+    assert edlib is not None
+    overlap = "GGGTTTCCCAAAGGG"
+    fwd = "AAAA" + overlap
+    rev_oriented = overlap + "TTTT"
+    rev = str(Seq(rev_oriented).reverse_complement())
+    candidates = compute_overlap_candidates(fwd, rev, None, None, engine="edlib", end_anchor_tolerance=5)
+    best = max(candidates, key=lambda c: (c.identity, c.overlap_len, c.end_anchored))
+    assert best.orientation == "revcomp"
+    assert best.overlap_len == len(overlap)
+    assert best.identity >= 0.95
+    assert "AAAA" in best.aligned_fwd.replace("-", "")
+    assert "TTTT" in best.aligned_rev.replace("-", "")
+
+
+def test_edlib_cigar_indel_semantics_via_stub(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test for Edlib CIGAR I/D semantics using a stubbed Edlib module."""
+    class FakeEdlib:
+        @staticmethod
+        def align(_query, _target, mode="HW", task="path"):
+            assert mode == "HW"
+            assert task == "path"
+            # one match, insertion-to-target, one match, deletion-from-target, one match
+            return {"cigar": "1=1I1=1D1=", "locations": [(0, 4), (1, 4)]}
+
+    real_import = importlib.import_module
+
+    def fake_import(name, package=None):
+        if name == "edlib":
+            return FakeEdlib
+        return real_import(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", fake_import)
+    monkeypatch.setattr("builtins.__import__", __import__)
+
+    import sys
+    sys.modules["edlib"] = FakeEdlib
+    try:
+        cands = compute_overlap_candidates("ABCDE", "ABCDE", None, None, engine="edlib", end_anchor_tolerance=2)
+    finally:
+        sys.modules.pop("edlib", None)
+
+    # path-only safe mode: single location candidate per orientation
+    assert len(cands) == 2
+    fwd = next(c for c in cands if c.orientation == "forward")
+    assert fwd.aligned_fwd.count("-") >= 1
+    assert fwd.aligned_rev.count("-") >= 1
+
+
+def test_merge_report_includes_overlap_engine_column(tmp_path: Path) -> None:
+    """Ensure merge report output includes the overlap_engine metadata column."""
+    fwd_path = tmp_path / "S5_27F.fasta"
+    rev_path = tmp_path / "S5_1492R.fasta"
+    fwd_path.write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
+    rev_path.write_text(">r\n" + "A" * 120 + "\n", encoding="utf-8")
+
+    merge_two_reads(
+        sample_id="S5",
+        fwd_path=fwd_path,
+        rev_path=rev_path,
+        output_dir=tmp_path,
+        min_overlap=100,
+        min_identity=0.8,
+        min_quality=20.0,
+        quality_mode="warning",
+        overlap_engine="auto",
+    )
+
+    report_path = tmp_path / "S5_paired.merge_report.tsv"
+    header = report_path.read_text(encoding="utf-8").splitlines()[0].split("\t")
+    assert "overlap_engine" in header
+
+
+def test_engine_matrix_invariants_for_simple_pair(tmp_path: Path) -> None:
+    """Check merge invariants across overlap engines for a simple known-overlap read pair."""
+    overlap = "GGGTTTCCCAAAGGG"
+    fwd_seq = "AAAA" + overlap
+    rev_oriented = overlap + "TTTT"
+    rev_seq = str(Seq(rev_oriented).reverse_complement())
+
+    expected = "AAAA" + overlap + "TTTT"
+    engines = ["ungapped", "biopython", "auto"]
+    if importlib.util.find_spec("edlib") is not None:
+        engines.append("edlib")
+
+    for eng in engines:
+        d = tmp_path / eng
+        d.mkdir()
+        fwd_path = d / "S6_27F.fasta"
+        rev_path = d / "S6_1492R.fasta"
+        fwd_path.write_text(f">f\n{fwd_seq}\n", encoding="utf-8")
+        rev_path.write_text(f">r\n{rev_seq}\n", encoding="utf-8")
+
+        contig_path, report = merge_two_reads(
+            sample_id="S6",
+            fwd_path=fwd_path,
+            rev_path=rev_path,
+            output_dir=d,
+            min_overlap=10,
+            min_identity=0.8,
+            min_quality=5.0,
+            quality_mode="warning",
+            overlap_engine=eng,
+            anchor_tolerance_bases=5,
+        )
+        assert report.merge_status in {"merged", "ambiguous_overlap", "not_end_anchored", "identity_low", "overlap_too_short"}
+        if report.merge_status == "merged":
+            assert contig_path is not None
+            merged = str(next(SeqIO.parse(contig_path, "fasta")).seq)
+            assert merged.count("AAAA") == 1
+            assert merged.count("TTTT") == 1
+            assert len(merged) == len(fwd_seq) + len(rev_oriented) - report.overlap_len
+            assert merged == expected
+
+
+def test_gapped_overlap_identity_not_penalized_by_terminal_flanks() -> None:
+    """Verify terminal flanks do not reduce identity for gapped overlap scoring."""
+    overlap = "GGGTTTCCCAAAGGG"
+    fwd = "AAAA" + overlap
+    rev_oriented = overlap + "TTTT"
+    rev = str(Seq(rev_oriented).reverse_complement())
+
+    candidates = compute_overlap_candidates(fwd, rev, None, None, engine="biopython", end_anchor_tolerance=5)
+    best = max(candidates, key=lambda c: (c.identity, c.overlap_len))
+
+    assert best.orientation == "revcomp"
+    assert best.overlap_len == len(overlap)
+    assert best.identity == pytest.approx(1.0)
+    assert best.terminal_gap_cols > 0
+    assert best.end_anchored is True
+
+
+def test_merge_two_reads_gapped_preserves_union_geometry(tmp_path: Path) -> None:
+    """Ensure gapped merging preserves expected union sequence geometry."""
+    overlap = "GGGTTTCCCAAAGGG"
+    fwd_seq = "AAAA" + overlap
+    rev_oriented = overlap + "TTTT"
+    rev_seq = str(Seq(rev_oriented).reverse_complement())
+
+    fwd_path = tmp_path / "S2_27F.fasta"
+    rev_path = tmp_path / "S2_1492R.fasta"
+    fwd_path.write_text(f">f\n{fwd_seq}\n", encoding="utf-8")
+    rev_path.write_text(f">r\n{rev_seq}\n", encoding="utf-8")
+
+    contig_path, report = merge_two_reads(
+        sample_id="S2",
+        fwd_path=fwd_path,
+        rev_path=rev_path,
+        output_dir=tmp_path,
+        min_overlap=10,
+        min_identity=0.95,
+        min_quality=5.0,
+        quality_mode="warning",
+        overlap_engine="biopython",
+        anchor_tolerance_bases=5,
+    )
+
+    assert contig_path is not None
+    merged = next(SeqIO.parse(contig_path, "fasta"))
+    assert str(merged.seq) == ("AAAA" + overlap + "TTTT")
+    assert report.overlap_len == len(overlap)
+
+
+def test_end_anchoring_guard_rejects_internal_repeat_match(tmp_path: Path) -> None:
+    """Confirm end-anchoring guard rejects internal repeat-only alignments."""
+    motif = "GATTACAGATTACA"
+    fwd_seq = "AAAA" + motif + "CCCC"
+    rev_oriented = "TTTT" + motif + "GGGG"
+    rev_seq = str(Seq(rev_oriented).reverse_complement())
+
+    fwd_path = tmp_path / "S3_27F.fasta"
+    rev_path = tmp_path / "S3_1492R.fasta"
+    fwd_path.write_text(f">f\n{fwd_seq}\n", encoding="utf-8")
+    rev_path.write_text(f">r\n{rev_seq}\n", encoding="utf-8")
+
+    contig_path, report = merge_two_reads(
+        sample_id="S3",
+        fwd_path=fwd_path,
+        rev_path=rev_path,
+        output_dir=tmp_path,
+        min_overlap=10,
+        min_identity=0.90,
+        min_quality=5.0,
+        quality_mode="warning",
+        overlap_engine="biopython",
+        anchor_tolerance_bases=2,
+    )
+
+    assert contig_path is None
+    assert report.merge_status in {"not_end_anchored", "identity_low", "overlap_too_short"}
+
+
 def test_overlap_selection_prefers_long_feasible_candidate() -> None:
+    """Ensure overlap selection prefers the longest feasible candidate over shorter alternatives."""
     fwd = "A" * 55 + "C" * 44 + "G"
     rev = "A" + "A" * 55 + "C" * 44
 
@@ -322,6 +650,7 @@ def test_overlap_selection_prefers_long_feasible_candidate() -> None:
 
 
 def test_merge_two_reads_sets_qualities_absent_warning_and_cap_info(tmp_path: Path) -> None:
+    """Verify missing QUAL inputs produce a warning state and CAP-style info output."""
     fwd_path = tmp_path / "S1_27F.fasta"
     rev_path = tmp_path / "S1_1492R.fasta"
     fwd_path.write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
@@ -345,6 +674,7 @@ def test_merge_two_reads_sets_qualities_absent_warning_and_cap_info(tmp_path: Pa
 
 
 def test_parse_cap3_reports_merge_only_no_missing_info_warning(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Ensure merge-only parsing path avoids CAP3-missing warnings while surfacing merge fields."""
     asm_dir = tmp_path / "asm"
     sample_dir = asm_dir / "sample1"
     sample_dir.mkdir(parents=True)
@@ -366,6 +696,7 @@ def test_parse_cap3_reports_merge_only_no_missing_info_warning(tmp_path: Path, c
 
 
 def test_merge_two_reads_blocking_rejects_missing_qualities(tmp_path: Path) -> None:
+    """Ensure blocking quality mode rejects merges when QUAL data is absent."""
     fwd_path = tmp_path / "S1_27F.fasta"
     rev_path = tmp_path / "S1_1492R.fasta"
     fwd_path.write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
@@ -388,6 +719,7 @@ def test_merge_two_reads_blocking_rejects_missing_qualities(tmp_path: Path) -> N
 
 
 def test_merge_two_reads_uses_iupac_for_low_quality_tie(tmp_path: Path) -> None:
+    """Verify low-quality mismatch ties emit IUPAC ambiguity codes in merged consensus."""
     fwd_path = tmp_path / "S1_27F.fasta"
     rev_path = tmp_path / "S1_1492R.fasta"
     fwd_seq = "A" * 119 + "C"
@@ -420,6 +752,7 @@ def test_merge_two_reads_uses_iupac_for_low_quality_tie(tmp_path: Path) -> None:
 
 
 def test_select_best_overlap_uses_quality_to_resolve_top_candidates() -> None:
+    """Ensure candidate quality breaks identity ties during overlap selection."""
     candidates = [
         OverlapCandidate("forward", "A" * 120, "A" * 120, 0, 120, 1, 119 / 120, 30.0),
         OverlapCandidate("revcomp", "A" * 120, "A" * 120, 0, 120, 1, 119 / 120, 25.0),
@@ -440,6 +773,7 @@ def test_select_best_overlap_uses_quality_to_resolve_top_candidates() -> None:
 
 
 def test_select_best_overlap_marks_ambiguous_when_quality_tied() -> None:
+    """Ensure equal-quality top candidates are marked ambiguous."""
     candidates = [
         OverlapCandidate("forward", "A" * 120, "A" * 120, 0, 120, 1, 119 / 120, 30.0),
         OverlapCandidate("revcomp", "A" * 120, "A" * 120, 0, 120, 1, 119 / 120, 30.0),
@@ -457,6 +791,7 @@ def test_select_best_overlap_marks_ambiguous_when_quality_tied() -> None:
 
 
 def test_select_best_overlap_marks_ambiguous_without_quality_when_identity_tied() -> None:
+    """Ensure identity ties without quality data are marked ambiguous."""
     candidates = [
         OverlapCandidate("forward", "A" * 120, "A" * 120, 0, 120, 1, 119 / 120, None),
         OverlapCandidate("revcomp", "A" * 120, "A" * 120, 0, 120, 1, 119 / 120, None),
@@ -473,6 +808,7 @@ def test_select_best_overlap_marks_ambiguous_without_quality_when_identity_tied(
     assert chosen.status == "ambiguous_overlap"
 
 def test_merge_two_reads_routes_high_conflict_to_cap3(tmp_path: Path) -> None:
+    """Verify high-confidence conflicts can route merges to CAP3 instead of producing a contig."""
     fwd_path = tmp_path / "S1_27F.fasta"
     rev_path = tmp_path / "S1_1492R.fasta"
     fwd_seq = "A" * 119 + "C"
@@ -506,6 +842,7 @@ def test_merge_two_reads_routes_high_conflict_to_cap3(tmp_path: Path) -> None:
 
 
 def test_merge_two_reads_flags_high_conflict_on_merge(tmp_path: Path) -> None:
+    """Verify high-confidence conflicts can be flagged while still allowing a merge."""
     fwd_path = tmp_path / "S1_27F.fasta"
     rev_path = tmp_path / "S1_1492R.fasta"
     fwd_seq = "A" * 119 + "C"
@@ -540,6 +877,7 @@ def test_merge_two_reads_flags_high_conflict_on_merge(tmp_path: Path) -> None:
 
 
 def test_merge_two_reads_report_includes_high_conflict_column(tmp_path: Path) -> None:
+    """Ensure merge report includes the high_conflict_mismatches output column."""
     fwd_path = tmp_path / "S1_27F.fasta"
     rev_path = tmp_path / "S1_1492R.fasta"
     fwd_path.write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
