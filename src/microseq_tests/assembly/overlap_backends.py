@@ -592,3 +592,25 @@ def resolve_overlap_engine(engine: str) -> str:
         else:
             mode = "edlib"
     return mode
+
+
+def resolve_overlap_engine_strategy(strategy: str) -> str:
+    mode = str(strategy).strip().lower()
+    if mode not in {"single", "cascade", "all"}:
+        return "single"
+    return mode
+
+
+def resolve_overlap_engine_order(order: list[str] | tuple[str, ...] | None) -> list[str]:
+    if not order:
+        return ["ungapped", "biopython", "edlib"]
+    resolved: list[str] = []
+    for raw in order:
+        mode = resolve_overlap_engine(str(raw))
+        if mode not in {"ungapped", "biopython", "edlib"}:
+            raise ValueError(f"Unsupported overlap engine in order: {raw}")
+        if mode not in resolved:
+            resolved.append(mode)
+    if not resolved:
+        return ["ungapped", "biopython", "edlib"]
+    return resolved

@@ -1,5 +1,3 @@
-# microseq_tests/src/microseq_tests/trimming/quality_trim.py
-
 from __future__ import annotations
 
 import argparse
@@ -20,25 +18,30 @@ PathLike = str | Path
 
 
 def quality_trim(input_file: PathLike, output_file: PathLike, *, threads: int = 1, **kwargs) -> Path:
-    _ = kwargs
     cfg = load_config()
     trimm = cfg["tools"]["trimmomatic"]
+    trim_cfg = cfg.get("trim", {})
+    trimm_cfg = trim_cfg.get("trimmomatic", {})
+    window_size = int(kwargs.get("window_size", trimm_cfg.get("sliding_window_size", 5)))
+    window_q = int(kwargs.get("window_q", trimm_cfg.get("sliding_window_q", 20)))
+    min_len = int(kwargs.get("min_len", trim_cfg.get("min_len", 200)))
+    phred = int(kwargs.get("phred", trim_cfg.get("phred", 33)))
 
     cmd = [
         trimm,
         "SE",
         "-threads",
         str(threads),
-        "-phred33",
+        f"-phred{phred}",
         str(input_file),
         str(output_file),
-        "SLIDINGWINDOW:5:20",
-        "MINLEN:200",
+        f"SLIDINGWINDOW:{window_size}:{window_q}",
+        f"MINLEN:{min_len}",
     ]
 
     L.info("RUN Trimmomatic: %s", " ".join(cmd))
     try:
-        result = subprocess.run(cmd, check=True, stderr=subprocess.PIPE, text=True)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         if result.stdout:
             L.info("Trimmomatic stdout:\n%s", result.stdout)
         if result.stderr:
@@ -84,6 +87,14 @@ def _iter_fastq_sources(path: Path) -> Iterable[Path]:
 
 
 def trim_fastq_inputs(input_path: PathLike, trim_dir: PathLike, *, summary_tsv: PathLike | None = None) -> Path:
+    cfg = load_config()
+    trim_cfg = cfg.get("trim", {})
+    trimm_cfg = trim_cfg.get("trimmomatic", {})
+    policy_desc = (
+        f"trimmomatic:window={int(trimm_cfg.get('sliding_window_size', 5))},"
+        f"q={int(trimm_cfg.get('sliding_window_q', 20))},minlen={int(trim_cfg.get('min_len', 200))}"
+    )
+
     input_path = Path(input_path)
     trim_dir = Path(trim_dir)
     trim_dir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +145,7 @@ def trim_fastq_inputs(input_path: PathLike, trim_dir: PathLike, *, summary_tsv: 
                     avg_len=avg_len,
                     avg_q=avg_q,
                     qc_status=qc_status,
+                    trim_policy=policy_desc,
                 )
                 comb.write("\t".join(row_fields) + "\n")
             combined_row = build_trim_summary_row(
@@ -142,6 +154,7 @@ def trim_fastq_inputs(input_path: PathLike, trim_dir: PathLike, *, summary_tsv: 
                 avg_len=combined_avg_len,
                 avg_q=combined_avg_q,
                 qc_status="combined",
+                trim_policy=policy_desc,
             )
             comb.write("\t".join(combined_row) + "\n")
     return out_fq

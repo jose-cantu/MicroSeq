@@ -26,7 +26,7 @@ import shutil
 # pull the existing implementation functions
 from microseq_tests.trimming.quality_trim import  trim_fastq_inputs
 from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq as ab1_to_fastq
-from microseq_tests.trimming.biopy_trim import trim_folder as biopy_trim
+from microseq_tests.trimming.biopy_trim import trim_folder as biopy_trim, build_trim_summary_row
 from microseq_tests.trimming.fastq_to_fasta import (
     fastq_folder_to_fasta as fastq_to_fasta,
 )
@@ -40,7 +40,12 @@ from microseq_tests.assembly.overlap_utils import (
     select_best_overlap,
     pick_best_identity_candidate,
 )
-from microseq_tests.assembly.overlap_backends import compute_overlap_candidates, resolve_overlap_engine
+from microseq_tests.assembly.overlap_backends import (
+    compute_overlap_candidates,
+    resolve_overlap_engine,
+    resolve_overlap_engine_order,
+    resolve_overlap_engine_strategy,
+)
 from microseq_tests.assembly.pairing import  (
         DETECTORS, DupPolicy, _extract_well, _strip_well_token, extract_sid_orientation, iter_seq_files, make_pattern_detector) 
 from microseq_tests.assembly.cap3_report import parse_cap3_reports
@@ -72,6 +77,24 @@ PathLike = Union[str, Path]
 L = logging.getLogger(__name__)
 
 
+def _resolve_trim_policy(config: dict | None = None) -> dict[str, object]:
+    cfg = config if config is not None else load_config()
+    trim_cfg = cfg.get("trim", {})
+    sanger_cfg = trim_cfg.get("sanger", {})
+    trimm_cfg = trim_cfg.get("trimmomatic", {})
+    return {
+        "min_len": int(trim_cfg.get("min_len", 200)),
+        "phred": int(trim_cfg.get("phred", 33)),
+        "sanger_method": str(sanger_cfg.get("method", "mott")).strip().lower(),
+        "sanger_cutoff_q": int(sanger_cfg.get("cutoff_q", 20)),
+        "sanger_window_size": int(sanger_cfg.get("window_size", 5)),
+        "sanger_per_base_q": int(sanger_cfg.get("per_base_q", 20)),
+        "sanger_file_q_threshold": float(sanger_cfg.get("file_q_threshold", 20.0)),
+        "trimm_sliding_window_size": int(trimm_cfg.get("sliding_window_size", 5)),
+        "trimm_sliding_window_q": int(trimm_cfg.get("sliding_window_q", 20)),
+    }
+
+
 # ───────────────────────────────────────────────────────── trimming
 def run_trim(
     input_path: PathLike,
@@ -96,6 +119,13 @@ def run_trim(
 
     Returns 0 on success.
     """
+    cfg = load_config()
+    trim_policy = _resolve_trim_policy(cfg)
+    policy_desc = (
+        f"sanger={trim_policy['sanger_method']}(cutoff={trim_policy['sanger_cutoff_q']},window={trim_policy['sanger_window_size']},q={trim_policy['sanger_per_base_q']}); "
+        f"fastq=trimmomatic(window={trim_policy['trimm_sliding_window_size']}:{trim_policy['trimm_sliding_window_q']},minlen={trim_policy['min_len']})"
+    )
+    L.info("Trim policy: %s", policy_desc)
     work = Path(workdir)
     work.mkdir(parents=True, exist_ok=True)
     (work / "qc").mkdir(parents=True, exist_ok=True)
@@ -119,14 +149,24 @@ def run_trim(
                 shutil.copy2(ab1_source, dst / ab1_source.name)
         ab1_to_fastq(dst, fastq_dir)
 
-        biopy_trim(fastq_dir, work / "qc", combined_tsv=summary_tsv)
+        biopy_trim(
+            fastq_dir,
+            work / "qc",
+            combined_tsv=summary_tsv,
+            method=str(trim_policy["sanger_method"]),
+            cutoff_q=int(trim_policy["sanger_cutoff_q"]),
+            window_size=int(trim_policy["sanger_window_size"]),
+            per_base_q=int(trim_policy["sanger_per_base_q"]),
+            file_q_threshold=float(trim_policy["sanger_file_q_threshold"]),
+            min_len=int(trim_policy["min_len"]),
+        )
         trim_dir = work / "passed_qc_fastq"
     else:
         input_path = Path(input_path) 
         trim_dir = work / "qc"
         trim_fastq_inputs(input_path, trim_dir, summary_tsv=summary_tsv) 
 
-    primer_cfg = load_config().get("primer_trim", {})
+    primer_cfg = cfg.get("primer_trim", {})
     if primer_cfg.get("enabled"):
         forward_primers = primer_cfg.get("forward_primers", [])
         reverse_primers = primer_cfg.get("reverse_primers", [])
@@ -150,12 +190,33 @@ def run_trim(
                 iupac_mode=bool(primer_cfg.get("iupac_mode", True)),
                 report_path=primer_report,
                 orientation_resolver=_orientation_resolver,
+                post_quality_trim_enabled=bool(primer_cfg.get("post_quality_trim", {}).get("enabled", False)),
+                post_quality_method=str(primer_cfg.get("post_quality_trim", {}).get("method", trim_policy["sanger_method"])),
+                post_quality_cutoff_q=int(primer_cfg.get("post_quality_trim", {}).get("cutoff_q", trim_policy["sanger_cutoff_q"])),
+                post_quality_window_size=int(primer_cfg.get("post_quality_trim", {}).get("window_size", trim_policy["sanger_window_size"])),
+                post_quality_per_base_q=int(primer_cfg.get("post_quality_trim", {}).get("per_base_q", trim_policy["sanger_per_base_q"])),
+                post_quality_rescue_5prime_bases=int(primer_cfg.get("post_quality_trim", {}).get("rescue_5prime_bases", 0)),
+                post_quality_min_len=int(cfg.get("trim", {}).get("min_len", 200)),
             )
             if summary_tsv:
                 update_trim_summary(Path(summary_tsv), primer_results)
             trim_dir = primer_trim_dir
         else:
             L.warning("Primer trim enabled but no primers configured; skipping primer trimming.")
+
+
+    if summary_tsv:
+        summary_path = Path(summary_tsv)
+        if summary_path.exists():
+            with summary_path.open("a", encoding="utf-8") as sfh:
+                sfh.write("\t".join(build_trim_summary_row(
+                    file_name="_policy",
+                    reads=0,
+                    avg_len=0.0,
+                    avg_q=0.0,
+                    qc_status="policy",
+                    trim_policy=policy_desc,
+                )) + "\n")
 
     fastq_to_fasta(trim_dir, work / "qc" / "trimmed.fasta")
     L.info("Trim finished -> %s", work / "qc" / "trimmed.fasta")
@@ -552,7 +613,8 @@ def _resolve_overlap_thresholds(cfg: dict | None = None) -> tuple[int, float, fl
     config = cfg if cfg is not None else load_config()
     overlap_cfg = config.get("overlap_eval", {})
     merge_cfg = config.get("merge_two_reads", {})
-    overlap_engine = resolve_overlap_engine(str(merge_cfg.get("overlap_engine", "ungapped")))
+    configured_overlap_engine = str(merge_cfg.get("overlap_engine", "ungapped")).strip().lower()
+    overlap_engine = resolve_overlap_engine(configured_overlap_engine)
     anchor_tolerance_bases = int(merge_cfg.get("anchor_tolerance_bases", 30))
     min_overlap = int(overlap_cfg.get("min_overlap", merge_cfg.get("min_overlap", 100)))
     min_identity = float(overlap_cfg.get("min_identity", merge_cfg.get("min_identity", 0.8)))
@@ -589,7 +651,16 @@ def _write_overlap_audit(
 ) -> dict[str, str]:
     config = load_config()
     merge_cfg = config.get("merge_two_reads", {})
-    overlap_engine = resolve_overlap_engine(str(merge_cfg.get("overlap_engine", "ungapped")))
+    configured_overlap_engine = str(merge_cfg.get("overlap_engine", "ungapped")).strip().lower()
+    overlap_engine = resolve_overlap_engine(configured_overlap_engine)
+    overlap_strategy = resolve_overlap_engine_strategy(str(merge_cfg.get("overlap_engine_strategy", "single")))
+    raw_order = merge_cfg.get("overlap_engine_order", ["ungapped", "biopython", "edlib"])
+    if isinstance(raw_order, str):
+        raw_order = [tok.strip() for tok in raw_order.split(",") if tok.strip()]
+    if not isinstance(raw_order, (list, tuple)):
+        raw_order = ["ungapped", "biopython", "edlib"]
+    engine_order = resolve_overlap_engine_order(raw_order)
+
     anchor_tolerance_bases = int(merge_cfg.get("anchor_tolerance_bases", 30))
 
     if min_overlap is None or min_identity is None or min_quality is None:
@@ -599,119 +670,169 @@ def _write_overlap_audit(
         min_quality = cfg_quality if min_quality is None else min_quality
 
     output_tsv.parent.mkdir(parents=True, exist_ok=True)
+    engines_tsv = output_tsv.with_name("overlap_audit_engines.tsv")
     status_map: dict[str, str] = {}
-    with output_tsv.open("w", encoding="utf-8") as fh:
+    with output_tsv.open("w", encoding="utf-8") as fh, engines_tsv.open("w", encoding="utf-8") as efh:
         fh.write(
-            "sample_id\toverlap_len\toverlap_identity\toverlap_quality\torientation\tstatus"
-            "\tbest_identity\tbest_identity_orientation\tanchoring_feasible\toverlap_engine\n"
+            "sample_id	overlap_len	overlap_identity	overlap_quality	orientation	status"
+            "	best_identity	best_identity_orientation	anchoring_feasible	end_anchored_possible"
+            "	selected_engine	fallback_used	overlap_engine\n"
+        )
+        efh.write(
+            "sample_id	engine	orientation	status	overlap_len	identity	overlap_quality"
+            "	end_anchored	anchoring_feasible	selected_for_merge\n"
         )
         for sample_id, entries in sorted(paired_samples.items()):
             if not entries["F"] or not entries["R"]:
                 status = "overlap_missing_reads"
                 status_map[sample_id] = status
-                fh.write(f"{sample_id}\t0\t0\t\t\t{status}\t0\t\tno\t{overlap_engine}\n")
+                fh.write(f"{sample_id}	0	0			{status}	0		no	no	{overlap_engine}	no	{configured_overlap_engine}\n")
                 continue
             fwd_path = entries["F"][0]
             rev_path = entries["R"][0]
             if not fwd_path.exists() or not rev_path.exists():
                 status = "overlap_missing_reads"
                 status_map[sample_id] = status
-                fh.write(f"{sample_id}\t0\t0\t\t\t{status}\t0\t\tno\t{overlap_engine}\n")
+                fh.write(f"{sample_id}	0	0			{status}	0		no	no	{overlap_engine}	no	{configured_overlap_engine}\n")
                 continue
             fwd_record = _read_first_record(fwd_path, "fasta")
             rev_record = _read_first_record(rev_path, "fasta")
             if fwd_record is None or rev_record is None:
                 status = "overlap_missing_reads"
                 status_map[sample_id] = status
-                fh.write(f"{sample_id}\t0\t0\t\t\t{status}\t0\t\tno\t{overlap_engine}\n")
+                fh.write(f"{sample_id}	0	0			{status}	0		no	no	{overlap_engine}	no	{configured_overlap_engine}\n")
                 continue
 
             fwd_qual = _load_qual_record(Path(f"{fwd_path}.qual"), fwd_record.id)
             rev_qual = _load_qual_record(Path(f"{rev_path}.qual"), rev_record.id)
-            if overlap_engine == "ungapped":
-                overlap_candidates = iter_end_anchored_overlaps(
-                    str(fwd_record.seq),
-                    str(rev_record.seq),
-                    fwd_qual,
-                    rev_qual,
-                )
-            else:
-                backend = compute_overlap_candidates(
-                    str(fwd_record.seq),
-                    str(rev_record.seq),
-                    fwd_qual,
-                    rev_qual,
-                    engine=overlap_engine,
-                    end_anchor_tolerance=anchor_tolerance_bases,
-                )
-                overlap_candidates = [
-                    AlignedOverlapCandidate(
-                        orientation=r.orientation,
-                        overlap_len=r.overlap_len,
-                        mismatches=r.mismatches,
-                        identity=r.identity,
-                        overlap_quality=r.overlap_quality,
-                        aligned_fwd=r.aligned_fwd,
-                        aligned_rev=r.aligned_rev,
-                        indels=r.indels,
-                        cigar=r.cigar,
-                        overlap_span_cols=r.overlap_span_cols,
-                        terminal_gap_cols=r.terminal_gap_cols,
-                        internal_indels=r.internal_indels,
-                        fwd_overlap_start=r.fwd_overlap_start,
-                        fwd_overlap_end=r.fwd_overlap_end,
-                        rev_overlap_start=r.rev_overlap_start,
-                        rev_overlap_end=r.rev_overlap_end,
-                        end_anchored=r.end_anchored,
+
+            engines_to_run = [overlap_engine] if overlap_strategy == "single" else engine_order
+            selected_engine = engines_to_run[0]
+            selected_overlap: OverlapResult | None = None
+            best_identity_val = 0.0
+            best_identity_orientation = ""
+            per_engine_rows: list[tuple[str, OverlapResult, str, bool, bool, bool]] = []
+
+            for idx, engine_name in enumerate(engines_to_run):
+                if engine_name == "ungapped":
+                    overlap_candidates = list(iter_end_anchored_overlaps(
+                        str(fwd_record.seq),
+                        str(rev_record.seq),
+                        fwd_qual,
+                        rev_qual,
+                    ))
+                else:
+                    backend = compute_overlap_candidates(
+                        str(fwd_record.seq),
+                        str(rev_record.seq),
+                        fwd_qual,
+                        rev_qual,
+                        engine=engine_name,
+                        end_anchor_tolerance=anchor_tolerance_bases,
                     )
-                    for r in backend
-                ]
-            overlap = select_best_overlap(
-                overlap_candidates,
-                min_overlap=min_overlap,
-                min_identity=min_identity,
-                min_quality=min_quality,
-                quality_mode=quality_mode,
-            )
-            best_identity = pick_best_identity_candidate(overlap_candidates, min_overlap=min_overlap)
-            has_anchor_info = any(hasattr(c, "end_anchored") for c in overlap_candidates)
-            anchored_and_feasible = any(
-                getattr(c, "end_anchored", True)
-                and c.overlap_len >= min_overlap
-                and c.identity >= min_identity
-                and (
-                    quality_mode != "blocking"
-                    or (c.overlap_quality is not None and c.overlap_quality >= min_quality)
-                )
-                for c in overlap_candidates
-            )
-            if has_anchor_info and not anchored_and_feasible:
-                status = "not_end_anchored"
-            elif overlap.status in {"not_end_anchored", "ambiguous_overlap"}:
-                status = overlap.status
-            else:
-                status = _classify_overlap_status(
-                    overlap.overlap_len,
-                    overlap.identity,
-                    overlap.overlap_quality,
+                    overlap_candidates = [
+                        AlignedOverlapCandidate(
+                            orientation=r.orientation,
+                            overlap_len=r.overlap_len,
+                            mismatches=r.mismatches,
+                            identity=r.identity,
+                            overlap_quality=r.overlap_quality,
+                            aligned_fwd=r.aligned_fwd,
+                            aligned_rev=r.aligned_rev,
+                            indels=r.indels,
+                            cigar=r.cigar,
+                            overlap_span_cols=r.overlap_span_cols,
+                            terminal_gap_cols=r.terminal_gap_cols,
+                            internal_indels=r.internal_indels,
+                            fwd_overlap_start=r.fwd_overlap_start,
+                            fwd_overlap_end=r.fwd_overlap_end,
+                            rev_overlap_start=r.rev_overlap_start,
+                            rev_overlap_end=r.rev_overlap_end,
+                            end_anchored=r.end_anchored,
+                        )
+                        for r in backend
+                    ]
+                overlap = select_best_overlap(
+                    overlap_candidates,
                     min_overlap=min_overlap,
                     min_identity=min_identity,
                     min_quality=min_quality,
                     quality_mode=quality_mode,
                 )
-            status_map[sample_id] = status
-            overlap_quality = overlap.overlap_quality
-            best_identity_val = overlap.identity if best_identity is None else best_identity.identity
-            best_identity_orientation = overlap.orientation if best_identity is None else best_identity.orientation
-            anchoring_feasible = "yes" if (not has_anchor_info or anchored_and_feasible) else "no"
-            fh.write(
-                f"{sample_id}\t{overlap.overlap_len}\t{overlap.identity:.4f}\t"
-                f"{'' if overlap_quality is None else f'{overlap_quality:.2f}'}\t"
-                f"{overlap.orientation}\t{status}\t{best_identity_val:.4f}\t{best_identity_orientation}"
-                f"\t{anchoring_feasible}\t{overlap_engine}\n"
-            )
-    return status_map
+                best_identity = pick_best_identity_candidate(overlap_candidates, min_overlap=min_overlap)
+                end_anchored_possible = any(getattr(c, "end_anchored", True) for c in overlap_candidates)
+                anchoring_feasible = any(
+                    getattr(c, "end_anchored", True)
+                    and c.overlap_len >= min_overlap
+                    and c.identity >= min_identity
+                    and (
+                        quality_mode != "blocking"
+                        or (c.overlap_quality is not None and c.overlap_quality >= min_quality)
+                    )
+                    for c in overlap_candidates
+                )
+                if overlap.status in {"not_end_anchored", "ambiguous_overlap"}:
+                    status = overlap.status
+                else:
+                    status = _classify_overlap_status(
+                        overlap.overlap_len,
+                        overlap.identity,
+                        overlap.overlap_quality,
+                        min_overlap=min_overlap,
+                        min_identity=min_identity,
+                        min_quality=min_quality,
+                        quality_mode=quality_mode,
+                    )
+                per_engine_rows.append((engine_name, overlap, status, end_anchored_possible, anchoring_feasible, status == "ok"))
 
+                if selected_overlap is None:
+                    selected_engine = engine_name
+                    selected_overlap = overlap
+                    best_identity_val = overlap.identity if best_identity is None else best_identity.identity
+                    best_identity_orientation = overlap.orientation if best_identity is None else best_identity.orientation
+                if overlap_strategy == "cascade" and status == "ok":
+                    selected_engine = engine_name
+                    selected_overlap = overlap
+                    best_identity_val = overlap.identity if best_identity is None else best_identity.identity
+                    best_identity_orientation = overlap.orientation if best_identity is None else best_identity.orientation
+                    break
+                if overlap_strategy == "all" and selected_overlap is not None:
+                    prev_idx = engines_to_run.index(selected_engine)
+                    prev_status = next(r[2] for r in per_engine_rows if r[0] == selected_engine)
+                    prev_key = (1 if prev_status == "ok" else 0, selected_overlap.identity, selected_overlap.overlap_len, -prev_idx)
+                    curr_key = (1 if status == "ok" else 0, overlap.identity, overlap.overlap_len, -idx)
+                    if curr_key > prev_key:
+                        selected_engine = engine_name
+                        selected_overlap = overlap
+                        best_identity_val = overlap.identity if best_identity is None else best_identity.identity
+                        best_identity_orientation = overlap.orientation if best_identity is None else best_identity.orientation
+
+            row = next((r for r in per_engine_rows if r[0] == selected_engine), None)
+            selected_status = row[2] if row else "overlap_missing_reads"
+            end_anchored_possible_selected = row[3] if row else False
+            anchoring_feasible_selected = row[4] if row else False
+            status_map[sample_id] = selected_status
+
+            if selected_overlap is None:
+                selected_overlap = OverlapResult("forward", 0, 0.0, 0, None, "", "")
+
+            fallback_used = "yes" if (overlap_strategy in {"cascade", "all"} and selected_engine != engines_to_run[0]) else "no"
+            overlap_quality = selected_overlap.overlap_quality
+            fh.write(
+                f"{sample_id}	{selected_overlap.overlap_len}	{selected_overlap.identity:.4f}	"
+                f"{'' if overlap_quality is None else f'{overlap_quality:.2f}'}	"
+                f"{selected_overlap.orientation}	{selected_status}	{best_identity_val:.4f}	{best_identity_orientation}"
+                f"	{'yes' if anchoring_feasible_selected else 'no'}	{'yes' if end_anchored_possible_selected else 'no'}"
+                f"\t{selected_engine}\t{fallback_used}\t{configured_overlap_engine}\n"
+            )
+            for engine_name, overlap, status, end_anchored_possible_e, anchoring_feasible_e, _selected_ok in per_engine_rows:
+                efh.write(
+                    f"{sample_id}	{engine_name}	{overlap.orientation}	{status}	{overlap.overlap_len}"
+                    f"	{overlap.identity:.4f}	{'' if overlap.overlap_quality is None else f'{overlap.overlap_quality:.2f}'}"
+                    f"	{'yes' if end_anchored_possible_e else 'no'}	{'yes' if anchoring_feasible_e else 'no'}"
+                    f"\t{'yes' if engine_name == selected_engine else 'no'}\n"
+                )
+    return status_map
 
 def _build_blast_inputs(
     asm_dir: Path,

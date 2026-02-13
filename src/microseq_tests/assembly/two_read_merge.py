@@ -15,7 +15,12 @@ from microseq_tests.assembly.overlap_utils import (
     iter_end_anchored_overlaps,
     select_best_overlap,
 )
-from microseq_tests.assembly.overlap_backends import compute_overlap_candidates, resolve_overlap_engine
+from microseq_tests.assembly.overlap_backends import (
+    compute_overlap_candidates,
+    resolve_overlap_engine,
+    resolve_overlap_engine_order,
+    resolve_overlap_engine_strategy,
+)
 
 _IUPAC_PAIR_MAP = {
     frozenset({"A", "G"}): "R",
@@ -179,6 +184,8 @@ def merge_two_reads(
     high_conflict_q_threshold: int = 30,
     high_conflict_action: str = "flag",
     overlap_engine: str = "ungapped",
+    overlap_engine_strategy: str = "single",
+    overlap_engine_order: list[str] | None = None,
     anchor_tolerance_bases: int = 30,
 ) -> tuple[Path | None, MergeReport]:
     f_count = _count_fasta_records(fwd_path)
@@ -198,23 +205,53 @@ def merge_two_reads(
     qualities = "present" if fwd_qual is not None and rev_qual is not None else "absent"
 
     resolved_overlap_engine = resolve_overlap_engine(overlap_engine)
-    if resolved_overlap_engine == "ungapped":
-        candidates = iter_end_anchored_overlaps(
-            str(fwd_record.seq),
-            str(rev_record.seq),
-            fwd_qual,
-            rev_qual,
-        )
-    else:
+    strategy = resolve_overlap_engine_strategy(overlap_engine_strategy)
+    order = resolve_overlap_engine_order(overlap_engine_order)
+    engines_to_run = [resolved_overlap_engine] if strategy == "single" else order
+
+    def _classify_merge_status(overlap_result: OverlapResult) -> str:
+        if overlap_result.status in {"not_end_anchored", "ambiguous_overlap"}:
+            return overlap_result.status
+        if overlap_result.overlap_len < min_overlap:
+            return "overlap_too_short"
+        if overlap_result.identity < min_identity:
+            return "identity_low"
+        if quality_mode == "blocking" and (
+            overlap_result.overlap_quality is None or overlap_result.overlap_quality < min_quality
+        ):
+            return "quality_low"
+        return "merged"
+
+    def _candidates_for_engine(engine_name: str) -> list[AlignedOverlapCandidate]:
+        if engine_name == "ungapped":
+            raw = iter_end_anchored_overlaps(
+                str(fwd_record.seq),
+                str(rev_record.seq),
+                fwd_qual,
+                rev_qual,
+            )
+            return [
+                AlignedOverlapCandidate(
+                    orientation=c.orientation,
+                    overlap_len=c.overlap_len,
+                    mismatches=c.mismatches,
+                    identity=c.identity,
+                    overlap_quality=c.overlap_quality,
+                    aligned_fwd=c.as_result().aligned_fwd,
+                    aligned_rev=c.as_result().aligned_rev,
+                    end_anchored=True,
+                )
+                for c in raw
+            ]
         backend_results = compute_overlap_candidates(
             str(fwd_record.seq),
             str(rev_record.seq),
             fwd_qual,
             rev_qual,
-            engine=resolved_overlap_engine,
+            engine=engine_name,
             end_anchor_tolerance=anchor_tolerance_bases,
         )
-        candidates = [
+        return [
             AlignedOverlapCandidate(
                 orientation=result.orientation,
                 overlap_len=result.overlap_len,
@@ -236,15 +273,51 @@ def merge_two_reads(
             )
             for result in backend_results
         ]
-    overlap: OverlapResult = select_best_overlap(
-        candidates,
-        min_overlap=min_overlap,
-        min_identity=min_identity,
-        min_quality=min_quality,
-        quality_mode=quality_mode,
-        ambiguity_identity_delta=ambiguity_identity_delta,
-        ambiguity_quality_epsilon=ambiguity_quality_epsilon,
-    )
+
+    selected_engine = engines_to_run[0]
+    selected_overlap: OverlapResult | None = None
+    selected_merge_status = "overlap_too_short"
+    candidates: list[AlignedOverlapCandidate] = []
+    for idx, engine_name in enumerate(engines_to_run):
+        engine_candidates = _candidates_for_engine(engine_name)
+        overlap_try: OverlapResult = select_best_overlap(
+            engine_candidates,
+            min_overlap=min_overlap,
+            min_identity=min_identity,
+            min_quality=min_quality,
+            quality_mode=quality_mode,
+            ambiguity_identity_delta=ambiguity_identity_delta,
+            ambiguity_quality_epsilon=ambiguity_quality_epsilon,
+        )
+        status_try = _classify_merge_status(overlap_try)
+
+        if selected_overlap is None:
+            selected_engine = engine_name
+            selected_overlap = overlap_try
+            selected_merge_status = status_try
+            candidates = engine_candidates
+        if strategy == "cascade" and status_try == "merged":
+            selected_engine = engine_name
+            selected_overlap = overlap_try
+            selected_merge_status = status_try
+            candidates = engine_candidates
+            break
+        if strategy == "all" and selected_overlap is not None:
+            prev_score = (
+                1 if selected_merge_status == "merged" else 0,
+                selected_overlap.identity,
+                selected_overlap.overlap_len,
+                -engines_to_run.index(selected_engine),
+            )
+            cur_score = (1 if status_try == "merged" else 0, overlap_try.identity, overlap_try.overlap_len, -idx)
+            if cur_score > prev_score:
+                selected_engine = engine_name
+                selected_overlap = overlap_try
+                selected_merge_status = status_try
+                candidates = engine_candidates
+
+    resolved_overlap_engine = selected_engine
+    overlap = selected_overlap if selected_overlap is not None else OverlapResult("forward", 0, 0.0, 0, None, "", "")
     rev_qual_for_consensus = rev_qual
     if overlap.orientation == "revcomp" and rev_qual is not None:
         rev_qual_for_consensus = list(reversed(rev_qual))

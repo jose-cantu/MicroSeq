@@ -266,6 +266,8 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
     merge_min_overlap = int(overlap_cfg.get("min_overlap", merge_cfg.get("min_overlap", 100)))
     merge_min_identity = float(overlap_cfg.get("min_identity", merge_cfg.get("min_identity", 0.8)))
     merge_overlap_engine = str(merge_cfg.get("overlap_engine", "ungapped")).strip().lower()
+    merge_overlap_engine_strategy = str(merge_cfg.get("overlap_engine_strategy", "single")).strip().lower()
+    merge_overlap_engine_order = merge_cfg.get("overlap_engine_order", ["ungapped", "biopython", "edlib"])
     merge_overlap_engine_resolved = resolve_overlap_engine(merge_overlap_engine)
     merge_anchor_tolerance_bases = int(merge_cfg.get("anchor_tolerance_bases", 30))
     merge_min_quality = float(overlap_cfg.get("min_quality", 20.0))
@@ -418,6 +420,8 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
                         high_conflict_q_threshold=high_conflict_q_threshold,
                         high_conflict_action=high_conflict_action,
                         overlap_engine=merge_overlap_engine,
+                        overlap_engine_strategy=merge_overlap_engine_strategy,
+                        overlap_engine_order=merge_overlap_engine_order if isinstance(merge_overlap_engine_order, list) else None,
                         anchor_tolerance_bases=merge_anchor_tolerance_bases,
                     )
                 except MergeInputError as exc:
@@ -429,7 +433,8 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
                     )
                 else:
                     metadata_lines.append(
-                        f"{sample_key}\tmerge_two_reads engine={merge_overlap_engine_resolved} "
+                        f"{sample_key}\tmerge_two_reads engine={report.overlap_engine} "
+                        f"strategy={merge_overlap_engine_strategy} order={merge_overlap_engine_order} "
                         f"orientation={report.orientation} overlap={report.overlap_len} identity={report.identity:.4f}"
                     )
                     if contig_path:

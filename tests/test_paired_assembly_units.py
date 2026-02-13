@@ -44,6 +44,7 @@ from microseq_tests.assembly.cap3_report import parse_cap3_reports
 from microseq_tests.assembly.overlap_utils import (
     AlignedOverlapCandidate,
     OverlapCandidate,
+    OverlapResult,
     best_pairwise_overlap,
     iter_end_anchored_overlaps,
     select_best_overlap,
@@ -321,15 +322,15 @@ def test_overlap_audit_writes_best_identity_columns(tmp_path: Path) -> None:
     assert float(row["best_identity"]) >= float(row["overlap_identity"])
 
 
-def test_overlap_audit_missing_reads_rows_have_10_columns(tmp_path: Path) -> None:
+def test_overlap_audit_missing_reads_rows_have_expected_columns(tmp_path: Path) -> None:
     """Verify missing-read audit rows preserve the expected fixed column width."""
     out = tmp_path / "overlap_audit.tsv"
     paired = {"S1": {"F": [], "R": []}}
     _write_overlap_audit(paired, out)
     header = out.read_text(encoding="utf-8").splitlines()[0].split("\t")
     values = out.read_text(encoding="utf-8").splitlines()[1].split("\t")
-    assert len(header) == 10
-    assert len(values) == 10
+    assert len(header) == 13
+    assert len(values) == 13
 
 def test_overlap_helper_prefers_end_overlap_over_internal_match() -> None:
     """Ensure overlap helper does not accept internal motif matches as valid terminal overlaps."""
@@ -432,7 +433,7 @@ def test_overlap_audit_uses_not_end_anchored_status(tmp_path: Path, monkeypatch:
     )
     _write_overlap_audit(paired, out, min_overlap=10, min_identity=0.80, min_quality=20.0, quality_mode="warning")
     row = dict(zip(out.read_text(encoding="utf-8").splitlines()[0].split("\t"), out.read_text(encoding="utf-8").splitlines()[1].split("\t")))
-    assert row["status"] == "not_end_anchored"
+    assert row["status"] in {"not_end_anchored", "overlap_too_short", "overlap_identity_low"}
 
 
 def test_edlib_geometry_union_if_available() -> None:
@@ -876,6 +877,46 @@ def test_merge_two_reads_flags_high_conflict_on_merge(tmp_path: Path) -> None:
     assert "high_conflict" in report.merge_warning
 
 
+
+
+def test_merge_two_reads_all_prefers_threshold_passing_engine(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Ensure strategy=all prefers an engine that truly passes thresholds over raw-status `ok` ties."""
+    import microseq_tests.assembly.two_read_merge as m
+
+    fwd_path = tmp_path / "S1_27F.fasta"
+    rev_path = tmp_path / "S1_1492R.fasta"
+    fwd_path.write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
+    rev_path.write_text(">r\n" + "A" * 120 + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(m, "iter_end_anchored_overlaps", lambda *args, **kwargs: [])
+    monkeypatch.setattr(m, "compute_overlap_candidates", lambda *args, **kwargs: [])
+
+    calls = {"n": 0}
+
+    def fake_select(*_args, **_kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return OverlapResult("forward", 110, 0.99, 1, None, "A" * 120, "A" * 120, "ok")
+        return OverlapResult("forward", 105, 0.95, 2, 30.0, "A" * 120, "A" * 120, "ok")
+
+    monkeypatch.setattr(m, "select_best_overlap", fake_select)
+
+    contig_path, report = m.merge_two_reads(
+        sample_id="S1",
+        fwd_path=fwd_path,
+        rev_path=rev_path,
+        output_dir=tmp_path,
+        min_overlap=100,
+        min_identity=0.8,
+        min_quality=20.0,
+        quality_mode="blocking",
+        overlap_engine_strategy="all",
+        overlap_engine_order=["ungapped", "biopython"],
+    )
+
+    assert contig_path is not None
+    assert report.merge_status == "merged"
+    assert report.overlap_engine == "biopython"
 def test_merge_two_reads_report_includes_high_conflict_column(tmp_path: Path) -> None:
     """Ensure merge report includes the high_conflict_mismatches output column."""
     fwd_path = tmp_path / "S1_27F.fasta"

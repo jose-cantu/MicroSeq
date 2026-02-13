@@ -912,7 +912,7 @@ class MainWindow(QMainWindow):
         self.blast_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.blast_table.itemSelectionChanged.connect(self._update_detail_panel)
 
-        self.diagnostics_table = QTableWidget(0, 10)
+        self.diagnostics_table = QTableWidget(0, 13)
         self.diagnostics_table.setHorizontalHeaderLabels(
             [
                 "sample_id",
@@ -924,6 +924,9 @@ class MainWindow(QMainWindow):
                 "best_identity",
                 "best_identity_orientation",
                 "anchoring_feasible",
+                "end_anchored_possible",
+                "selected_engine",
+                "fallback_used",
                 "overlap_engine",
             ]
         )
@@ -2109,6 +2112,9 @@ class MainWindow(QMainWindow):
                 self._fmt_table_value(row.get("best_identity", "")),
                 self._fmt_table_value(row.get("best_identity_orientation", "")),
                 self._fmt_table_value(row.get("anchoring_feasible", "")),
+                self._fmt_table_value(row.get("end_anchored_possible", "")),
+                self._fmt_table_value(row.get("selected_engine", "")),
+                self._fmt_table_value(row.get("fallback_used", "")),
                 self._fmt_table_value(row.get("overlap_engine", "")),
             ]
             for col, value in enumerate(row_values):
@@ -2124,7 +2130,10 @@ class MainWindow(QMainWindow):
                 "best_identity": row_values[6],
                 "best_identity_orientation": row_values[7],
                 "anchoring_feasible": row_values[8],
-                "overlap_engine": row_values[9],
+                "end_anchored_possible": row_values[9],
+                "selected_engine": row_values[10],
+                "fallback_used": row_values[11],
+                "overlap_engine": row_values[12],
             }
         self._configure_table_view(self.diagnostics_table)
 
@@ -2234,8 +2243,11 @@ class MainWindow(QMainWindow):
                 f"q {audit.get('overlap_quality', '—')}, "
                 f"orient {audit.get('orientation', '—')}, "
                 f"best-id {audit.get('best_identity', '—')} @ {audit.get('best_identity_orientation', '—')}, "
-                f"anchored {audit.get('anchoring_feasible', '—')}, "
-                f"engine {audit.get('overlap_engine', '—')})"
+                f"anchored-feasible {audit.get('anchoring_feasible', '—')}, "
+                f"end-anchored-possible {audit.get('end_anchored_possible', '—')}, "
+                f"selected-engine {audit.get('selected_engine', '—')}, "
+                f"fallback {audit.get('fallback_used', '—')}, "
+                f"configured-engine {audit.get('overlap_engine', '—')})"
             )
         else:
             statuses = [audit.get("status", "—") for audit in audit_values if audit]

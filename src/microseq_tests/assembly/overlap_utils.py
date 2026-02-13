@@ -295,6 +295,7 @@ def select_best_overlap(
     ambiguity_identity_delta: float = 0.0,
     ambiguity_quality_epsilon: float = 0.1,
 ) -> OverlapResult:
+    candidates = list(candidates)
     feasible = [
         c
         for c in candidates
@@ -332,6 +333,11 @@ def select_best_overlap(
     best_overall = _pick_best_candidate(candidates)
     if best_overall is None:
         return OverlapResult("forward", 0, 0.0, 0, None, "", "")
+
+    anchored_candidates = [c for c in candidates if not hasattr(c, "end_anchored") or getattr(c, "end_anchored")]
+    if anchored_candidates:
+        return _pick_best_candidate(anchored_candidates).as_result()
+
     if hasattr(best_overall, "end_anchored") and not getattr(best_overall, "end_anchored"):
         result = best_overall.as_result()
         return OverlapResult(

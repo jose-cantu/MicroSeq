@@ -7,6 +7,8 @@ from typing import Callable, Iterable
 
 from Bio import SeqIO
 
+from microseq_tests.trimming.biopy_trim import trim_record_quality
+
 
 IUPAC_BASES: dict[str, set[str]] = {
     "A": {"A"},
@@ -42,6 +44,8 @@ class PrimerTrimResult:
     orientation_source: str
     iupac_mode: str
     primer_bases_trimmed_total: int
+    post_trim_bases_removed_total: int = 0
+    post_trim_final_len_avg: float = 0.0
 
 
 def _best_primer_match(
@@ -96,6 +100,13 @@ def trim_primer_fastqs(
     iupac_mode: bool = True,
     report_path: Path | None = None,
     orientation_resolver: Callable[[str], str | None] | None = None,
+    post_quality_trim_enabled: bool = False,
+    post_quality_method: str = "mott",
+    post_quality_cutoff_q: int = 22,
+    post_quality_window_size: int = 5,
+    post_quality_per_base_q: int = 22,
+    post_quality_rescue_5prime_bases: int = 0,
+    post_quality_min_len: int = 50,
 ) -> dict[str, PrimerTrimResult]:
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
@@ -115,6 +126,8 @@ def trim_primer_fastqs(
         offset_total = 0
         primer_hits: set[str] = set()
         trimmed_records = []
+        post_trim_bases_removed = 0
+        post_trim_final_len_sum = 0
         orientation_used = "combined"
         orientation_source = "combined"
 
@@ -152,19 +165,37 @@ def trim_primer_fastqs(
                 iupac_mode=iupac_mode,
             )
             if match is None:
-                trimmed_records.append(record)
-                continue
-            mismatches, offset, p_len, primer = match
-            trim_len = offset + p_len
-            if trim_len >= len(record):
-                continue
-            trimmed = record[trim_len:]
-            trimmed_records.append(trimmed)
-            reads_trimmed += 1
-            bases_trimmed += trim_len
-            mismatches_total += mismatches
-            offset_total += offset
-            primer_hits.add(primer)
+                rec_for_post = record
+            else:
+                mismatches, offset, p_len, primer = match
+                trim_len = offset + p_len
+                if trim_len >= len(record):
+                    continue
+                rec_for_post = record[trim_len:]
+                reads_trimmed += 1
+                bases_trimmed += trim_len
+                mismatches_total += mismatches
+                offset_total += offset
+                primer_hits.add(primer)
+
+            if post_quality_trim_enabled:
+                post_trimmed, left_trim_post, right_trim_post = trim_record_quality(
+                    rec_for_post,
+                    method=post_quality_method,
+                    cutoff_q=post_quality_cutoff_q,
+                    window_size=post_quality_window_size,
+                    per_base_q=post_quality_per_base_q,
+                    rescue_5prime_bases=post_quality_rescue_5prime_bases,
+                    min_len=post_quality_min_len,
+                )
+                if post_trimmed is None:
+                    continue
+                post_trim_bases_removed += left_trim_post + right_trim_post
+                rec_for_post = post_trimmed
+
+            post_trim_final_len_sum += len(rec_for_post)
+            trimmed_records.append(rec_for_post)
+            continue
 
         out_path = output_dir / fastq_path.name
         SeqIO.write(trimmed_records, out_path, "fastq")
@@ -172,6 +203,7 @@ def trim_primer_fastqs(
         avg_mismatches = mismatches_total / reads_trimmed if reads_trimmed else 0.0
         avg_offset = offset_total / reads_trimmed if reads_trimmed else 0.0
         primer_hit_text = ";".join(sorted(primer_hits)) if primer_hits else ""
+        post_trim_final_len_avg = (post_trim_final_len_sum / len(trimmed_records)) if trimmed_records else 0.0
         result = PrimerTrimResult(
             file_name=fastq_path.name,
             reads=reads,
@@ -185,6 +217,8 @@ def trim_primer_fastqs(
             orientation_source=orientation_source,
             iupac_mode="on" if iupac_mode else "off",
             primer_bases_trimmed_total=bases_trimmed,
+            post_trim_bases_removed_total=post_trim_bases_removed,
+            post_trim_final_len_avg=post_trim_final_len_avg,
         )
         results[fastq_path.name] = result
         report_lines.append(
@@ -224,6 +258,8 @@ def update_trim_summary(
         return
     header = lines[0].split("\t")
     target_cols = [
+        "post_trim_bases_removed",
+        "post_trim_final_len_avg",
         "primer_trimmed",
         "primer_bases_trimmed",
         "primer_trim_len_avg",
@@ -258,6 +294,8 @@ def update_trim_summary(
         file_name = parts[0]
         result = primer_lookup.get(file_name)
         if result:
+            parts[col_idx["post_trim_bases_removed"]] = str(result.post_trim_bases_removed_total)
+            parts[col_idx["post_trim_final_len_avg"]] = f"{result.post_trim_final_len_avg:.2f}"
             parts[col_idx["primer_trimmed"]] = "yes" if result.reads_trimmed else "no"
             parts[col_idx["primer_bases_trimmed"]] = f"{result.avg_trim_len:.2f}"
             parts[col_idx["primer_trim_len_avg"]] = f"{result.avg_trim_len:.2f}"

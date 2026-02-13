@@ -28,13 +28,34 @@ primer_trim:
   max_search: 60
   max_primer_offset: 10
   iupac_mode: true
+  post_quality_trim:
+    enabled: false
+    method: mott
+    cutoff_q: 22
+    window_size: 5
+    per_base_q: 22
+    rescue_5prime_bases: 0
   forward_primers: []
   reverse_primers: []
 merge_two_reads:
   overlap_engine: auto
+  overlap_engine_strategy: cascade
+  overlap_engine_order: [biopython, ungapped, edlib]
   anchor_tolerance_bases: 30
   min_overlap: 100
   min_identity: 0.8
+trim:
+  min_len: 200
+  phred: 33
+  trimmomatic:
+    sliding_window_size: 5
+    sliding_window_q: 20
+  sanger:
+    method: mott
+    cutoff_q: 20
+    window_size: 5
+    per_base_q: 20
+    file_q_threshold: 20.0
 overlap_eval:
   min_overlap: 100
   min_identity: 0.8
