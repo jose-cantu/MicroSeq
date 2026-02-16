@@ -58,8 +58,10 @@ from microseq_tests.pipeline import (
     _collect_pairing_catalog,
     _evaluate_overlap,
     _write_overlap_audit,
+    run_compare_assemblers,
 )
 from microseq_tests.assembly.pairing import DupPolicy
+from microseq_tests.assembly.registry import AssemblerSpec
 from microseq_tests.utility import io_utils
 
 
@@ -251,6 +253,8 @@ def test_parse_cap3_reports_and_missing_samples(tmp_path: Path) -> None:
     assert missing_row["status"] == "pair_missing"
     assert missing_row["contigs_count"] == 0
     assert missing_row["singlets_count"] == 0
+    assert missing_row["configured_engine"] == "auto"
+    assert missing_row["fallback_used"] == "n/a"
 
 
 
@@ -331,6 +335,96 @@ def test_overlap_audit_missing_reads_rows_have_expected_columns(tmp_path: Path) 
     values = out.read_text(encoding="utf-8").splitlines()[1].split("\t")
     assert len(header) == 13
     assert len(values) == 13
+
+
+
+def test_overlap_audit_emit_engine_audit_false_has_no_engines_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fwd = tmp_path / "S1_27F.fasta"
+    rev = tmp_path / "S1_1492R.fasta"
+    fwd.write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
+    rev.write_text(">r\n" + "A" * 120 + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "microseq_tests.pipeline.load_config",
+        lambda: {
+            "merge_two_reads": {
+                "overlap_engine": "biopython",
+                "overlap_engine_strategy": "single",
+                "overlap_engine_order": ["biopython", "ungapped", "edlib"],
+                "anchor_tolerance_bases": 30,
+                "min_overlap": 50,
+                "min_identity": 0.5,
+            },
+            "overlap_eval": {"min_overlap": 50, "min_identity": 0.5, "min_quality": 20.0},
+        },
+    )
+
+    out = tmp_path / "overlap_audit.tsv"
+    _write_overlap_audit(
+        {"S1": {"F": [fwd], "R": [rev]}},
+        out,
+        min_overlap=50,
+        min_identity=0.5,
+        min_quality=20.0,
+        emit_engine_audit=False,
+    )
+    assert out.exists()
+    assert not out.with_name("overlap_audit_engines.tsv").exists()
+
+
+def test_run_compare_assemblers_requires_staged_fasta(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "S1_27F.fastq").write_text("@r\nACGT\n+\n!!!!\n", encoding="utf-8")
+    (raw / "S1_1492R.fastq").write_text("@r\nACGT\n+\n!!!!\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="pre-staged paired FASTA"):
+        run_compare_assemblers(raw, tmp_path)
+
+
+def test_run_compare_assemblers_merge_specs_use_single_engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    in_dir = tmp_path / "paired_fasta"
+    in_dir.mkdir()
+    (in_dir / "S1_27F.fasta").write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">r\n" + "A" * 120 + "\n", encoding="utf-8")
+
+    specs = (
+        AssemblerSpec(id="merge_two_reads:biopython", display_name="b", kind="merge_two_reads", overlap_engine="biopython"),
+        AssemblerSpec(id="merge_two_reads:ungapped", display_name="u", kind="merge_two_reads", overlap_engine="ungapped"),
+        AssemblerSpec(id="merge_two_reads:edlib", display_name="e", kind="merge_two_reads", overlap_engine="edlib"),
+    )
+    monkeypatch.setattr("microseq_tests.pipeline.list_assemblers", lambda: specs)
+
+    calls: list[tuple[str, str]] = []
+
+    class FakeReport:
+        def __init__(self, overlap_engine: str):
+            self.merge_status = "merged"
+            self.overlap_engine = overlap_engine
+            self.merge_warning = ""
+
+    def fake_merge_two_reads(*, sample_id, fwd_path, rev_path, output_dir, overlap_engine, overlap_engine_strategy, **_kwargs):
+        calls.append((overlap_engine, overlap_engine_strategy))
+        contig = output_dir / f"{sample_id}.contig.fasta"
+        contig.write_text(">c\n" + "A" * 120 + "\n", encoding="utf-8")
+        return contig, FakeReport(overlap_engine)
+
+    monkeypatch.setattr("microseq_tests.pipeline.merge_two_reads", fake_merge_two_reads)
+    out_tsv = run_compare_assemblers(in_dir, tmp_path, fwd_pattern="27F", rev_pattern="1492R")
+
+    assert out_tsv.exists()
+    out_text = out_tsv.read_text(encoding="utf-8")
+    assert "merge_two_reads:biopython" in out_text
+    assert "merge_two_reads:ungapped" in out_text
+    assert "merge_two_reads:edlib" in out_text
+    assert all(strategy == "single" for _engine, strategy in calls)
+    assert {engine for engine, _strategy in calls} == {"biopython", "ungapped", "edlib"}
+
+    compare_root = tmp_path / "asm" / "compare"
+    assert (compare_root / "merge_two_reads_biopython" / "S1").exists()
+    assert (compare_root / "merge_two_reads_ungapped" / "S1").exists()
+    assert (compare_root / "merge_two_reads_edlib" / "S1").exists()
+
 
 def test_overlap_helper_prefers_end_overlap_over_internal_match() -> None:
     """Ensure overlap helper does not accept internal motif matches as valid terminal overlaps."""

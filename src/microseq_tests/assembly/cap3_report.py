@@ -33,6 +33,15 @@ def _count_fasta_records(path: Path) -> int:
     return sum(1 for _ in SeqIO.parse(path, "fasta"))
 
 
+def _contig_len_from_fasta(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    lengths = [len(rec.seq) for rec in SeqIO.parse(path, "fasta")]
+    if not lengths:
+        return None
+    return max(lengths)
+
+
 def parse_cap3_reports(
     asm_dir: Path,
     sample_keys: Iterable[str],
@@ -40,6 +49,16 @@ def parse_cap3_reports(
     output_tsv: Path | None = None,
     missing_samples: Iterable[str] | None = None,
     overlap_status: Mapping[str, str] | None = None,
+    overlap_rows: Mapping[str, Mapping[str, str]] | None = None,
+    blast_payloads: Mapping[str, Mapping[str, str]] | None = None,
+    primer_mode: str = "off",
+    primer_stage: str = "post_quality",
+    primer_preset: str = "",
+    primer_source: str = "custom",
+    configured_engine: str = "auto",
+    overlap_engine_strategy: str = "cascade",
+    overlap_engine_order: str = "",
+    overlap_quality_mode: str = "warning",
 ) -> list[dict[str, str | int | None]]:
     """Parse CAP3 info/contig/singlet outputs for the provided sample keys."""
 
@@ -67,6 +86,23 @@ def parse_cap3_reports(
                     "merge_warning": None,
                     "merge_high_conflict_mismatches": None,
                     "cap3_validation": None,
+                    "assembler": "none",
+                    "selected_engine": None,
+                    "configured_engine": configured_engine,
+                    "fallback_used": "n/a",
+                    "audit_status": None,
+                    "audit_overlap_identity": None,
+                    "audit_overlap_quality": None,
+                    "audit_overlap_orientation": None,
+                    "contig_len": None,
+                    "blast_payload": (blast_payloads or {}).get(sample_key, {}).get("blast_payload"),
+                    "primer_mode": primer_mode,
+                    "primer_stage": primer_stage,
+                    "primer_preset": primer_preset or "custom",
+                    "primer_source": primer_source,
+                    "overlap_engine_strategy": overlap_engine_strategy,
+                    "overlap_engine_order": overlap_engine_order,
+                    "overlap_quality_mode": overlap_quality_mode,
                 }
             )
             continue
@@ -118,6 +154,7 @@ def parse_cap3_reports(
         merge_warning = None
         merge_high_conflict_mismatches = None
         cap3_validation = None
+        contig_len = None
         if merge_report_path.exists():
             lines = merge_report_path.read_text(encoding="utf-8").splitlines()
             if len(lines) >= 2:
@@ -131,6 +168,21 @@ def parse_cap3_reports(
                 merge_qualities = report.get("qualities")
                 merge_warning = report.get("merge_warning")
                 merge_high_conflict_mismatches = report.get("high_conflict_mismatches")
+                contig_len = report.get("contig_len")
+
+        overlap_row = (overlap_rows or {}).get(sample_key, {})
+        blast_row = (blast_payloads or {}).get(sample_key, {})
+        assembler = "merge_two_reads" if merge_status == "merged" else "cap3"
+        selected_engine = merge_engine or overlap_row.get("selected_engine")
+        fallback_used = "n/a"
+        if selected_engine and overlap_engine_strategy in {"cascade", "all"}:
+            first_engine = (overlap_engine_order.split(",", 1)[0].strip() if overlap_engine_order else "")
+            if first_engine:
+                fallback_used = "yes" if selected_engine != first_engine else "no"
+        elif overlap_row.get("fallback_used"):
+            raw_fb = str(overlap_row.get("fallback_used")).strip().lower()
+            fallback_used = raw_fb if raw_fb in {"yes", "no", "n/a"} else "n/a"
+        contig_len = _contig_len_from_fasta(contigs_path) or contig_len
 
         if cap3_validation_path.exists():
             cap3_validation = cap3_validation_path.read_text(encoding="utf-8").strip() or None
@@ -162,6 +214,23 @@ def parse_cap3_reports(
                 "merge_warning": merge_warning,
                 "merge_high_conflict_mismatches": merge_high_conflict_mismatches,
                 "cap3_validation": cap3_validation,
+                "assembler": assembler,
+                "selected_engine": selected_engine,
+                "configured_engine": configured_engine,
+                "fallback_used": fallback_used,
+                "audit_status": overlap_row.get("status"),
+                "audit_overlap_identity": overlap_row.get("overlap_identity"),
+                "audit_overlap_quality": overlap_row.get("overlap_quality"),
+                "audit_overlap_orientation": overlap_row.get("orientation"),
+                "contig_len": contig_len,
+                "blast_payload": blast_row.get("blast_payload"),
+                "primer_mode": primer_mode,
+                "primer_stage": primer_stage,
+                "primer_preset": primer_preset or "custom",
+                "primer_source": primer_source,
+                "overlap_engine_strategy": overlap_engine_strategy,
+                "overlap_engine_order": overlap_engine_order,
+                "overlap_quality_mode": overlap_quality_mode,
             }
         )
 
@@ -186,6 +255,23 @@ def parse_cap3_reports(
             "merge_warning",
             "merge_high_conflict_mismatches",
             "cap3_validation",
+            "assembler",
+            "selected_engine",
+            "configured_engine",
+            "fallback_used",
+            "audit_status",
+            "audit_overlap_identity",
+            "audit_overlap_quality",
+            "audit_overlap_orientation",
+            "contig_len",
+            "blast_payload",
+            "primer_mode",
+            "primer_stage",
+            "primer_preset",
+            "primer_source",
+            "overlap_engine_strategy",
+            "overlap_engine_order",
+            "overlap_quality_mode",
         ]
         with output_tsv.open("w", encoding="utf-8") as fh:
             fh.write("\t".join(headers) + "\n")

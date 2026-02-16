@@ -16,6 +16,18 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 
 ### Added Feature 
 
+- Compare-all workflow now writes and auto-loads `asm/compare_assemblers.tsv` into the GUI results tables.
+- Assembly reporting now surfaces primer source classification (`off|preset|custom|mixed`) alongside primer mode/stage.
+- GUI output tabs now include **Compare Assemblers** to display `asm/compare_assemblers.tsv` after comparison runs.
+- Primer-trim configuration now supports `mode: off|detect|clip` and `stage: pre_quality|post_quality`, with migration from legacy `primer_trim.enabled`.
+- Added primer detect-only reporting (`qc/primer_detect_report.tsv`) and GUI **Primer preview** action for dry-run primer hit telemetry.
+- Paired assembly summary now includes canonical cross-path fields (`assembler`, selected/configured engine, overlap metadata, `contig_len`, payload, primer mode/stage).
+- Added reporting toggles in config (`reporting.emit_engine_audit`, `reporting.emit_per_sample_merge_report`) to keep debug artifacts optional.
+- Primer preview now consumes the same GUI primer policy overrides (stage/preset/custom sequences) and forces detect mode for parity with run behavior.
+- Detect mode now avoids writing primer-trim FASTQ copies, emitting only detect telemetry reports by default.
+- Added GUI custom primer sequence entry (forward/reverse, one per line) with validation for IUPAC DNA alphabet and minimum length.
+- Canonical `assembly_summary.tsv` now derives selected/configured engine fields from merge/config truth with audit fields separated as `audit_*`.
+
 - Session-based logging; export `MICROSEQ_SESSION_ID` to aggregate logs.
 - GUI toggle for speed vs. sensitivity BLAST algorithms.
 - Fallback to classic `blastn` when identity or coverage falls below 90%.
@@ -69,5 +81,3 @@ Example Format:
 ## [1.0] - 2025-05-25
 ### Fixed 
 - Fixed GUI settings file with wrong JSON key 
-
-

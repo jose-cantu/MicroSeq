@@ -23,7 +23,9 @@ databases:
 metadata:
   sample_id_normaliser: strip_suffix_legacy
 primer_trim:
-  enabled: false
+  mode: off
+  stage: post_quality
+  preset: ""
   max_mismatch: 2
   max_search: 60
   max_primer_offset: 10
@@ -37,6 +39,9 @@ primer_trim:
     rescue_5prime_bases: 0
   forward_primers: []
   reverse_primers: []
+reporting:
+  emit_engine_audit: true
+  emit_per_sample_merge_report: true
 merge_two_reads:
   overlap_engine: auto
   overlap_engine_strategy: cascade

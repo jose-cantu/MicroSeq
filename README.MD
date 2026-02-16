@@ -446,6 +446,7 @@ microseq assembly --mode paired \
 ```
 
 The same paired logic is available in the end-to-end pipeline via `run_full_pipeline(..., mode="paired")`; The GUI now supports single vs paired assembly, primer presets, advanced regex overrides, duplicate policy selection, well enforcement, and a pairing preview that summarizes detected primer tokens and missing mates/pairs before running CAP3. 
+The GUI output pane now also includes a dedicated **Compare Assemblers** tab that renders `asm/compare_assemblers.tsv` whenever assembler comparison is run.
 
 ** Paired assembly quick tutorial**
 

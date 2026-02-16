@@ -8,7 +8,7 @@ version = "1.0"
 description= "MicroSeq sandbox package" 
 readme= "README.MD"
 license= { text = "MIT" } 
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
   "pyyaml>=6",
   "biopython>=1.8",
@@ -34,3 +34,9 @@ microseq-recommend-threads = "microseq_tests.hardware:recommend_threads_cli"
 
 
 
+
+[tool.setuptools.package-data]
+"microseq_tests.data" = ["primer_catalog.yaml"]
+
+[tool.setuptools.data-files]
+"share/microseq/config" = ["config/primer_catalog.yaml"]

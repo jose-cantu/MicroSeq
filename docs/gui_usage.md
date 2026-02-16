@@ -32,6 +32,12 @@ Well enformcement off              Requries A1-H12 plate well labeling so when e
 * If you want the BIOM file you will need to tick the BIOM box when clicking full pipeline run note you will need to supply a metadata table (GUI will warn if missing).
 * Choose Fast(megablast) for routine Sanger reads; Comprehensive (blastn) for divergent amplicon reads. Note I do have it set up where if the coverage or percent ID doesn't reach 90% blastn will rerun instead given the nature of megablast algorithm.(Fast = NCBI Megablast large 28-bp word, tuned for ≥95 % identity hits between nearly identical Sanger traces; Comprehensive = standard blastn 11-bp word, slower but ∼5× more sensitive to <90 % identity or divergent/gapped matches; MicroSeq auto-falls back to blastn whenever the initial Megablast hit covers <90 % of the read or shows <90 % identity).
 * Primer token detection is available via the primer-set dropdown. Toggle **Advanced regex** when you want to enter explicit forward/reverse regex patterns instead of presets.
+* Primer **pairing labels** and primer **sequence trimming** are separate controls. Pairing labels (27F/1492R tokens) only determine forward/reverse matching; they do not edit read bases.
+* Primer trimming now supports three modes: **Off**, **Detect** (report hits, no clipping), and **Clip** (trim matched primer sequence). Stage can be set to **Pre-quality** or **Post-quality**.
+* You can now paste **custom forward/reverse primer sequences** directly in the GUI (one per line). This is independent from pairing token presets and overrides config-based primer lists for the run.
+* **Primer preview** now uses the same GUI primer stage/preset/custom-sequence settings as pipeline execution, but forces detect-only mode so you can validate hits before clipping.
+* Compare assemblers produces `asm/compare_assemblers.tsv`, now shown in the GUI **Compare Assemblers** output tab for side-by-side engine review.
+* Primer policy in paired mode is explicit in reports: mode (`off|detect|clip`), stage (`pre_quality|post_quality`), and source (`off|preset|custom|mixed`).
 * **Duplicate policy** lets you decide whether duplicate orientations error, keep first/last, merge, or keep separate (runs CAP3 per duplicate). The last selection is persisted between sessions.
 * **Enforce well codes** requires A1-H12 plate tokens in filenames; files with missing or mismatched wells are skipped but reported.
 
@@ -147,6 +153,17 @@ Primer-trim telemetry columns (when primer trim is enabled):
 * `primer_bases_trimmed_total` (total bases removed by primer trimming).
 * `primer_mismatch_avg`, `primer_hit`, `primer_offset_avg`.
 * `primer_orientation`, `primer_orientation_source`, `primer_iupac_mode`.
+
+Primer detect mode writes `qc/primer_detect_report.tsv` with per-file hit-rate telemetry (`reads_scanned`, `reads_with_primer_hit`, `hit_rate`, mismatch/offset averages, and matched primers).
+
+### Primer-trim config migration
+
+Legacy config used `primer_trim.enabled: true|false`. MicroSeq now normalises this to `primer_trim.mode` automatically:
+
+* `enabled: false` -> `mode: off`
+* `enabled: true` -> `mode: clip`
+
+Supported values are `mode: off|detect|clip` and `stage: pre_quality|post_quality`.
 
 ### Why this policy exists
 

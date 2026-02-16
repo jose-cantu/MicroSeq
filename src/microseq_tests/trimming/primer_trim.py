@@ -99,7 +99,9 @@ def trim_primer_fastqs(
     max_primer_offset: int = 10,
     iupac_mode: bool = True,
     report_path: Path | None = None,
+    detect_report_path: Path | None = None,
     orientation_resolver: Callable[[str], str | None] | None = None,
+    mode: str = "clip",
     post_quality_trim_enabled: bool = False,
     post_quality_method: str = "mott",
     post_quality_cutoff_q: int = 22,
@@ -115,8 +117,15 @@ def trim_primer_fastqs(
     fwd_primers = list(forward_primers)
     rev_primers = list(reverse_primers)
 
+    mode_norm = mode.strip().lower()
+    if mode_norm not in {"clip", "detect"}:
+        raise ValueError(f"Invalid primer trim mode '{mode}'. Expected clip or detect.")
+
     report_lines = [
         "file\treads\treads_trimmed\tbases_trimmed\tavg_trim_len\tavg_mismatches\tprimer_hit\tavg_offset\torientation_used\torientation_source\tiupac_mode"
+    ]
+    detect_lines = [
+        "file\treads_scanned\treads_with_primer_hit\thit_rate\tavg_mismatches\tavg_offset\tmatched_primers"
     ]
     for fastq_path in sorted(input_dir.glob("*.fastq")):
         reads = 0
@@ -169,11 +178,13 @@ def trim_primer_fastqs(
             else:
                 mismatches, offset, p_len, primer = match
                 trim_len = offset + p_len
-                if trim_len >= len(record):
+                if trim_len >= len(record) and mode_norm == "clip":
                     continue
-                rec_for_post = record[trim_len:]
+                rec_for_post = record
                 reads_trimmed += 1
-                bases_trimmed += trim_len
+                if mode_norm == "clip":
+                    rec_for_post = record[trim_len:]
+                    bases_trimmed += trim_len
                 mismatches_total += mismatches
                 offset_total += offset
                 primer_hits.add(primer)
@@ -197,8 +208,9 @@ def trim_primer_fastqs(
             trimmed_records.append(rec_for_post)
             continue
 
-        out_path = output_dir / fastq_path.name
-        SeqIO.write(trimmed_records, out_path, "fastq")
+        if mode_norm == "clip":
+            out_path = output_dir / fastq_path.name
+            SeqIO.write(trimmed_records, out_path, "fastq")
         avg_trim_len = bases_trimmed / reads_trimmed if reads_trimmed else 0.0
         avg_mismatches = mismatches_total / reads_trimmed if reads_trimmed else 0.0
         avg_offset = offset_total / reads_trimmed if reads_trimmed else 0.0
@@ -238,10 +250,28 @@ def trim_primer_fastqs(
                 ]
             )
         )
+        hit_rate = (reads_trimmed / reads) if reads else 0.0
+        detect_lines.append(
+            "\t".join(
+                [
+                    fastq_path.name,
+                    str(reads),
+                    str(reads_trimmed),
+                    f"{hit_rate:.4f}",
+                    f"{avg_mismatches:.2f}",
+                    f"{avg_offset:.2f}",
+                    primer_hit_text or "-",
+                ]
+            )
+        )
 
     if report_path:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
+
+    if detect_report_path:
+        detect_report_path.parent.mkdir(parents=True, exist_ok=True)
+        detect_report_path.write_text("\n".join(detect_lines) + "\n", encoding="utf-8")
 
     return results
 

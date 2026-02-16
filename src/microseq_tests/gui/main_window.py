@@ -34,12 +34,10 @@ from pathlib import Path
 from typing import Optional
 import collections
 
-PRIMER_SETS: dict[str, tuple[list[str], list[str]]] = {
-    "16S (27F/1492R)": (["27F"], ["1492R"]), 
-    "16S (8F/1492R)": (["8F"], ["1492R"]),
-    "16S V4 (515F/806R)": (["515F"], ["806R"]),
-    "Custom": ([], [])
-}
+from microseq_tests.primer_catalog import pairing_label_sets, build_primer_cfg_override
+from microseq_tests.assembly.registry import list_assemblers
+
+PRIMER_SETS: dict[str, tuple[list[str], list[str]]] = pairing_label_sets()
 
 from PySide6.QtCore import (
     QLine, Qt, QObject, QThread, Signal, Slot, QSettings, QTimer, QModelIndex, QProcess, QUrl
@@ -58,6 +56,8 @@ from microseq_tests.pipeline import (
     run_blast_stage,
     run_postblast,
     run_full_pipeline,
+    run_trim,
+    run_compare_assemblers,
     _summarize_paired_candidates,
     _suggest_pairing_patterns
 )
@@ -604,6 +604,16 @@ class MainWindow(QMainWindow):
         # add the Paired option to dropdown, storing paired as internal data 
         self.mode_combo.addItem("Paired", userData="paired")
 
+        self.assembler_combo = QComboBox()
+        for assembler in list_assemblers():
+            self.assembler_combo.addItem(assembler.display_name, userData=assembler.id)
+        self.assembler_combo.setToolTip("Reserved for future selected-assembler workflows.")
+
+        self.compare_assemblers_btn = QPushButton("Compare assemblers")
+        self.compare_assemblers_btn.setToolTip("Compare all registered assemblers on paired FASTA inputs and write asm/compare_assemblers.tsv")
+        self.assembler_combo.setVisible(False)
+        self.assembler_combo.setEnabled(False)
+
         self.primer_set_combo = QComboBox()
         for label in PRIMER_SETS: 
             self.primer_set_combo.addItem(label)
@@ -622,6 +632,9 @@ class MainWindow(QMainWindow):
 
         self.preview_pairs_btn = QPushButton("Preview Pairs")
         self.preview_pairs_btn.setToolTip("Summarize detected forward/reverse reads w/o running pipeline in a dry run")
+
+        self.primer_preview_btn = QPushButton("Primer preview")
+        self.primer_preview_btn.setToolTip("Run primer detect-only scan and show per-file hit metrics.")
 
         self.enforce_well_chk = QCheckBox("Enforce same plate well (A1-H12)")
 
@@ -653,6 +666,50 @@ class MainWindow(QMainWindow):
         self.overlap_audit_chk = QCheckBox("Overlap audit (diagnostic only)")
         self.overlap_audit_chk.setToolTip("Run overlap heuristic and write qc/overlap_audit.tsv.")
 
+        self.primer_trim_mode_combo = QComboBox()
+        self.primer_trim_mode_combo.addItems(["Off", "Detect", "Clip"])
+        self.primer_trim_mode_combo.setCurrentText(self.settings.value("primer_trim_mode", "Off"))
+        self.primer_trim_mode_combo.currentTextChanged.connect(
+            lambda txt: self.settings.setValue("primer_trim_mode", txt)
+        )
+
+        self.primer_trim_stage_combo = QComboBox()
+        self.primer_trim_stage_combo.addItem("Post-quality", userData="post_quality")
+        self.primer_trim_stage_combo.addItem("Pre-quality", userData="pre_quality")
+        stg = self.settings.value("primer_trim_stage", "post_quality")
+        self.primer_trim_stage_combo.setCurrentIndex(max(0, self.primer_trim_stage_combo.findData(stg)))
+        self.primer_trim_stage_combo.currentIndexChanged.connect(
+            lambda _i: self.settings.setValue("primer_trim_stage", self.primer_trim_stage_combo.currentData())
+        )
+
+        self.primer_trim_preset_combo = QComboBox()
+        self.primer_trim_preset_combo.addItem("Custom from config", userData="")
+        self.primer_trim_preset_combo.addItem("16S_27F_1492R", userData="16S_27F_1492R")
+        pst = self.settings.value("primer_trim_preset", "")
+        self.primer_trim_preset_combo.setCurrentIndex(max(0, self.primer_trim_preset_combo.findData(pst)))
+        self.primer_trim_preset_combo.currentIndexChanged.connect(
+            lambda _i: self.settings.setValue("primer_trim_preset", self.primer_trim_preset_combo.currentData())
+        )
+
+        self.primer_fwd_edit = QPlainTextEdit()
+        self.primer_fwd_edit.setPlaceholderText("Forward primer sequences (one per line)")
+        self.primer_fwd_edit.setFixedHeight(54)
+        self.primer_fwd_edit.setPlainText(self.settings.value("primer_trim_fwd", ""))
+        self.primer_fwd_edit.textChanged.connect(
+            lambda: self.settings.setValue("primer_trim_fwd", self.primer_fwd_edit.toPlainText())
+        )
+
+        self.primer_rev_edit = QPlainTextEdit()
+        self.primer_rev_edit.setPlaceholderText("Reverse primer sequences (one per line)")
+        self.primer_rev_edit.setFixedHeight(54)
+        self.primer_rev_edit.setPlainText(self.settings.value("primer_trim_rev", ""))
+        self.primer_rev_edit.textChanged.connect(
+            lambda: self.settings.setValue("primer_trim_rev", self.primer_rev_edit.toPlainText())
+        )
+
+        self.primer_save_btn = QPushButton("Save custom preset")
+        self.primer_save_btn.setToolTip("Use current forward/reverse custom sequences for this session.")
+        self.primer_save_btn.clicked.connect(lambda: self.primer_trim_preset_combo.setCurrentIndex(0))
 
         self.collapse_reps_chk = QCheckBox("Collapse replicates")
         self.collapse_reps_chk.setToolTip("Collapse technical replicates with vsearch (requires vsearch).")
@@ -692,6 +749,13 @@ class MainWindow(QMainWindow):
 
         # Immediately call function to update the UI based on intial mode selection (example: show/hide reverse pattern field) 
         self._on_mode_changed(idx) 
+
+        saved_assembler = self.settings.value("assembler_id", self.assembler_combo.itemData(0))
+        asm_idx = self.assembler_combo.findData(saved_assembler)
+        self.assembler_combo.setCurrentIndex(0 if asm_idx < 0 else asm_idx)
+        self.assembler_combo.currentIndexChanged.connect(
+            lambda _i: self.settings.setValue("assembler_id", self.assembler_combo.currentData())
+        )
 
         # ------ Connect UI events to functions/settings storage -------- 
 
@@ -761,6 +825,8 @@ class MainWindow(QMainWindow):
         self.primer_set_combo.currentIndexChanged.connect(self._on_primer_set_changed)
         self.detect_tokens_btn.clicked.connect(self._detect_tokens)
         self.preview_pairs_btn.clicked.connect(self._preview_pairs)
+        self.primer_preview_btn.clicked.connect(self._preview_primers)
+        self.compare_assemblers_btn.clicked.connect(self._compare_assemblers)
         self.advanced_regex_chk.toggled.connect(self._toggle_advanced_regex)
         self.enforce_well_chk.toggled.connect(
             lambda checked: self.settings.setValue("enforce_same_well", checked)
@@ -884,20 +950,23 @@ class MainWindow(QMainWindow):
         self.summary_filter = QComboBox()
         self.summary_filter.addItem("All statuses", userData=None)
 
-        self.summary_table = QTableWidget(0, 11)
+        self.summary_table = QTableWidget(0, 14)
         self.summary_table.setHorizontalHeaderLabels(
             [
                 "sample_id",
                 "status",
-                "contigs_count",
-                "singlets_count",
-                "overlaps_saved",
-                "overlaps_removed",
+                "assembler",
+                "contig_len",
+                "blast_payload",
+                "selected_engine",
+                "configured_engine",
                 "merge_status",
                 "merge_overlap_len",
                 "merge_identity",
-                "merge_qualities",
-                "merge_warning",
+                "overlaps_saved",
+                "overlaps_removed",
+                "primer_mode",
+                "primer_stage",
             ]
         )
         self.summary_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -932,6 +1001,22 @@ class MainWindow(QMainWindow):
         )
         self.diagnostics_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.diagnostics_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+        self.compare_table = QTableWidget(0, 7)
+        self.compare_table.setHorizontalHeaderLabels(
+            [
+                "sample_id",
+                "assembler_id",
+                "assembler_name",
+                "status",
+                "selected_engine",
+                "contig_len",
+                "warnings",
+            ]
+        )
+        self.compare_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.compare_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.compare_table.itemSelectionChanged.connect(self._update_detail_panel)
 
         self.open_blast_inputs_btn = QPushButton("Open blast_inputs.fasta")
         self.open_blast_inputs_btn.clicked.connect(lambda: self._open_path(self._blast_inputs_fasta, prefer_in_app=True))
@@ -971,6 +1056,10 @@ class MainWindow(QMainWindow):
         diagnostics_layout = QVBoxLayout(diagnostics_tab)
         diagnostics_layout.addWidget(self.diagnostics_table)
 
+        compare_tab = QWidget()
+        compare_layout = QVBoxLayout(compare_tab)
+        compare_layout.addWidget(self.compare_table)
+
         logs_tab = QWidget()
         logs_layout = QVBoxLayout(logs_tab)
         logs_layout.addWidget(self.log_view)
@@ -980,6 +1069,7 @@ class MainWindow(QMainWindow):
         self.output_tabs.addTab(summary_tab, "Assembly Summary")
         self.output_tabs.addTab(blast_tab, "BLAST Inputs")
         self.output_tabs.addTab(diagnostics_tab, "Diagnostics")
+        self.output_tabs.addTab(compare_tab, "Compare Assemblers")
 
         # ---- Detail panel ----
         self.detail_sample_lbl = QLabel("sample_id: ")
@@ -1058,6 +1148,9 @@ class MainWindow(QMainWindow):
         self.diagnostics_table.cellDoubleClicked.connect(
             lambda row, col: self._show_cell_text(self.diagnostics_table, row, col)
         )
+        self.compare_table.cellDoubleClicked.connect(
+            lambda row, col: self._show_cell_text(self.compare_table, row, col)
+        )
 
 
         self._blast_inputs_fasta: Optional[Path] = None
@@ -1134,7 +1227,20 @@ class MainWindow(QMainWindow):
         cap3_opts.addWidget(self.write_blast_inputs_chk)
         cap3_opts.addWidget(self.use_blast_inputs_combo)
         cap3_opts.addWidget(self.overlap_audit_chk)
+        cap3_opts.addWidget(QLabel("Primer trim"))
+        cap3_opts.addWidget(self.primer_trim_mode_combo)
+        cap3_opts.addWidget(QLabel("Primer stage"))
+        cap3_opts.addWidget(self.primer_trim_stage_combo)
+        cap3_opts.addWidget(QLabel("Primer preset"))
+        cap3_opts.addWidget(self.primer_trim_preset_combo)
+        cap3_opts.addWidget(self.primer_save_btn)
         cap3_opts.addStretch()
+
+        primer_seq_opts = QHBoxLayout()
+        primer_seq_opts.addWidget(QLabel("Trim primers (F)"))
+        primer_seq_opts.addWidget(self.primer_fwd_edit)
+        primer_seq_opts.addWidget(QLabel("Trim primers (R)"))
+        primer_seq_opts.addWidget(self.primer_rev_edit)
 
         pairing = QHBoxLayout()
         pairing.addWidget(QLabel("Primer set"))
@@ -1143,6 +1249,8 @@ class MainWindow(QMainWindow):
         pairing.addWidget(self.rev_pattern_edit)
         pairing.addWidget(self.detect_tokens_btn)
         pairing.addWidget(self.preview_pairs_btn)
+        pairing.addWidget(self.primer_preview_btn)
+        pairing.addWidget(self.compare_assemblers_btn)
         pairing.addWidget(self.dup_policy_lbl)
         pairing.addWidget(self.dup_policy_combo) 
         pairing.addWidget(self.enforce_well_chk)
@@ -1156,6 +1264,7 @@ class MainWindow(QMainWindow):
         outer.addLayout(mid)
         outer.addLayout(pipeline_opts)
         outer.addLayout(cap3_opts)
+        outer.addLayout(primer_seq_opts)
         outer.addLayout(pairing) 
         outer.addWidget(self.output_splitter)
 
@@ -1201,6 +1310,8 @@ class MainWindow(QMainWindow):
             self.primer_set_combo,
             self.detect_tokens_btn,
             self.preview_pairs_btn,
+            self.primer_preview_btn,
+            self.compare_assemblers_btn,
             self.dup_policy_lbl,
             self.dup_policy_combo,
             self.advanced_regex_chk,
@@ -1213,6 +1324,12 @@ class MainWindow(QMainWindow):
             self.write_blast_inputs_chk,
             self.use_blast_inputs_combo,
             self.overlap_audit_chk,
+            self.primer_trim_mode_combo,
+            self.primer_trim_stage_combo,
+            self.primer_trim_preset_combo,
+            self.primer_fwd_edit,
+            self.primer_rev_edit,
+            self.primer_save_btn,
         ):
             widget.setVisible(is_paired)
             widget.setEnabled(is_paired)
@@ -1251,6 +1368,25 @@ class MainWindow(QMainWindow):
             "chimera_mode": self.chimera_mode_combo.currentData(),
             "overlap_audit": self.overlap_audit_chk.isChecked(),
         }
+
+
+    def _primer_override_kwargs(self, *, for_preview: bool = False) -> dict:
+        mode_label = self.primer_trim_mode_combo.currentText().strip().lower()
+        mode_map = {"off": "off", "detect": "detect", "clip": "clip"}
+        mode = mode_map.get(mode_label, "off")
+        stage = self.primer_trim_stage_combo.currentData()
+        preset = self.primer_trim_preset_combo.currentData()
+        forward_raw = self.primer_fwd_edit.toPlainText()
+        reverse_raw = self.primer_rev_edit.toPlainText()
+        override = build_primer_cfg_override(
+            mode=mode,
+            stage=stage,
+            preset=preset,
+            forward_raw=forward_raw,
+            reverse_raw=reverse_raw,
+            for_preview=for_preview,
+        )
+        return {"primer_cfg_override": override}
     
     def _tokens_to_regex(self, text: str) -> str | None:
         tokens = [t.strip() for t in text.split(",") if t.strip()]
@@ -1426,6 +1562,40 @@ class MainWindow(QMainWindow):
         dialog.destroyed.connect(lambda *_: setattr(self, "_active_pairing_preview", None))
         dialog.show()
 
+    def _run_primer_preview_job(self, input_path: Path, primer_override: dict[str, object]) -> dict[str, object]:
+        with tempfile.TemporaryDirectory(prefix="microseq_primer_preview_") as td:
+            out_dir = Path(td)
+            summary_tsv = out_dir / "qc" / "trim_summary.tsv"
+            run_trim(
+                input_path,
+                out_dir,
+                sanger=(input_path.suffix.lower() == ".ab1" or (input_path.is_dir() and any(input_path.glob("*.ab1")))),
+                summary_tsv=summary_tsv,
+                primer_cfg_override=primer_override,
+            )
+            report = out_dir / "qc" / "primer_detect_report.tsv"
+            if not report.exists():
+                return {
+                    "primer_preview_notice": "No primer detect report was generated. Check primer_trim preset/sequences in config.",
+                }
+            return {
+                "primer_preview_text": report.read_text(encoding="utf-8"),
+            }
+
+    def _preview_primers(self):
+        if not self._input_path:
+            self._show_box(QMessageBox.Icon.Warning, "No input", "Choose a file or folder first.")
+            return
+
+        try:
+            primer_override = dict(self._primer_override_kwargs(for_preview=True).get("primer_cfg_override", {}))
+        except ValueError as exc:
+            self._show_box(QMessageBox.Icon.Warning, "Invalid primer sequence", str(exc))
+            return
+        primer_override["mode"] = "detect"
+        self._launch(self._run_primer_preview_job, Path(self._input_path), primer_override)
+
+
     def _cleanup_input_staging(self) -> None:
         if self._input_staging:
             self._input_staging.cleanup()
@@ -1599,6 +1769,38 @@ class MainWindow(QMainWindow):
         thread.started.connect(worker.run)
         thread.start()
 
+    def _compare_assemblers(self):
+        if not self._input_path:
+            self._show_box(QMessageBox.Icon.Warning, "No input", "Choose a file or folder first.")
+            return
+        if self.mode_combo.currentData() != "paired":
+            self._show_box(QMessageBox.Icon.Information, "Paired mode required", "Assembler comparison requires paired mode.")
+            return
+
+        # Explicit contract: comparison runs on staged paired FASTA inputs.
+        source_dir = self._input_path if self._input_path.is_dir() else self._input_path.parent
+        has_fasta = any(source_dir.rglob("*.fasta")) or any(source_dir.rglob("*.fa")) or any(source_dir.rglob("*.fna")) or any(source_dir.rglob("*.fas"))
+        has_raw = any(source_dir.rglob("*.ab1")) or any(source_dir.rglob("*.fastq")) or any(source_dir.rglob("*.fq"))
+        if has_raw and not has_fasta:
+            self._show_box(
+                QMessageBox.Icon.Information,
+                "Staged FASTA required",
+                "Compare assemblers expects pre-staged paired FASTA inputs (e.g., qc/paired_fasta).",
+            )
+            return
+
+        self.log_model.append("\n▶ Compare all assemblers")
+
+        self._launch(
+            run_compare_assemblers,
+            source_dir,
+            self.out_dir if self.out_dir else source_dir.parent,
+            fwd_pattern=self._current_patterns()[0],
+            rev_pattern=self._current_patterns()[1],
+            enforce_same_well=self.enforce_well_chk.isChecked(),
+        )
+
+
     # -------- Trim -> Convert -> BLAST -> Taxonomy ---------------
     def _launch_qc(self):
         if not self._input_path:
@@ -1606,6 +1808,13 @@ class MainWindow(QMainWindow):
             return
         if not self._ensure_vsearch_available():
             return
+        primer_kw: dict = {}
+        if self.mode_combo.currentData() == "paired":
+            try:
+                primer_kw = self._primer_override_kwargs()
+            except ValueError as exc:
+                self._show_box(QMessageBox.Icon.Warning, "Invalid primer sequence", str(exc))
+                return
         task = self.settings.value("blast_task", "megablast")
         self._launch(
             run_full_pipeline,
@@ -1616,7 +1825,8 @@ class MainWindow(QMainWindow):
             metadata=None,   # Trim → Convert → BLAST → Tax
             blast_task=task,
             **self._assembly_kwargs(),
-            **self._pipeline_kwargs()
+            **self._pipeline_kwargs(),
+            **primer_kw,
         )
 
     # ------ Run full pipeline with Post-Blast as well -------------
@@ -1626,6 +1836,13 @@ class MainWindow(QMainWindow):
             return
         if not self._ensure_vsearch_available():
             return
+        primer_kw: dict = {}
+        if self.mode_combo.currentData() == "paired":
+            try:
+                primer_kw = self._primer_override_kwargs()
+            except ValueError as exc:
+                self._show_box(QMessageBox.Icon.Warning, "Invalid primer sequence", str(exc))
+                return
         # if user asked for BIOM but hasn't chosen metadata, abort early
         if self.biom_chk.isChecked() and not self.meta_path:
             self._show_box(QMessageBox.Icon.Warning,
@@ -1645,7 +1862,8 @@ class MainWindow(QMainWindow):
             metadata=self.meta_path,      # None or Path run the Post-BLAST stage too
             blast_task=task,
             **self._assembly_kwargs(),
-            **self._pipeline_kwargs()
+            **self._pipeline_kwargs(),
+            **primer_kw,
         )
 
     # ------ Run stand-alone Post-BLAST ---------------------------------
@@ -1808,6 +2026,8 @@ class MainWindow(QMainWindow):
                     QMessageBox.Icon.Warning,
                     "Run Failed", e)
             QTimer.singleShot(0, dialog_fn)
+        elif isinstance(result, Path):
+            rc, out = 0, result
         else:                                          # int from BLAST‑only path
             rc, out = int(result), Path()
 
@@ -1818,7 +2038,7 @@ class MainWindow(QMainWindow):
             0, lambda m=msg: self.log_model.append(f"● {m}\n")
         )
 
-        if rc == 0 and out is not None:
+        if rc == 0 and out is not None and not (isinstance(result, dict) and ("primer_preview_text" in result or "primer_preview_notice" in result)):
             QTimer.singleShot(
                 0,
                 lambda p=out: self._show_box(
@@ -1827,8 +2047,15 @@ class MainWindow(QMainWindow):
                 f"Last output file:\n{p}") 
             )
 
-        if rc == 0 and isinstance(result, dict):
+        if rc == 0 and isinstance(result, dict) and "primer_preview_text" not in result and "primer_preview_notice" not in result:
             QTimer.singleShot(0, lambda r=result: self._load_output_tables(r))
+        elif rc == 0 and isinstance(result, Path) and result.name == "compare_assemblers.tsv":
+            QTimer.singleShot(0, lambda p=result: self._load_output_tables({"compare_assemblers": p}))
+
+        if rc == 0 and isinstance(result, dict) and "primer_preview_text" in result:
+            QTimer.singleShot(0, lambda t=result["primer_preview_text"]: TextBlobDialog("Primer preview (detect-only)", t, parent=self).exec())
+        if rc == 0 and isinstance(result, dict) and "primer_preview_notice" in result:
+            QTimer.singleShot(0, lambda m=result["primer_preview_notice"]: self._show_box(QMessageBox.Icon.Information, "Primer preview", m))
 
         # re‑enable buttons -----------------------------------------
         def _reenable():
@@ -1996,6 +2223,14 @@ class MainWindow(QMainWindow):
         if overlap_audit:
             self._load_overlap_audit_table(Path(overlap_audit))
 
+        compare_tsv = paths.get("compare_assemblers")
+        if compare_tsv:
+            self._load_compare_assemblers_table(Path(compare_tsv))
+        elif asm_dir:
+            compare_candidate = asm_dir / "compare_assemblers.tsv"
+            if compare_candidate.exists():
+                self._load_compare_assemblers_table(compare_candidate)
+
         if asm_dir:
             self._asm_dir = asm_dir
             self._blast_inputs_fasta = self._asm_dir / "blast_inputs.fasta"
@@ -2034,15 +2269,18 @@ class MainWindow(QMainWindow):
             row_values = [
                 self._fmt_table_value(row.get("sample_id", "")),
                 self._fmt_table_value(row.get("status", "")),
-                self._fmt_table_value(row.get("contigs_count", "")),
-                self._fmt_table_value(row.get("singlets_count", "")),
-                self._fmt_table_value(row.get("overlaps_saved", "")),
-                self._fmt_table_value(row.get("overlaps_removed", "")),
+                self._fmt_table_value(row.get("assembler", "")),
+                self._fmt_table_value(row.get("contig_len", "")),
+                self._fmt_table_value(row.get("blast_payload", "")),
+                self._fmt_table_value(row.get("selected_engine", "")),
+                self._fmt_table_value(row.get("configured_engine", "")),
                 self._fmt_table_value(row.get("merge_status", "")),
                 self._fmt_table_value(row.get("merge_overlap_len", "")),
                 self._fmt_table_value(row.get("merge_identity", "")),
-                self._fmt_table_value(row.get("merge_qualities", "")),
-                self._fmt_table_value(row.get("merge_warning", "")),
+                self._fmt_table_value(row.get("overlaps_saved", "")),
+                self._fmt_table_value(row.get("overlaps_removed", "")),
+                self._fmt_table_value(row.get("primer_mode", "")),
+                self._fmt_table_value(row.get("primer_stage", "")),
             ]
             for col, value in enumerate(row_values):
                 item = QTableWidgetItem(value)
@@ -2055,15 +2293,18 @@ class MainWindow(QMainWindow):
                 self.summary_table.setItem(row_idx, col, item)
             self._summary_rows[row_values[0]] = {
                 "status": row_values[1],
-                "contigs_count": row_values[2],
-                "singlets_count": row_values[3],
-                "overlaps_saved": row_values[4],
-                "overlaps_removed": row_values[5],
-                "merge_status": row_values[6],
-                "merge_overlap_len": row_values[7],
-                "merge_identity": row_values[8],
-                "merge_qualities": row_values[9],
-                "merge_warning": row_values[10],
+                "assembler": row_values[2],
+                "contig_len": row_values[3],
+                "blast_payload": row_values[4],
+                "selected_engine": row_values[5],
+                "configured_engine": row_values[6],
+                "merge_status": row_values[7],
+                "merge_overlap_len": row_values[8],
+                "merge_identity": row_values[9],
+                "overlaps_saved": row_values[10],
+                "overlaps_removed": row_values[11],
+                "primer_mode": row_values[12],
+                "primer_stage": row_values[13],
             }
         for status in sorted(df["status"].dropna().unique()):
             self.summary_filter.addItem(status, userData=status)
@@ -2115,7 +2356,7 @@ class MainWindow(QMainWindow):
                 self._fmt_table_value(row.get("end_anchored_possible", "")),
                 self._fmt_table_value(row.get("selected_engine", "")),
                 self._fmt_table_value(row.get("fallback_used", "")),
-                self._fmt_table_value(row.get("overlap_engine", "")),
+                self._fmt_table_value(row.get("configured_engine", row.get("overlap_engine", ""))),
             ]
             for col, value in enumerate(row_values):
                 item = QTableWidgetItem(value)
@@ -2134,8 +2375,31 @@ class MainWindow(QMainWindow):
                 "selected_engine": row_values[10],
                 "fallback_used": row_values[11],
                 "overlap_engine": row_values[12],
+                "configured_engine": row_values[12],
             }
         self._configure_table_view(self.diagnostics_table)
+
+    def _load_compare_assemblers_table(self, compare_path: Path) -> None:
+        if not compare_path.exists():
+            return
+        df = pd.read_csv(compare_path, sep="\t")
+        self.compare_table.setRowCount(0)
+        for row_idx, row in df.iterrows():
+            self.compare_table.insertRow(row_idx)
+            row_values = [
+                self._fmt_table_value(row.get("sample_id", "")),
+                self._fmt_table_value(row.get("assembler_id", "")),
+                self._fmt_table_value(row.get("assembler_name", "")),
+                self._fmt_table_value(row.get("status", "")),
+                self._fmt_table_value(row.get("selected_engine", "")),
+                self._fmt_table_value(row.get("contig_len", "")),
+                self._fmt_table_value(row.get("warnings", "")),
+            ]
+            for col, value in enumerate(row_values):
+                item = QTableWidgetItem(value)
+                item.setToolTip(value)
+                self.compare_table.setItem(row_idx, col, item)
+        self._configure_table_view(self.compare_table)
 
     def _apply_summary_filter(self) -> None:
         selected = self.summary_filter.currentData()
@@ -2196,6 +2460,8 @@ class MainWindow(QMainWindow):
             table = self.blast_table
         elif tab_index == 3:
             table = self.diagnostics_table
+        elif tab_index == 4:
+            table = self.compare_table
         else:
             table = self.summary_table if self.summary_table.selectedItems() else self.blast_table
 

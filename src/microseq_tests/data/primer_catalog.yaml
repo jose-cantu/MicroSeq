@@ -1,0 +1,22 @@
+pairing_sets:
+  "16S (27F/1492R)":
+    forward: ["27F"]
+    reverse: ["1492R"]
+  "16S (8F/1492R)":
+    forward: ["8F"]
+    reverse: ["1492R"]
+  "16S V4 (515F/806R)":
+    forward: ["515F"]
+    reverse: ["806R"]
+  "Custom":
+    forward: []
+    reverse: []
+
+trim_presets:
+  "16S_27F_1492R":
+    forward_primers: ["AGAGTTTGATCMTGGCTCAG"]
+    reverse_primers: ["TACGGYTACCTTGTTACGACTT"]
+    max_mismatch: 2
+    max_search: 80
+    max_primer_offset: 10
+    iupac_mode: true

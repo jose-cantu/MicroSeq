@@ -6,6 +6,7 @@ Return an int exit-code (0 = success) & raise on fatal errors.
 
 from __future__ import annotations
 from pathlib import Path
+from contextlib import nullcontext
 from collections import Counter, defaultdict
 import re 
 from typing import Union, Sequence
@@ -50,9 +51,12 @@ from microseq_tests.assembly.pairing import  (
         DETECTORS, DupPolicy, _extract_well, _strip_well_token, extract_sid_orientation, iter_seq_files, make_pattern_detector) 
 from microseq_tests.assembly.cap3_report import parse_cap3_reports
 from microseq_tests.assembly.cap3_profiles import resolve_cap3_profile
+from microseq_tests.assembly.registry import list_assemblers
+from microseq_tests.assembly.two_read_merge import merge_two_reads
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
 from microseq_tests.utility.utils import load_config, expand_db_path
+from microseq_tests.primer_catalog import trim_presets
 from microseq_tests.vsearch_tools import ( 
     collapse_replicates_grouped, 
     chimera_check_ref, 
@@ -71,10 +75,13 @@ __all__ = [
     "run_ab1_to_fastq",
     "run_fastq_to_fasta",
     "run_full_pipeline",
+    "run_compare_assemblers",
 ]
 
 PathLike = Union[str, Path]
 L = logging.getLogger(__name__)
+
+_PRIMER_PRESETS: dict[str, dict[str, object]] = trim_presets()
 
 
 def _resolve_trim_policy(config: dict | None = None) -> dict[str, object]:
@@ -95,6 +102,112 @@ def _resolve_trim_policy(config: dict | None = None) -> dict[str, object]:
     }
 
 
+def _normalize_primer_trim_cfg(cfg: dict) -> dict[str, object]:
+    primer_cfg = dict(cfg.get("primer_trim", {}))
+    mode = str(primer_cfg.get("mode", "")).strip().lower()
+    if not mode:
+        if "enabled" in primer_cfg:
+            mode = "clip" if bool(primer_cfg.get("enabled")) else "off"
+        else:
+            mode = "off"
+    if mode not in {"off", "detect", "clip"}:
+        raise ValueError(f"Invalid primer_trim.mode '{mode}'. Expected one of: off, detect, clip.")
+
+    stage = str(primer_cfg.get("stage", "post_quality")).strip().lower()
+    if stage not in {"pre_quality", "post_quality"}:
+        raise ValueError(
+            f"Invalid primer_trim.stage '{stage}'. Expected one of: pre_quality, post_quality."
+        )
+
+    preset_configured = str(primer_cfg.get("preset", "")).strip()
+    preset_cfg = _PRIMER_PRESETS.get(preset_configured) if preset_configured else None
+    if preset_configured and preset_cfg is None:
+        raise ValueError(
+            f"Unknown primer_trim.preset '{preset_configured}'. Known presets: {', '.join(sorted(_PRIMER_PRESETS))}."
+        )
+
+    custom_fwd = list(primer_cfg.get("forward_primers", []) or [])
+    custom_rev = list(primer_cfg.get("reverse_primers", []) or [])
+    has_custom_fwd = bool(custom_fwd)
+    has_custom_rev = bool(custom_rev)
+
+    fwd = list(custom_fwd)
+    rev = list(custom_rev)
+    if preset_cfg and not fwd:
+        fwd = list(preset_cfg.get("forward_primers", []) or [])
+    if preset_cfg and not rev:
+        rev = list(preset_cfg.get("reverse_primers", []) or [])
+
+    if mode == "off":
+        primer_source = "off"
+        preset_effective = ""
+    elif has_custom_fwd and has_custom_rev:
+        primer_source = "custom"
+        preset_effective = ""
+    elif has_custom_fwd or has_custom_rev:
+        primer_source = "mixed"
+        preset_effective = ""
+    elif preset_configured:
+        primer_source = "preset"
+        preset_effective = preset_configured
+    else:
+        primer_source = "custom"
+        preset_effective = ""
+
+    if mode != "off" and not (preset_effective or fwd or rev):
+        raise ValueError(
+            "Primer trimming mode is enabled but no primer sequences were provided. "
+            "Set primer_trim.preset or forward_primers/reverse_primers."
+        )
+
+    return {
+        "mode": mode,
+        "stage": stage,
+        "preset": preset_effective,
+        "preset_configured": preset_configured,
+        "primer_source": primer_source,
+        "forward_primers": fwd,
+        "reverse_primers": rev,
+        "max_mismatch": int(primer_cfg.get("max_mismatch", preset_cfg.get("max_mismatch", 2) if preset_cfg else 2)),
+        "max_search": int(primer_cfg.get("max_search", preset_cfg.get("max_search", 60) if preset_cfg else 60)),
+        "max_primer_offset": int(primer_cfg.get("max_primer_offset", preset_cfg.get("max_primer_offset", 10) if preset_cfg else 10)),
+        "iupac_mode": bool(primer_cfg.get("iupac_mode", preset_cfg.get("iupac_mode", True) if preset_cfg else True)),
+        "post_quality_trim": primer_cfg.get("post_quality_trim", {}),
+    }
+
+
+def _reporting_flags(cfg: dict) -> dict[str, bool]:
+    rep = cfg.get("reporting", {})
+    return {
+        "emit_engine_audit": bool(rep.get("emit_engine_audit", True)),
+        "emit_per_sample_merge_report": bool(rep.get("emit_per_sample_merge_report", True)),
+    }
+
+
+def _load_tsv_rows_by_sample(path: Path) -> dict[str, dict[str, str]]:
+    if not path.exists():
+        return {}
+    rows: dict[str, dict[str, str]] = {}
+    with path.open("r", encoding="utf-8") as fh:
+        lines = [ln.rstrip("\n") for ln in fh if ln.strip()]
+    if len(lines) < 2:
+        return rows
+    headers = lines[0].split("\t")
+    try:
+        sid_idx = headers.index("sample_id")
+    except ValueError:
+        return rows
+    for line in lines[1:]:
+        vals = line.split("\t")
+        if len(vals) < len(headers):
+            vals.extend([""] * (len(headers) - len(vals)))
+        row = dict(zip(headers, vals, strict=False))
+        sid = vals[sid_idx]
+        if sid:
+            rows[sid] = row
+    return rows
+
+
 # ───────────────────────────────────────────────────────── trimming
 def run_trim(
     input_path: PathLike,
@@ -105,6 +218,7 @@ def run_trim(
     link_raw: bool = False,
     mee_max: float | None = None,
     mee_min_len: int | None = None, 
+    primer_cfg_override: dict | None = None,
 
 ) -> int:
     """Trim reads and convert if needed.
@@ -120,6 +234,10 @@ def run_trim(
     Returns 0 on success.
     """
     cfg = load_config()
+    if primer_cfg_override:
+        merged = dict(cfg.get("primer_trim", {}))
+        merged.update(primer_cfg_override)
+        cfg["primer_trim"] = merged
     trim_policy = _resolve_trim_policy(cfg)
     policy_desc = (
         f"sanger={trim_policy['sanger_method']}(cutoff={trim_policy['sanger_cutoff_q']},window={trim_policy['sanger_window_size']},q={trim_policy['sanger_per_base_q']}); "
@@ -129,6 +247,10 @@ def run_trim(
     work = Path(workdir)
     work.mkdir(parents=True, exist_ok=True)
     (work / "qc").mkdir(parents=True, exist_ok=True)
+
+    primer_cfg = _normalize_primer_trim_cfg(cfg)
+
+    pre_quality_primer_results: dict[str, object] = {}
 
     if sanger:
         fastq_dir = work / "raw_fastq"
@@ -149,8 +271,27 @@ def run_trim(
                 shutil.copy2(ab1_source, dst / ab1_source.name)
         ab1_to_fastq(dst, fastq_dir)
 
+        quality_input_dir = fastq_dir
+        if primer_cfg["mode"] != "off" and primer_cfg["stage"] == "pre_quality":
+            pre_quality_primer_dir = work / "raw_fastq_primer_trim"
+            pre_quality_primer_results = trim_primer_fastqs(
+                fastq_dir,
+                pre_quality_primer_dir,
+                forward_primers=primer_cfg["forward_primers"],
+                reverse_primers=primer_cfg["reverse_primers"],
+                max_mismatch=int(primer_cfg["max_mismatch"]),
+                max_search=int(primer_cfg["max_search"]),
+                max_primer_offset=int(primer_cfg["max_primer_offset"]),
+                iupac_mode=bool(primer_cfg["iupac_mode"]),
+                report_path=(work / "qc" / "primer_trim_report.tsv") if primer_cfg["mode"] == "clip" else None,
+                detect_report_path=work / "qc" / "primer_detect_report.tsv",
+                mode=str(primer_cfg["mode"]),
+            )
+            if primer_cfg["mode"] == "clip":
+                quality_input_dir = pre_quality_primer_dir
+
         biopy_trim(
-            fastq_dir,
+            quality_input_dir,
             work / "qc",
             combined_tsv=summary_tsv,
             method=str(trim_policy["sanger_method"]),
@@ -161,48 +302,50 @@ def run_trim(
             min_len=int(trim_policy["min_len"]),
         )
         trim_dir = work / "passed_qc_fastq"
+        if summary_tsv and primer_cfg["mode"] == "clip" and primer_cfg["stage"] == "pre_quality":
+            update_trim_summary(Path(summary_tsv), pre_quality_primer_results)
     else:
         input_path = Path(input_path) 
         trim_dir = work / "qc"
         trim_fastq_inputs(input_path, trim_dir, summary_tsv=summary_tsv) 
 
-    primer_cfg = cfg.get("primer_trim", {})
-    if primer_cfg.get("enabled"):
-        forward_primers = primer_cfg.get("forward_primers", [])
-        reverse_primers = primer_cfg.get("reverse_primers", [])
-        max_mismatch = int(primer_cfg.get("max_mismatch", 2))
-        max_search = int(primer_cfg.get("max_search", 60))
-        if forward_primers or reverse_primers:
-            primer_trim_dir = work / "passed_qc_fastq_primer_trim"
-            primer_report = work / "qc" / "primer_trim_report.tsv"
-            def _orientation_resolver(filename: str) -> str | None:
-                _sid, orient = extract_sid_orientation(filename)
-                return orient
+    if primer_cfg["mode"] != "off" and primer_cfg["stage"] == "post_quality":
+        primer_trim_dir = work / "passed_qc_fastq_primer_trim"
+        primer_detect_report = work / "qc" / "primer_detect_report.tsv"
+        primer_report = work / "qc" / "primer_trim_report.tsv"
 
-            primer_results = trim_primer_fastqs(
-                trim_dir,
-                primer_trim_dir,
-                forward_primers=forward_primers,
-                reverse_primers=reverse_primers,
-                max_mismatch=max_mismatch,
-                max_search=max_search,
-                max_primer_offset=int(primer_cfg.get("max_primer_offset", 10)),
-                iupac_mode=bool(primer_cfg.get("iupac_mode", True)),
-                report_path=primer_report,
-                orientation_resolver=_orientation_resolver,
-                post_quality_trim_enabled=bool(primer_cfg.get("post_quality_trim", {}).get("enabled", False)),
-                post_quality_method=str(primer_cfg.get("post_quality_trim", {}).get("method", trim_policy["sanger_method"])),
-                post_quality_cutoff_q=int(primer_cfg.get("post_quality_trim", {}).get("cutoff_q", trim_policy["sanger_cutoff_q"])),
-                post_quality_window_size=int(primer_cfg.get("post_quality_trim", {}).get("window_size", trim_policy["sanger_window_size"])),
-                post_quality_per_base_q=int(primer_cfg.get("post_quality_trim", {}).get("per_base_q", trim_policy["sanger_per_base_q"])),
-                post_quality_rescue_5prime_bases=int(primer_cfg.get("post_quality_trim", {}).get("rescue_5prime_bases", 0)),
-                post_quality_min_len=int(cfg.get("trim", {}).get("min_len", 200)),
-            )
-            if summary_tsv:
-                update_trim_summary(Path(summary_tsv), primer_results)
+        def _orientation_resolver(filename: str) -> str | None:
+            _sid, orient = extract_sid_orientation(filename)
+            return orient
+
+        post_cfg = primer_cfg.get("post_quality_trim", {}) if isinstance(primer_cfg.get("post_quality_trim", {}), dict) else {}
+        primer_results = trim_primer_fastqs(
+            trim_dir,
+            primer_trim_dir,
+            forward_primers=primer_cfg["forward_primers"],
+            reverse_primers=primer_cfg["reverse_primers"],
+            max_mismatch=int(primer_cfg["max_mismatch"]),
+            max_search=int(primer_cfg["max_search"]),
+            max_primer_offset=int(primer_cfg["max_primer_offset"]),
+            iupac_mode=bool(primer_cfg["iupac_mode"]),
+            report_path=primer_report if primer_cfg["mode"] == "clip" else None,
+            detect_report_path=primer_detect_report,
+            orientation_resolver=_orientation_resolver,
+            mode=str(primer_cfg["mode"]),
+            post_quality_trim_enabled=bool(post_cfg.get("enabled", False)) and primer_cfg["mode"] == "clip",
+            post_quality_method=str(post_cfg.get("method", trim_policy["sanger_method"])),
+            post_quality_cutoff_q=int(post_cfg.get("cutoff_q", trim_policy["sanger_cutoff_q"])),
+            post_quality_window_size=int(post_cfg.get("window_size", trim_policy["sanger_window_size"])),
+            post_quality_per_base_q=int(post_cfg.get("per_base_q", trim_policy["sanger_per_base_q"])),
+            post_quality_rescue_5prime_bases=int(post_cfg.get("rescue_5prime_bases", 0)),
+            post_quality_min_len=int(cfg.get("trim", {}).get("min_len", 200)),
+        )
+        if summary_tsv and primer_cfg["mode"] == "clip":
+            update_trim_summary(Path(summary_tsv), primer_results)
+        if primer_cfg["mode"] == "clip":
             trim_dir = primer_trim_dir
         else:
-            L.warning("Primer trim enabled but no primers configured; skipping primer trimming.")
+            L.info("Primer detect mode active; reads were not clipped.")
 
 
     if summary_tsv:
@@ -215,7 +358,10 @@ def run_trim(
                     avg_len=0.0,
                     avg_q=0.0,
                     qc_status="policy",
-                    trim_policy=policy_desc,
+                    trim_policy=(
+                        f"{policy_desc}; primer_mode={primer_cfg['mode']}; "
+                        f"primer_stage={primer_cfg['stage']}; primer_preset={primer_cfg['preset'] or 'custom'}; primer_source={primer_cfg.get('primer_source','custom')}"
+                    ),
                 )) + "\n")
 
     fastq_to_fasta(trim_dir, work / "qc" / "trimmed.fasta")
@@ -231,7 +377,7 @@ def run_assembly(fasta_in: PathLike, out_dir: PathLike, *, threads: int | None =
     de_novo_assembly(Path(fasta_in), Path(out_dir), **options)
     return 0
 
-def run_paired_assembly(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options=None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None) -> list[Path]:
+def run_paired_assembly(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options=None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None, use_qual: bool = True) -> list[Path]:
     return assemble_pairs(Path(input_dir), Path(output_dir), dup_policy=dup_policy, cap3_options=cap3_options, fwd_pattern=fwd_pattern, rev_pattern=rev_pattern, pairing_report=pairing_report, enforce_same_well=enforce_same_well, well_pattern=well_pattern, use_qual=use_qual )
 
 # ───────────────────────────────────────────────────────── BLAST
@@ -351,8 +497,6 @@ def run_postblast(
 
 
 # # ────────────────────────────────────────────────── full workflow here =)
-from pathlib import Path
-from microseq_tests.utility.utils import load_config, expand_db_path
 
 def _summarize_paired_candidates(
         directory: Path, fwd_pattern: str | None, rev_pattern: str | None, *, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None
@@ -648,6 +792,7 @@ def _write_overlap_audit(
     min_identity: float | None = None,
     min_quality: float | None = None,
     quality_mode: str = "warning",
+    emit_engine_audit: bool = True,
 ) -> dict[str, str]:
     config = load_config()
     merge_cfg = config.get("merge_two_reads", {})
@@ -672,16 +817,19 @@ def _write_overlap_audit(
     output_tsv.parent.mkdir(parents=True, exist_ok=True)
     engines_tsv = output_tsv.with_name("overlap_audit_engines.tsv")
     status_map: dict[str, str] = {}
-    with output_tsv.open("w", encoding="utf-8") as fh, engines_tsv.open("w", encoding="utf-8") as efh:
+    with output_tsv.open("w", encoding="utf-8") as fh, (
+        engines_tsv.open("w", encoding="utf-8") if emit_engine_audit else nullcontext()
+    ) as efh:
         fh.write(
             "sample_id	overlap_len	overlap_identity	overlap_quality	orientation	status"
             "	best_identity	best_identity_orientation	anchoring_feasible	end_anchored_possible"
-            "	selected_engine	fallback_used	overlap_engine\n"
+            "	selected_engine	fallback_used	configured_engine\n"
         )
-        efh.write(
-            "sample_id	engine	orientation	status	overlap_len	identity	overlap_quality"
-            "	end_anchored	anchoring_feasible	selected_for_merge\n"
-        )
+        if efh:
+            efh.write(
+                "sample_id	engine	orientation	status	overlap_len	identity	overlap_quality"
+                "	end_anchored	anchoring_feasible	selected_for_merge\n"
+            )
         for sample_id, entries in sorted(paired_samples.items()):
             if not entries["F"] or not entries["R"]:
                 status = "overlap_missing_reads"
@@ -825,13 +973,14 @@ def _write_overlap_audit(
                 f"	{'yes' if anchoring_feasible_selected else 'no'}	{'yes' if end_anchored_possible_selected else 'no'}"
                 f"\t{selected_engine}\t{fallback_used}\t{configured_overlap_engine}\n"
             )
-            for engine_name, overlap, status, end_anchored_possible_e, anchoring_feasible_e, _selected_ok in per_engine_rows:
-                efh.write(
-                    f"{sample_id}	{engine_name}	{overlap.orientation}	{status}	{overlap.overlap_len}"
-                    f"	{overlap.identity:.4f}	{'' if overlap.overlap_quality is None else f'{overlap.overlap_quality:.2f}'}"
-                    f"	{'yes' if end_anchored_possible_e else 'no'}	{'yes' if anchoring_feasible_e else 'no'}"
-                    f"\t{'yes' if engine_name == selected_engine else 'no'}\n"
-                )
+            if efh:
+                for engine_name, overlap, status, end_anchored_possible_e, anchoring_feasible_e, _selected_ok in per_engine_rows:
+                    efh.write(
+                        f"{sample_id}	{engine_name}	{overlap.orientation}	{status}	{overlap.overlap_len}"
+                        f"	{overlap.identity:.4f}	{'' if overlap.overlap_quality is None else f'{overlap.overlap_quality:.2f}'}"
+                        f"	{'yes' if end_anchored_possible_e else 'no'}	{'yes' if anchoring_feasible_e else 'no'}"
+                        f"\t{'yes' if engine_name == selected_engine else 'no'}\n"
+                    )
     return status_map
 
 def _build_blast_inputs(
@@ -935,6 +1084,157 @@ def _merge_cap3_contigs(
                 rec.description = ""
                 SeqIO.write(rec, out, "fasta")
 
+
+
+def run_compare_assemblers(
+    input_dir: PathLike,
+    out_dir: PathLike,
+    *,
+    fwd_pattern: str | None = None,
+    rev_pattern: str | None = None,
+    enforce_same_well: bool = False,
+    well_pattern: str | re.Pattern[str] | None = None,
+    on_stage=None,
+    on_progress=None,
+) -> Path:
+    """Run all registered assemblers against staged paired FASTA inputs and emit a comparison table."""
+    on_stage = on_stage or (lambda *_: None)
+    on_progress = on_progress or (lambda *_: None)
+
+    in_dir = Path(input_dir)
+    if not in_dir.exists() or not in_dir.is_dir():
+        raise ValueError(f"Assembler comparison requires a staged paired FASTA directory: {in_dir}")
+
+    has_ab1_or_fastq = any(in_dir.rglob("*.ab1")) or any(in_dir.rglob("*.fastq")) or any(in_dir.rglob("*.fq"))
+    has_fasta = any(in_dir.rglob("*.fasta")) or any(in_dir.rglob("*.fa")) or any(in_dir.rglob("*.fna")) or any(in_dir.rglob("*.fas"))
+    if has_ab1_or_fastq and not has_fasta:
+        raise ValueError(
+            "Assembler comparison expects pre-staged paired FASTA inputs. "
+            "Provide the paired FASTA staging directory (for example: qc/paired_fasta)."
+        )
+
+    out_root = Path(out_dir) / "asm" / "compare"
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    paired_samples, missing_samples = _collect_pairing_catalog(
+        in_dir,
+        fwd_pattern=fwd_pattern,
+        rev_pattern=rev_pattern,
+        dup_policy=DupPolicy.ERROR,
+        enforce_same_well=enforce_same_well,
+        well_pattern=well_pattern,
+    )
+    if not paired_samples:
+        raise ValueError("No paired samples available for assembler comparison")
+
+    cfg = load_config()
+    merge_cfg = cfg.get("merge_two_reads", {})
+    cap3_exe = str(cfg.get("tools", {}).get("cap3", "cap3")).strip() or "cap3"
+    overlap_min_overlap, overlap_min_identity, overlap_min_quality = _resolve_overlap_thresholds(cfg)
+    quality_mode = str(cfg.get("overlap_eval", {}).get("quality_mode", "warning")).strip().lower()
+    ambiguity_identity_delta = float(merge_cfg.get("ambiguity_identity_delta", 0.005))
+    ambiguity_quality_epsilon = float(merge_cfg.get("ambiguity_quality_epsilon", 0.25))
+    high_conflict_q_threshold = int(merge_cfg.get("high_conflict_q_threshold", 30))
+    high_conflict_action = str(merge_cfg.get("high_conflict_action", "warn")).strip().lower()
+    anchor_tolerance_bases = int(merge_cfg.get("anchor_tolerance_bases", 30))
+
+    specs = list_assemblers()
+    rows: list[dict[str, str]] = []
+    total = max(1, len(specs) * len(paired_samples))
+    done = 0
+
+    for spec in specs:
+        on_stage(f"Compare {spec.display_name}")
+        spec_dir = out_root / spec.id.replace(":", "_")
+        spec_dir.mkdir(parents=True, exist_ok=True)
+
+        for sample_id, entries in sorted(paired_samples.items()):
+            sample_dir = spec_dir / sample_id
+            sample_dir.mkdir(parents=True, exist_ok=True)
+            status = "pair_missing"
+            selected_engine = ""
+            contig_len = ""
+            warning = ""
+
+            if sample_id in missing_samples or not entries["F"] or not entries["R"]:
+                status = "pair_missing"
+            else:
+                fwd_path = entries["F"][0]
+                rev_path = entries["R"][0]
+                try:
+                    if spec.kind == "merge_two_reads":
+                        contig_path, report = merge_two_reads(
+                            sample_id=sample_id,
+                            fwd_path=fwd_path,
+                            rev_path=rev_path,
+                            output_dir=sample_dir,
+                            min_overlap=overlap_min_overlap,
+                            min_identity=overlap_min_identity,
+                            min_quality=overlap_min_quality,
+                            quality_mode=quality_mode,
+                            ambiguity_identity_delta=ambiguity_identity_delta,
+                            ambiguity_quality_epsilon=ambiguity_quality_epsilon,
+                            high_conflict_q_threshold=high_conflict_q_threshold,
+                            high_conflict_action=high_conflict_action,
+                            overlap_engine=spec.overlap_engine or "biopython",
+                            overlap_engine_strategy="single",
+                            overlap_engine_order=None,
+                            anchor_tolerance_bases=anchor_tolerance_bases,
+                        )
+                        status = report.merge_status
+                        selected_engine = report.overlap_engine
+                        warning = report.merge_warning or ""
+                        if contig_path and contig_path.exists():
+                            contigs_out = sample_dir / f"{sample_id}.contigs.fasta"
+                            shutil.copy(contig_path, contigs_out)
+                            lengths = [len(rec.seq) for rec in SeqIO.parse(contigs_out, "fasta")]
+                            if lengths:
+                                contig_len = str(max(lengths))
+                    else:
+                        cap3_args = _resolve_cap3_options(spec.cap3_profile or "strict", None, None)
+                        sample_fasta = sample_dir / f"{sample_id}_paired.fasta"
+                        with sample_fasta.open("w", encoding="utf-8") as fh:
+                            for rec in SeqIO.parse(fwd_path, "fasta"):
+                                SeqIO.write(rec, fh, "fasta")
+                            for rec in SeqIO.parse(rev_path, "fasta"):
+                                SeqIO.write(rec, fh, "fasta")
+                        import subprocess
+
+                        cmd = [cap3_exe, sample_fasta.name, *cap3_args]
+                        subprocess.run(cmd, cwd=sample_dir, capture_output=True, text=True, check=True)
+                        cap_contigs = sample_dir / f"{sample_fasta.name}.cap.contigs"
+                        lengths = [len(rec.seq) for rec in SeqIO.parse(cap_contigs, "fasta")] if cap_contigs.exists() else []
+                        status = "assembled" if lengths else "cap3_no_output"
+                        selected_engine = "cap3"
+                        if lengths:
+                            contig_len = str(max(lengths))
+                except Exception as exc:
+                    status = "error"
+                    warning = str(exc)
+
+            rows.append({
+                "sample_id": sample_id,
+                "assembler_id": spec.id,
+                "assembler_name": spec.display_name,
+                "status": status,
+                "selected_engine": selected_engine,
+                "contig_len": contig_len,
+                "warnings": warning,
+            })
+
+            done += 1
+            on_progress(int(done * 100 / total))
+
+    out_tsv = Path(out_dir) / "asm" / "compare_assemblers.tsv"
+    out_tsv.parent.mkdir(parents=True, exist_ok=True)
+    headers = ["sample_id", "assembler_id", "assembler_name", "status", "selected_engine", "contig_len", "warnings"]
+    with out_tsv.open("w", encoding="utf-8") as fh:
+        fh.write("\t".join(headers) + "\n")
+        for row in rows:
+            fh.write("\t".join(row.get(h, "") for h in headers) + "\n")
+    return out_tsv
+
+
 def run_full_pipeline(
     infile: Path,
     db_key: str,
@@ -968,6 +1268,7 @@ def run_full_pipeline(
     chimera_mode: str = "off",
     chimera_db: PathLike | None = None,
     overlap_audit: bool = False, 
+    primer_cfg_override: dict | None = None,
     on_stage=None,
     on_progress=None,
 ) -> dict[str, Path | None]:
@@ -996,10 +1297,23 @@ def run_full_pipeline(
     on_progress(0)
 
     cfg = load_config()
+    if primer_cfg_override:
+        merged_primer = dict(cfg.get("primer_trim", {}))
+        merged_primer.update(primer_cfg_override)
+        cfg["primer_trim"] = merged_primer
+    primer_cfg = _normalize_primer_trim_cfg(cfg)
+    reporting_cfg = _reporting_flags(cfg)
     overlap_min_overlap, overlap_min_identity, overlap_min_quality = _resolve_overlap_thresholds(cfg)
     overlap_quality_mode = str(cfg.get("overlap_eval", {}).get("quality_mode", "warning")).strip().lower()
     if overlap_quality_mode not in {"blocking", "warning"}:
         overlap_quality_mode = "warning"
+    merge_cfg = cfg.get("merge_two_reads", {})
+    configured_overlap_engine = str(merge_cfg.get("overlap_engine", "auto")).strip().lower()
+    overlap_strategy = str(merge_cfg.get("overlap_engine_strategy", "cascade")).strip().lower()
+    raw_engine_order = merge_cfg.get("overlap_engine_order", ["biopython", "ungapped", "edlib"])
+    if isinstance(raw_engine_order, str):
+        raw_engine_order = [tok.strip() for tok in raw_engine_order.split(",") if tok.strip()]
+    overlap_engine_order_str = ",".join(str(tok) for tok in raw_engine_order)
     chimera_db_path: Path | None = None
     if chimera_mode != "off":
         if chimera_db:
@@ -1080,7 +1394,7 @@ def run_full_pipeline(
         assembly_input = infile
         if not is_fasta:
             on_stage("Trim")
-            run_trim(infile, out_dir, sanger=True, summary_tsv=summary_tsv,)
+            run_trim(infile, out_dir, sanger=True, summary_tsv=summary_tsv, primer_cfg_override=primer_cfg_override)
             if thr and thr.isInterruptionRequested():
                 raise RuntimeError("Cancelled")
             pct += step
@@ -1158,19 +1472,14 @@ def run_full_pipeline(
                     min_identity=overlap_min_identity,
                     min_quality=overlap_min_quality,
                     quality_mode=overlap_quality_mode,
+                    emit_engine_audit=reporting_cfg["emit_engine_audit"],
                 )
             else:
                 L.warning("Overlap audit skipped; paired input is not a directory: %s", assembly_input)
 
         assembly_summary = paths["assembly_summary"]
-        if assembly_summary:
-            parse_cap3_reports(
-                out_dir / "asm",
-                sorted(set(paired_samples.keys()) | set(missing_samples)),
-                output_tsv=assembly_summary,
-                missing_samples=missing_samples,
-                overlap_status=overlap_status,
-            )
+        overlap_rows = _load_tsv_rows_by_sample(paths["overlap_audit"]) if paths.get("overlap_audit") else {}
+        blast_payload_rows: dict[str, dict[str, str]] = {}
         merged_contigs = out_dir / "asm" / "paired_contigs.fasta"
         _merge_cap3_contigs(contig_paths, merged_contigs)
 
@@ -1188,6 +1497,50 @@ def run_full_pipeline(
                 blast_inputs_fasta,
                 blast_inputs_tsv,
             )
+            blast_payload_rows = _load_tsv_rows_by_sample(blast_inputs_tsv)
+            if assembly_summary:
+                parse_cap3_reports(
+                    out_dir / "asm",
+                    sorted(set(paired_samples.keys()) | set(missing_samples)),
+                    output_tsv=assembly_summary,
+                    missing_samples=missing_samples,
+                    overlap_status=overlap_status,
+                    overlap_rows=overlap_rows,
+                    blast_payloads=blast_payload_rows,
+                    primer_mode=str(primer_cfg["mode"]),
+                    primer_stage=str(primer_cfg["stage"]),
+                    primer_preset=str(primer_cfg.get("preset", "")),
+                    primer_source=str(primer_cfg.get("primer_source", "custom")),
+                    configured_engine=configured_overlap_engine,
+                    overlap_engine_strategy=overlap_strategy,
+                    overlap_engine_order=overlap_engine_order_str,
+                    overlap_quality_mode=overlap_quality_mode,
+                )
+
+        if assembly_summary and not write_blast_inputs:
+            parse_cap3_reports(
+                out_dir / "asm",
+                sorted(set(paired_samples.keys()) | set(missing_samples)),
+                output_tsv=assembly_summary,
+                missing_samples=missing_samples,
+                overlap_status=overlap_status,
+                overlap_rows=overlap_rows,
+                blast_payloads=blast_payload_rows,
+                primer_mode=str(primer_cfg["mode"]),
+                primer_stage=str(primer_cfg["stage"]),
+                primer_preset=str(primer_cfg.get("preset", "")),
+                primer_source=str(primer_cfg.get("primer_source", "custom")),
+                configured_engine=configured_overlap_engine,
+                overlap_engine_strategy=overlap_strategy,
+                overlap_engine_order=overlap_engine_order_str,
+                overlap_quality_mode=overlap_quality_mode,
+            )
+
+        if not reporting_cfg["emit_per_sample_merge_report"]:
+            for sample_id in paired_samples.keys():
+                rp = (out_dir / "asm" / sample_id / f"{sample_id}_paired.merge_report.tsv")
+                if rp.exists():
+                    rp.unlink()
 
         if use_blast_inputs and write_blast_inputs:
             paths["fasta"] = blast_inputs_fasta
@@ -1204,7 +1557,7 @@ def run_full_pipeline(
         on_stage("Trim")
 
         sanger = infile.is_dir() or infile.suffix.lower() == ".ab1"
-        run_trim(infile, out_dir, sanger=sanger, summary_tsv=summary_tsv,)
+        run_trim(infile, out_dir, sanger=sanger, summary_tsv=summary_tsv, primer_cfg_override=primer_cfg_override)
 
         pct += step
         on_progress(pct)
