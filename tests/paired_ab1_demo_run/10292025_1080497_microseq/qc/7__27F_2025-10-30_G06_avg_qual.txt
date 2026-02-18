@@ -1,1 +1,2 @@
-7__27F	781	42.29
+read_id	left_trim_bases	right_trim_bases	final_len	mean_q
+7__27F	54	3	778	42.42

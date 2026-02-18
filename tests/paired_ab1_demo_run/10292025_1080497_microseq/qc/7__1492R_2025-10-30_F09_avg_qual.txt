@@ -1,1 +1,2 @@
-7__1492R	942	32.03
+read_id	left_trim_bases	right_trim_bases	final_len	mean_q
+7__1492R	62	72	867	33.29

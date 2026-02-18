@@ -1,24 +1,24 @@
-sample_id	overlaps_saved	overlaps_removed	contigs_count	singlets_count	clip_f_left	clip_f_right	clip_r_left	clip_r_right	status	merge_status	merge_overlap_len	merge_identity	merge_qualities	merge_warning	merge_high_conflict_mismatches	cap3_validation
-1	1	0	1	0	1	653	1	1131	overlap_identity_low	identity_low	653	0.2864	present		0	
-10	0	0	1	0					assembled	merged	675	0.8370	present	high_conflict	17	
-11	1	1	0	2					overlap_identity_low	identity_low	996	0.2711	present		0	
-12	1	0	1	0	1	989	1	1060	overlap_identity_low	identity_low	989	0.2720	present		0	
-13	1	1	0	2					overlap_identity_low	identity_low	512	0.2891	present		0	
-14	1	0	1	0	1	1058	1	1020	overlap_identity_low	identity_low	1020	0.2598	present		0	
-15	1	0	1	0	1	995	1	1045	overlap_identity_low	identity_low	995	0.2583	present		0	
-16	1	1	0	2					overlap_identity_low	identity_low	1038	0.2697	present		0	
-17	1	1	0	2					overlap_identity_low	identity_low	1063	0.2672	present		0	
-18	0	0	0	0					pair_missing							
-2	1	1	0	2					overlap_identity_low	identity_low	1070	0.2589	present		0	
-23	1	0	1	0	1	1094	1	1085	overlap_identity_low	identity_low	1085	0.2581	present		0	
-24	1	0	1	0	1	1072	1	1036	overlap_identity_low	identity_low	1036	0.2529	present		0	
-25	1	0	1	0	1	1000	1	1083	overlap_identity_low	identity_low	1000	0.2600	present		0	
-26	1	0	1	0	1	1055	1	1067	overlap_identity_low	identity_low	1055	0.2777	present		0	
-27	0	0	1	0					assembled	merged	743	0.8116	present	high_conflict	17	
-3	1	1	0	2					overlap_identity_low	identity_low	1022	0.2554	present		0	
-4	1	1	0	2					overlap_identity_low	identity_low	803	0.2690	present		0	
-5	1	1	0	2					overlap_identity_low	identity_low	961	0.2570	present		0	
-6	1	1	0	2					overlap_identity_low	identity_low	994	0.2565	present		0	
-7	1	1	0	2					overlap_identity_low	identity_low	781	0.2574	present		0	
-8	0	0	1	0					assembled	merged	711	0.8073	present	high_conflict	21	
-9	1	0	1	0	1	1014	1	1055	overlap_identity_low	identity_low	1014	0.2623	present		0	
+sample_id	overlaps_saved	overlaps_removed	contigs_count	singlets_count	clip_f_left	clip_f_right	clip_r_left	clip_r_right	status	merge_status	merge_overlap_engine	merge_overlap_len	merge_identity	merge_qualities	merge_warning	merge_high_conflict_mismatches	cap3_validation	assembler	selected_engine	configured_engine	fallback_used	audit_status	audit_overlap_identity	audit_overlap_quality	audit_overlap_orientation	contig_len	blast_payload	primer_mode	primer_stage	primer_preset	primer_source	overlap_engine_strategy	overlap_engine_order	overlap_quality_mode
+1	1	0	1	0	1	593	1	918	ambiguous_overlap	ambiguous_overlap	biopython	213	0.9725	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9725	21.73	revcomp	1293	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+10	0	0	1	0					assembled	merged	ungapped	612	0.9020	present	high_conflict	15		merge_two_reads	ungapped	auto	yes	ok	0.9020	32.49	revcomp	1357	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+11	1	0	1	0	1	957	1	897	ambiguous_overlap	ambiguous_overlap	biopython	505	0.9728	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9728	25.17	revcomp	1344	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+12	1	0	1	0	1	952	1	909	ambiguous_overlap	ambiguous_overlap	biopython	525	0.9850	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9850	31.66	revcomp	1332	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+13	0	0	0	2					overlap_identity_low	identity_low	biopython	112	0.5816	present		0		cap3	biopython	auto	no	overlap_identity_low	0.5816	27.21	forward	0	singlet	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+14	1	0	1	0	1	969	1	952	ambiguous_overlap	ambiguous_overlap	biopython	557	0.9840	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9840	30.58	revcomp	1359	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+15	1	0	1	0	1	988	1	948	ambiguous_overlap	ambiguous_overlap	biopython	529	0.9722	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9722	29.91	revcomp	1397	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+16	1	0	1	0	1	958	1	884	ambiguous_overlap	ambiguous_overlap	biopython	489	0.9779	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9779	30.69	revcomp	1347	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+17	1	0	1	0	1	948	1	926	ambiguous_overlap	ambiguous_overlap	biopython	542	0.9819	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9819	30.53	revcomp	1326	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+18	0	0	0	2					overlap_identity_low	identity_low	biopython	105	0.5873	present		0		cap3	biopython	auto	no	overlap_identity_low	0.5873	17.21	forward	0	singlet	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+2	1	0	1	0	1	963	1	954	ambiguous_overlap	ambiguous_overlap	biopython	562	0.9877	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9877	32.14	revcomp	1350	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+23	1	0	1	0	1	985	1	1029	ambiguous_overlap	ambiguous_overlap	biopython	611	0.9744	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9744	30.10	revcomp	1390	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+24	1	0	1	0	1	986	1	984	ambiguous_overlap	ambiguous_overlap	biopython	568	0.9930	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9930	33.65	revcomp	1399	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+25	1	1	0	2					ambiguous_overlap	ambiguous_overlap	biopython	536	0.9744	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9744	31.05	revcomp	0	singlet	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+26	0	0	1	0					assembled	merged	ungapped	589	0.8387	present	high_conflict	26		merge_two_reads	ungapped	auto	yes	ok	0.8387	32.64	revcomp	1411	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+27	0	0	1	0					assembled	merged	ungapped	597	0.9246	present	high_conflict	10		merge_two_reads	ungapped	auto	yes	ok	0.9246	33.17	revcomp	1398	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+3	1	0	1	0	1	985	1	927	ambiguous_overlap	ambiguous_overlap	biopython	565	0.9860	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9860	30.66	revcomp	1339	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+4	0	0	1	0					assembled	merged	ungapped	351	0.8091	present	high_conflict	8		merge_two_reads	ungapped	auto	yes	ok	0.8091	23.65	revcomp	1327	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+5	1	1	0	2					ambiguous_overlap	ambiguous_overlap	biopython	455	0.9241	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9241	18.09	revcomp	0	singlet	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+6	1	0	1	0	1	922	1	880	ambiguous_overlap	ambiguous_overlap	biopython	435	0.9507	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9507	21.72	revcomp	1358	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+7	1	1	0	2					ambiguous_overlap	ambiguous_overlap	biopython	295	0.9446	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9446	21.56	revcomp	0	singlet	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+8	0	0	1	0					assembled	merged	ungapped	519	0.9653	present	high_conflict	5		merge_two_reads	ungapped	auto	yes	ok	0.9653	33.73	revcomp	1400	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning
+9	1	0	1	0	1	971	1	938	ambiguous_overlap	ambiguous_overlap	biopython	556	0.9911	present		0		cap3	biopython	auto	no	ambiguous_overlap	0.9911	31.92	revcomp	1348	contig	clip	post_quality	16S_27F_1492R	preset	cascade	biopython,ungapped,edlib	warning

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 import logging
+
+from numpy import partition
+from pandas.core.generic import sample
 L = logging.getLogger(__name__)
 import os
 import inspect
@@ -1163,6 +1166,7 @@ class MainWindow(QMainWindow):
         self._summary_rows: dict[str, dict[str, str]] = {}
         self._blast_rows: dict[str, dict[str, str]] = {}
         self._audit_rows: dict[str, dict[str, str]] = {}
+        self._compare_rows: dict[tuple[str, str], dict[str, str]] = {} 
         self._active_viewer: Optional[QDialog] = None
         self._active_pairing_preview: Optional[QDialog] = None
 
@@ -2392,6 +2396,7 @@ class MainWindow(QMainWindow):
             return
         df = pd.read_csv(compare_path, sep="\t")
         self.compare_table.setRowCount(0)
+        self._compare_rows.clear() 
         for row_idx, row in df.iterrows():
             self.compare_table.insertRow(row_idx)
             row_values = [
@@ -2407,6 +2412,25 @@ class MainWindow(QMainWindow):
                 item = QTableWidgetItem(value)
                 item.setToolTip(value)
                 self.compare_table.setItem(row_idx, col, item)
+            sample_id = row_values[0]
+            assembler_id = row_values[1]
+            self._compare_rows[(sample_id, assembler_id)] = {
+                "sample_id": sample_id,
+                "assembler_id": assembler_id,
+                "assembler_name": row_values[2],
+                "status": row_values[3],
+                "selected_engine": row_values[4],
+                "contig_len": row_values[5],
+                "warnings": row_values[6],
+                "diag_code_for_machine": self._fmt_table_value(row.get("diag_code_for_machine", "")),
+                "diag_detail_for_human": self._fmt_table_value(row.get("diag_detail_for_human", "")),
+                "cap3_contigs_n": self._fmt_table_value(row.get("cap3_contigs_n", "")),
+                "cap3_singlets_n": self._fmt_table_value(row.get("cap3_singlets_n", "")),
+                "cap3_info_path": self._fmt_table_value(row.get("cap3_info_path", "")),
+                "cap3_stdout_path": self._fmt_table_value(row.get("cap3_stdout_path", "")),
+                "cap3_stderr_path": self._fmt_table_value(row.get("cap3_stderr_path", "")),
+            } 
+
         self._configure_table_view(self.compare_table)
 
     def _apply_summary_filter(self) -> None:
@@ -2450,6 +2474,31 @@ class MainWindow(QMainWindow):
                 return [item.text()]
         return []
 
+    def _selected_compare_keys(self) -> list[tuple[str, str]]:
+        """ This is to pair the sample id and asm id together to help with troubleshooting in the compare assembly tab.""" 
+        model = self.compare_table.selectionModel() 
+        if not model:
+            return [] 
+        rows = model.selectedRows(0)
+        selected: list[tuple[str, str]] = [] 
+        for idx in rows: 
+            row = idx.row() 
+            sid_item = self.compare_table.item(row, 0)
+            asm_item = self.compare_table.item(row, 1)
+            if sid_item and asm_item:
+                selected.append((sid_item.text(), asm_item.text()))
+
+            if selected:
+                return selected 
+
+            row = self.compare_table.currentRow()
+            if row >= 0: 
+                sid_item = self.compare_table.item(row, 0)
+                asm_item = self.compare_table.item(row, 1)  
+                if sid_item and asm_item:
+                    return [(sid_item.text(), asm_item.text())]
+            return [] 
+
     def _join_values(self, values: list[str]) -> str:
         cleaned = [v for v in values if v]
         if not cleaned:
@@ -2476,6 +2525,38 @@ class MainWindow(QMainWindow):
         sample_ids = self._selected_sample_ids(table) if table else []
         if not sample_ids:
             return
+
+        compare_keys = self._selected_compare_keys() if tab_index == 4 else [] 
+        if compare_keys:
+            rows = [self._compare_rows.get(k, {}) for k in compare_keys]
+            self.detail_sample_lbl.setText(
+                f"sample_id: {self._join_values([r.get('sample_id', '') for r in rows])}"
+            )
+            self.detail_status_lbl.setText(
+                f"status: {self._join_values([r.get('status', '-') for r in rows])}"
+            )
+            reason_bits = [] 
+            for r in rows:
+                parts = [r.get("diag_code_for_machine", ""), r.get("diag_detail_for_human", ""), r.get("warnings", "")]
+                reason_bits.append(" | ".join(p for p in parts if p) or "-")
+            self.detail_reason_lbl.setText(f"reason: {self._join_values(reason_bits)}")
+            payload_vals = ["contig" if r.get("payload_fasta") else "no_payload" for r in rows]
+            self.detail_payload_lbl.setText(f"blast_payload: {self._join_values(payload_vals)}")
+            cap3_meta = [] 
+            for r in rows:
+                if r.get("cap3_contigs_n") or r.get("cap3_singlets_n"):
+                    cap3_meta.append(
+                        f"{r.get('assembler_id', '')} contigs={r.get('cap3_contigs_n', '0')} singlets= {r.get('cap3_singlets_n', '0')}"
+                    )
+                else:
+                    cap3_meta.append(r.get("assembler_id", ""))
+            self.detail_payload_lbl.setText(f"payload_ids: {self._join_values(cap3_meta)}")
+            self.detail_assembly_engine_lbl.setText(
+                f"assembly path: {self._join_values([r.get('assembler_name', '') for r in rows])}"
+            )
+
+            audit_values = [self._audit_rows.get(r.get("sample_id", ""), {}) for r in rows]
+            statuses = 
 
         summary_vals = [self._summary_rows.get(sid, {}).get("status", "—") for sid in sample_ids]
         reason_vals = [self._blast_rows.get(sid, {}).get("reason", "—") for sid in sample_ids]

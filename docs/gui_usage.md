@@ -220,3 +220,45 @@ Key files to highlight in the GUI doc:
 * `qc/pairing_report.tsv` shows which forward/reverse files paired, along with any missing mates or well conflicts.
 * `asm/*_paired.fasta.cap.singlets` is expected from CAP3; it lists input reads that could not be merged into a contig at the overlap/identity thresholds.
 * `asm/contig_map.tsv` links each contig back to the input reads used, which is helpful when auditing assemblies or troubleshooting mismatched pairs.
+
+## Troublehshooting what the different Status sign means in Assembly Summary Tab
+So in the dropdown menu in Assembler selection for `CAP3 default (legacy paired pipeline)` it will run it on 2 assemblers first and ungapped merged algorithm and if it fails to produce a good quality contig then it will fallback to cap3 based on what profiles you chose on the left side of the gui for `CAP3 Profile` (strict, relaxed, diagnostic). 
+
+If you get the status `ambiguous_overlap` this means that the overlap selector found multiple top feasable candidates that are effectively tied, so it refuses to pick a unique merge. It is a merge/overlap ambiguity signal here essentially. Why do I have it labeled as "ambiguous"? Because in the tie logic I have set it its explicit in checking if a) same overlap length, same mismatch count, and very close in quality/identity with configured epsilons. When all this happens, then the selector will return the status "ambiguous_overlap" instead of "assembled" which represents the single best overlap. 
+
+## Explaning what each of the columns means in the Tabs Assembly Summary, Blast Inputs, Diagnostics, Compare Assemblers 
+
+### Assembly Summary Tab 
+`sample_id`: The sample key used throughout paired assembly outputs. 
+`status`: Finaly summary status for that sample. In legacy Cap3 mode this can be cap3-derived (`assembled`, `singlets_only`, `cap3_no_output`) and may be overridden by overlap audit `overlap_*` or for example as I suggested earlier `ambiguous_overlap`.
+`assembler`: Which assembler path was selected for summary (ie `cap3:relaxed, merge_two_reads:*`) etc, in the selected/all mode, or `cap3/merge_two_reads` in legacy report parsing. 
+`contig_len`: Length of selected/produced contig payload (max length here when multple records) 
+`blast_payload`: This is what is being passed to BLAST (contig, singlet, no_payload, pair_missing depending on mode/results). 
+`selected_engine`: Engine that produced the chosen result for example overlap engine for `merge_two_reads` rows, `cap3` for cap3 results etc. 
+`configured_engine`: Configured overlap engine (legacy parse path populates; selected/all summary currently leaves blank will adjust this later on). 
+`merge_status`: Merge prepass status (`merged`, `identity_low`, `overlap_too_short`, `quality_low`, `ambiguous_overlap`, `not_end_anchored`, `high_conflict`)
+`merge_overlap_len`: Overlap length measured by merge pre-pass (legacy parse path).
+`merge_identity`: Overlap identity from merge pre-pass. 
+`overlaps_saved / overlaps_removed`: Parsed from CAP3 `.cap.info` overlap counters. 
+`primer_mode / primer_stage`: Run time primer trimming policy (off/detect/clip and pre/post quality stage). 
+
+### BLAST Inputs Tab 
+`sample_id`: Sample key for payload row. 
+`blast_payload`: Type of sequence payload sent to BLAST(`contig`, `singlet`, `no_payload`, `pair_missing`)
+`reason`: Why that payload choice happened. Legacy examples `contigs_present`, `singlets_only`, `cap3_no_output`, `pair_missing`. Selected/all compare examples: `selected_payload`, `winner_no_payload`, `selected_backend_no_payload`, `pair_missing`. 
+`payload_ids`: Mapping of rewritten FASTA ids to original ids, eg `sample|contig|cap3_relaxed1=contig1`
+
+### Diagnostic Tab 
+`sample_id`: Sample key audited. 
+`overlap_len`: Chosen overlap length. 
+`overlap_identity`: Identity of selected overlap candidate
+`overlap_quality`: Mean overlap quality 
+`orientation`: Selected overlap orientation (`revcomp` / `forward`)
+`status`: Overlap audit status (`ok`, `overlap_too_short`, `overlap_identity_low`, `overlap_quality_low`, `ambiguous_overlap`, `not_end_anchored`)
+`best_identity`: Best identity value seen among condidates used in diagnostic context 
+`best_identity_orientation`: Orientation associated with best identity candidate. 
+`anchoring_feasible`: Whether at least one candidate can satify end anchor + thresholds. 
+`end_anchored_possible`: Whether any candidate is end anchored at all. 
+
+### What does anchoring feasability even mean? 
+

@@ -1,44 +1,44 @@
 cap3_executable	cap3
 cap3_version	cap3 10.2011
 sample_id	cap3_command
-1	merge_two_reads orientation=revcomp overlap=653 identity=0.2864
+1	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=213 identity=0.9725
 1	cap3 1_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-10	merge_two_reads orientation=revcomp overlap=675 identity=0.8370
-11	merge_two_reads orientation=revcomp overlap=996 identity=0.2711
+10	merge_two_reads engine=ungapped strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=612 identity=0.9020
+11	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=505 identity=0.9728
 11	cap3 11_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-12	merge_two_reads orientation=revcomp overlap=989 identity=0.2720
+12	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=525 identity=0.9850
 12	cap3 12_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-13	merge_two_reads orientation=revcomp overlap=512 identity=0.2891
+13	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=forward overlap=112 identity=0.5816
 13	cap3 13_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-14	merge_two_reads orientation=forward overlap=1020 identity=0.2598
+14	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=557 identity=0.9840
 14	cap3 14_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-15	merge_two_reads orientation=forward overlap=995 identity=0.2583
+15	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=529 identity=0.9722
 15	cap3 15_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-16	merge_two_reads orientation=forward overlap=1038 identity=0.2697
+16	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=489 identity=0.9779
 16	cap3 16_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-17	merge_two_reads orientation=revcomp overlap=1063 identity=0.2672
+17	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=542 identity=0.9819
 17	cap3 17_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-2	merge_two_reads orientation=revcomp overlap=1070 identity=0.2589
+18	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=forward overlap=105 identity=0.5873
+18	cap3 18_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+2	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=562 identity=0.9877
 2	cap3 2_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-23	merge_two_reads orientation=revcomp overlap=1085 identity=0.2581
+23	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=611 identity=0.9744
 23	cap3 23_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-24	merge_two_reads orientation=revcomp overlap=1036 identity=0.2529
+24	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=568 identity=0.9930
 24	cap3 24_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-25	merge_two_reads orientation=revcomp overlap=1000 identity=0.2600
+25	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=536 identity=0.9744
 25	cap3 25_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-26	merge_two_reads orientation=revcomp overlap=1055 identity=0.2777
-26	cap3 26_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-27	merge_two_reads orientation=revcomp overlap=743 identity=0.8116
-3	merge_two_reads orientation=revcomp overlap=1022 identity=0.2554
+26	merge_two_reads engine=ungapped strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=589 identity=0.8387
+27	merge_two_reads engine=ungapped strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=597 identity=0.9246
+3	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=565 identity=0.9860
 3	cap3 3_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-4	merge_two_reads orientation=revcomp overlap=803 identity=0.2690
-4	cap3 4_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-5	merge_two_reads orientation=revcomp overlap=961 identity=0.2570
+4	merge_two_reads engine=ungapped strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=351 identity=0.8091
+5	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=455 identity=0.9241
 5	cap3 5_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-6	merge_two_reads orientation=forward overlap=994 identity=0.2565
+6	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=435 identity=0.9507
 6	cap3 6_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-7	merge_two_reads orientation=forward overlap=781 identity=0.2574
+7	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=295 identity=0.9446
 7	cap3 7_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
-8	merge_two_reads orientation=revcomp overlap=711 identity=0.8073
-9	merge_two_reads orientation=revcomp overlap=1014 identity=0.2623
+8	merge_two_reads engine=ungapped strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=519 identity=0.9653
+9	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=556 identity=0.9911
 9	cap3 9_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100

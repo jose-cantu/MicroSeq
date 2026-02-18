@@ -1,0 +1,139 @@
+sample_id	assembler_id	assembler_name	dup_policy	status	selected_engine	contig_len	warnings	payload_fasta
+1	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+10	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+11	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+12	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+13	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	identity_low	biopython			
+14	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+15	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+16	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+17	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+18	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	identity_low	biopython			
+2	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+23	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+24	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+25	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+26	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+27	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+3	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+4	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+5	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+6	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+7	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+8	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+9	merge_two_reads:biopython	Merge two reads (Biopython overlap)	error	ambiguous_overlap	biopython			
+1	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+10	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	merged	ungapped	1357	high_conflict	/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/merge_two_reads_ungapped/10/payload.fasta
+11	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+12	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+13	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+14	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+15	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+16	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+17	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+18	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+2	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+23	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+24	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+25	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+26	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	merged	ungapped	1411	high_conflict	/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/merge_two_reads_ungapped/26/payload.fasta
+27	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	merged	ungapped	1398	high_conflict	/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/merge_two_reads_ungapped/27/payload.fasta
+3	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+4	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	merged	ungapped	1327	high_conflict	/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/merge_two_reads_ungapped/4/payload.fasta
+5	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+6	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+7	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+8	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	merged	ungapped	1400	high_conflict	/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/merge_two_reads_ungapped/8/payload.fasta
+9	merge_two_reads:ungapped	Merge two reads (Ungapped overlap)	error	identity_low	ungapped			
+1	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	not_end_anchored	edlib			
+10	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+11	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+12	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+13	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+14	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+15	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+16	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	not_end_anchored	edlib			
+17	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+18	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+2	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+23	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+24	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+25	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+26	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+27	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+3	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+4	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	not_end_anchored	edlib			
+5	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+6	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+7	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+8	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+9	merge_two_reads:edlib	Merge two reads (Edlib overlap)	error	identity_low	edlib			
+1	cap3:strict	CAP3 (Strict profile)	error	assembled	cap3	1293		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_strict/1/payload.fasta
+10	cap3:strict	CAP3 (Strict profile)	error	assembled	cap3	1357		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_strict/10/payload.fasta
+11	cap3:strict	CAP3 (Strict profile)	error	cap3_no_output	cap3			
+12	cap3:strict	CAP3 (Strict profile)	error	assembled	cap3	1332		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_strict/12/payload.fasta
+13	cap3:strict	CAP3 (Strict profile)	error	cap3_no_output	cap3			
+14	cap3:strict	CAP3 (Strict profile)	error	assembled	cap3	1359		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_strict/14/payload.fasta
+15	cap3:strict	CAP3 (Strict profile)	error	cap3_no_output	cap3			
+16	cap3:strict	CAP3 (Strict profile)	error	cap3_no_output	cap3			
+17	cap3:strict	CAP3 (Strict profile)	error	assembled	cap3	1326		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_strict/17/payload.fasta
+18	cap3:strict	CAP3 (Strict profile)	error	cap3_no_output	cap3			
+2	cap3:strict	CAP3 (Strict profile)	error	assembled	cap3	1350		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_strict/2/payload.fasta
+23	cap3:strict	CAP3 (Strict profile)	error	assembled	cap3	1390		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_strict/23/payload.fasta
+24	cap3:strict	CAP3 (Strict profile)	error	assembled	cap3	1399		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_strict/24/payload.fasta
+25	cap3:strict	CAP3 (Strict profile)	error	cap3_no_output	cap3			
+26	cap3:strict	CAP3 (Strict profile)	error	assembled	cap3	1411		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_strict/26/payload.fasta
+27	cap3:strict	CAP3 (Strict profile)	error	assembled	cap3	1398		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_strict/27/payload.fasta
+3	cap3:strict	CAP3 (Strict profile)	error	assembled	cap3	1339		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_strict/3/payload.fasta
+4	cap3:strict	CAP3 (Strict profile)	error	assembled	cap3	1327		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_strict/4/payload.fasta
+5	cap3:strict	CAP3 (Strict profile)	error	cap3_no_output	cap3			
+6	cap3:strict	CAP3 (Strict profile)	error	cap3_no_output	cap3			
+7	cap3:strict	CAP3 (Strict profile)	error	cap3_no_output	cap3			
+8	cap3:strict	CAP3 (Strict profile)	error	assembled	cap3	1400		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_strict/8/payload.fasta
+9	cap3:strict	CAP3 (Strict profile)	error	assembled	cap3	1348		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_strict/9/payload.fasta
+1	cap3:diagnostic	CAP3 (Diagnostic profile)	error	assembled	cap3	1293		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_diagnostic/1/payload.fasta
+10	cap3:diagnostic	CAP3 (Diagnostic profile)	error	assembled	cap3	1357		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_diagnostic/10/payload.fasta
+11	cap3:diagnostic	CAP3 (Diagnostic profile)	error	cap3_no_output	cap3			
+12	cap3:diagnostic	CAP3 (Diagnostic profile)	error	assembled	cap3	1332		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_diagnostic/12/payload.fasta
+13	cap3:diagnostic	CAP3 (Diagnostic profile)	error	cap3_no_output	cap3			
+14	cap3:diagnostic	CAP3 (Diagnostic profile)	error	assembled	cap3	1359		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_diagnostic/14/payload.fasta
+15	cap3:diagnostic	CAP3 (Diagnostic profile)	error	cap3_no_output	cap3			
+16	cap3:diagnostic	CAP3 (Diagnostic profile)	error	cap3_no_output	cap3			
+17	cap3:diagnostic	CAP3 (Diagnostic profile)	error	assembled	cap3	1326		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_diagnostic/17/payload.fasta
+18	cap3:diagnostic	CAP3 (Diagnostic profile)	error	cap3_no_output	cap3			
+2	cap3:diagnostic	CAP3 (Diagnostic profile)	error	assembled	cap3	1350		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_diagnostic/2/payload.fasta
+23	cap3:diagnostic	CAP3 (Diagnostic profile)	error	assembled	cap3	1390		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_diagnostic/23/payload.fasta
+24	cap3:diagnostic	CAP3 (Diagnostic profile)	error	assembled	cap3	1399		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_diagnostic/24/payload.fasta
+25	cap3:diagnostic	CAP3 (Diagnostic profile)	error	cap3_no_output	cap3			
+26	cap3:diagnostic	CAP3 (Diagnostic profile)	error	assembled	cap3	1411		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_diagnostic/26/payload.fasta
+27	cap3:diagnostic	CAP3 (Diagnostic profile)	error	assembled	cap3	1398		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_diagnostic/27/payload.fasta
+3	cap3:diagnostic	CAP3 (Diagnostic profile)	error	assembled	cap3	1339		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_diagnostic/3/payload.fasta
+4	cap3:diagnostic	CAP3 (Diagnostic profile)	error	assembled	cap3	1327		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_diagnostic/4/payload.fasta
+5	cap3:diagnostic	CAP3 (Diagnostic profile)	error	cap3_no_output	cap3			
+6	cap3:diagnostic	CAP3 (Diagnostic profile)	error	cap3_no_output	cap3			
+7	cap3:diagnostic	CAP3 (Diagnostic profile)	error	cap3_no_output	cap3			
+8	cap3:diagnostic	CAP3 (Diagnostic profile)	error	assembled	cap3	1400		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_diagnostic/8/payload.fasta
+9	cap3:diagnostic	CAP3 (Diagnostic profile)	error	assembled	cap3	1348		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_diagnostic/9/payload.fasta
+1	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1293		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/1/payload.fasta
+10	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1357		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/10/payload.fasta
+11	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1344		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/11/payload.fasta
+12	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1332		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/12/payload.fasta
+13	cap3:relaxed	CAP3 (Relaxed profile)	error	cap3_no_output	cap3			
+14	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1359		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/14/payload.fasta
+15	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1397		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/15/payload.fasta
+16	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1347		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/16/payload.fasta
+17	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1326		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/17/payload.fasta
+18	cap3:relaxed	CAP3 (Relaxed profile)	error	cap3_no_output	cap3			
+2	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1350		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/2/payload.fasta
+23	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1390		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/23/payload.fasta
+24	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1399		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/24/payload.fasta
+25	cap3:relaxed	CAP3 (Relaxed profile)	error	cap3_no_output	cap3			
+26	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1411		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/26/payload.fasta
+27	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1398		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/27/payload.fasta
+3	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1339		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/3/payload.fasta
+4	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1327		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/4/payload.fasta
+5	cap3:relaxed	CAP3 (Relaxed profile)	error	cap3_no_output	cap3			
+6	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1358		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/6/payload.fasta
+7	cap3:relaxed	CAP3 (Relaxed profile)	error	cap3_no_output	cap3			
+8	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1400		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/8/payload.fasta
+9	cap3:relaxed	CAP3 (Relaxed profile)	error	assembled	cap3	1348		/Users/josecantu/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497_microseq/asm/compare/cap3_relaxed/9/payload.fasta
