@@ -34,7 +34,7 @@ from microseq_tests.trimming.fastq_to_fasta import (
 from microseq_tests.trimming.primer_trim import trim_primer_fastqs, update_trim_summary
 
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
-from microseq_tests.assembly.paired_assembly import assemble_pairs, _build_keep_separate_pairs 
+from microseq_tests.assembly.paired_assembly import assemble_pairs, _build_keep_separate_pairs, _write_combined_fasta 
 from microseq_tests.assembly.overlap_utils import (
     AlignedOverlapCandidate,
     iter_end_anchored_overlaps,
@@ -51,7 +51,7 @@ from microseq_tests.assembly.pairing import  (
         DETECTORS, DupPolicy, _extract_well, _strip_well_token, extract_sid_orientation, iter_seq_files, make_pattern_detector) 
 from microseq_tests.assembly.cap3_report import parse_cap3_reports
 from microseq_tests.assembly.cap3_profiles import resolve_cap3_profile
-from microseq_tests.assembly.registry import list_assemblers
+from microseq_tests.assembly.registry import list_assemblers, get_assembler_spec
 from microseq_tests.assembly.two_read_merge import merge_two_reads
 from microseq_tests.blast.run_blast import run_blast
 from microseq_tests.utility.add_taxonomy import run_taxonomy_join
@@ -1092,8 +1092,11 @@ def run_compare_assemblers(
     *,
     fwd_pattern: str | None = None,
     rev_pattern: str | None = None,
+    dup_policy: DupPolicy = DupPolicy.ERROR,
     enforce_same_well: bool = False,
     well_pattern: str | re.Pattern[str] | None = None,
+    pairing_report: PathLike | None = None,
+    use_qual: bool = True,
     on_stage=None,
     on_progress=None,
 ) -> Path:
@@ -1120,12 +1123,23 @@ def run_compare_assemblers(
         in_dir,
         fwd_pattern=fwd_pattern,
         rev_pattern=rev_pattern,
-        dup_policy=DupPolicy.ERROR,
+        dup_policy=dup_policy,
         enforce_same_well=enforce_same_well,
         well_pattern=well_pattern,
     )
     if not paired_samples:
         raise ValueError("No paired samples available for assembler comparison")
+
+    if pairing_report is not None:
+        pairing_report_path = Path(pairing_report)
+        pairing_report_path.parent.mkdir(parents=True, exist_ok=True)
+        with pairing_report_path.open("w", encoding="utf-8") as fh:
+            fh.write("sid\tF_path\tR_path\tdetector\n")
+            for sid in sorted(set(paired_samples) | set(missing_samples)):
+                entries = paired_samples.get(sid, {"F": [], "R": []})
+                f_path = ";".join(str(p) for p in entries.get("F", []))
+                r_path = ";".join(str(p) for p in entries.get("R", []))
+                fh.write(f"{sid}\t{f_path}\t{r_path}\t\n")
 
     cfg = load_config()
     merge_cfg = cfg.get("merge_two_reads", {})
@@ -1155,6 +1169,8 @@ def run_compare_assemblers(
             selected_engine = ""
             contig_len = ""
             warning = ""
+            payload_fasta = sample_dir / "payload.fasta"
+            payload_written = False
 
             if sample_id in missing_samples or not entries["F"] or not entries["R"]:
                 status = "pair_missing"
@@ -1185,29 +1201,27 @@ def run_compare_assemblers(
                         selected_engine = report.overlap_engine
                         warning = report.merge_warning or ""
                         if contig_path and contig_path.exists():
-                            contigs_out = sample_dir / f"{sample_id}.contigs.fasta"
-                            shutil.copy(contig_path, contigs_out)
-                            lengths = [len(rec.seq) for rec in SeqIO.parse(contigs_out, "fasta")]
-                            if lengths:
-                                contig_len = str(max(lengths))
+                            payload_records = list(SeqIO.parse(contig_path, "fasta"))
+                            if payload_records:
+                                SeqIO.write(payload_records, payload_fasta, "fasta")
+                                payload_written = True
+                                contig_len = str(max(len(rec.seq) for rec in payload_records))
                     else:
                         cap3_args = _resolve_cap3_options(spec.cap3_profile or "strict", None, None)
                         sample_fasta = sample_dir / f"{sample_id}_paired.fasta"
-                        with sample_fasta.open("w", encoding="utf-8") as fh:
-                            for rec in SeqIO.parse(fwd_path, "fasta"):
-                                SeqIO.write(rec, fh, "fasta")
-                            for rec in SeqIO.parse(rev_path, "fasta"):
-                                SeqIO.write(rec, fh, "fasta")
+                        _write_combined_fasta([fwd_path, rev_path], sample_fasta, use_qual=use_qual)
                         import subprocess
 
                         cmd = [cap3_exe, sample_fasta.name, *cap3_args]
                         subprocess.run(cmd, cwd=sample_dir, capture_output=True, text=True, check=True)
                         cap_contigs = sample_dir / f"{sample_fasta.name}.cap.contigs"
-                        lengths = [len(rec.seq) for rec in SeqIO.parse(cap_contigs, "fasta")] if cap_contigs.exists() else []
-                        status = "assembled" if lengths else "cap3_no_output"
+                        payload_records = list(SeqIO.parse(cap_contigs, "fasta")) if cap_contigs.exists() else []
+                        status = "assembled" if payload_records else "cap3_no_output"
                         selected_engine = "cap3"
-                        if lengths:
-                            contig_len = str(max(lengths))
+                        if payload_records:
+                            SeqIO.write(payload_records, payload_fasta, "fasta")
+                            payload_written = True
+                            contig_len = str(max(len(rec.seq) for rec in payload_records))
                 except Exception as exc:
                     status = "error"
                     warning = str(exc)
@@ -1216,10 +1230,12 @@ def run_compare_assemblers(
                 "sample_id": sample_id,
                 "assembler_id": spec.id,
                 "assembler_name": spec.display_name,
+                "dup_policy": str(dup_policy.value if isinstance(dup_policy, DupPolicy) else dup_policy),
                 "status": status,
                 "selected_engine": selected_engine,
                 "contig_len": contig_len,
                 "warnings": warning,
+                "payload_fasta": str(payload_fasta) if payload_written else "",
             })
 
             done += 1
@@ -1227,13 +1243,175 @@ def run_compare_assemblers(
 
     out_tsv = Path(out_dir) / "asm" / "compare_assemblers.tsv"
     out_tsv.parent.mkdir(parents=True, exist_ok=True)
-    headers = ["sample_id", "assembler_id", "assembler_name", "status", "selected_engine", "contig_len", "warnings"]
+    headers = [
+        "sample_id", "assembler_id", "assembler_name", "dup_policy", "status", "selected_engine", "contig_len", "warnings", "payload_fasta"
+    ]
     with out_tsv.open("w", encoding="utf-8") as fh:
         fh.write("\t".join(headers) + "\n")
         for row in rows:
             fh.write("\t".join(row.get(h, "") for h in headers) + "\n")
     return out_tsv
 
+def _select_best_compare_rows(
+    compare_tsv: Path,
+    *,
+    assembler_mode: str,
+    assembler_id: str | None = None,
+) -> dict[str, dict[str, str]]:
+    if not compare_tsv.exists():
+        return {}
+    df = pd.read_csv(compare_tsv, sep="\t")
+    if df.empty:
+        return {}
+
+    winners: dict[str, dict[str, str]] = {}
+    mode = (assembler_mode or "").strip().lower()
+
+    if mode == "selected":
+        if not assembler_id:
+            raise ValueError("selected assembler mode requires assembler_id")
+        chosen = df[df["assembler_id"] == assembler_id].copy()
+        for sample_id, group in chosen.groupby("sample_id"):
+            group["_len"] = pd.to_numeric(group.get("contig_len", ""), errors="coerce").fillna(-1)
+            group = group.sort_values(by=["_len", "assembler_id"], ascending=[False, True])
+            row = group.iloc[0].to_dict()
+            winners[str(sample_id)] = {str(k): "" if pd.isna(v) else str(v) for k, v in row.items()}
+        return winners
+
+    status_rank = {"assembled": 2, "merged": 1}
+    for sample_id, group in df.groupby("sample_id"):
+        group = group.copy()
+        group["_status_rank"] = group["status"].map(lambda v: status_rank.get(str(v), 0))
+        group["_len"] = pd.to_numeric(group.get("contig_len", ""), errors="coerce").fillna(-1)
+        group = group.sort_values(by=["_status_rank", "_len", "assembler_id"], ascending=[False, False, True])
+        row = group.iloc[0].to_dict()
+        winners[str(sample_id)] = {str(k): "" if pd.isna(v) else str(v) for k, v in row.items()}
+    return winners
+
+def _build_selected_blast_inputs(
+    selected_rows: dict[str, dict[str, str]],
+    paired_samples: dict[str, dict[str, list[Path]]],
+    missing_samples: set[str],
+    output_fasta: Path,
+    output_tsv: Path,
+    *,
+    no_payload_reason: str,
+) -> dict[str, dict[str, str]]:
+    output_fasta.parent.mkdir(parents=True, exist_ok=True)
+    output_tsv.parent.mkdir(parents=True, exist_ok=True)
+    records: list[SeqRecord] = []
+    rows: list[dict[str, str]] = []
+
+    all_samples = sorted(set(paired_samples) | set(missing_samples))
+    for sample_id in all_samples:
+        chosen = selected_rows.get(sample_id, {})
+        asm_id = chosen.get("assembler_id", "")
+        payload_path = Path(chosen["payload_fasta"]) if chosen.get("payload_fasta") else None
+        payload_records = list(SeqIO.parse(payload_path, "fasta")) if payload_path and payload_path.exists() else []
+
+        payload = "pair_missing" if sample_id in missing_samples else "no_payload"
+        reason = "pair_missing" if sample_id in missing_samples else no_payload_reason
+        payload_ids: list[str] = []
+        if payload_records:
+            payload = "contig"
+            reason = "selected_payload"
+            label = asm_id.replace(":", "_") if asm_id else "selected"
+            for idx, rec in enumerate(payload_records, start=1):
+                new_id = f"{sample_id}|contig|{label}{idx}"
+                payload_ids.append(f"{new_id}={rec.id}")
+                rec.id = new_id
+                rec.name = new_id
+                rec.description = ""
+                records.append(rec)
+
+        rows.append({
+            "sample_id": sample_id,
+            "blast_payload": payload,
+            "payload_ids": ";".join(payload_ids),
+            "reason": reason,
+            "selected_assembler_id": asm_id,
+            "selected_assembler_name": chosen.get("assembler_name", ""),
+            "selected_status": chosen.get("status", ""),
+        })
+
+    if records:
+        SeqIO.write(records, output_fasta, "fasta")
+    else:
+        output_fasta.write_text("", encoding="utf-8")
+
+    headers = [
+        "sample_id", "blast_payload", "payload_ids", "reason",
+        "selected_assembler_id", "selected_assembler_name", "selected_status",
+    ]
+    with output_tsv.open("w", encoding="utf-8") as fh:
+        fh.write("\t".join(headers) + "\n")
+        for row in rows:
+            fh.write("\t".join(row.get(h, "") for h in headers) + "\n")
+
+    return {row["sample_id"]: row for row in rows}
+
+def _write_selected_assembly_summary(
+    output_tsv: Path,
+    paired_samples: dict[str, dict[str, list[Path]]],
+    missing_samples: set[str],
+    selected_rows: dict[str, dict[str, str]],
+    blast_rows: dict[str, dict[str, str]],
+    assembler_mode_label: str,
+    *,
+    primer_mode: str,
+    primer_stage: str,
+    primer_preset: str,
+    primer_source: str,
+    overlap_engine_strategy: str,
+    overlap_engine_order: str,
+    overlap_quality_mode: str,
+    overlap_rows: dict[str, dict[str, str]] | None = None,
+) -> None:
+    output_tsv.parent.mkdir(parents=True, exist_ok=True)
+    headers = [
+        "sample_id", "status", "assembler", "contig_len", "blast_payload",
+        "selected_engine", "configured_engine", "merge_status", "merge_overlap_len",
+        "merge_identity", "overlaps_saved", "overlaps_removed", "primer_mode", "primer_stage",
+        "primer_preset", "primer_source", "overlap_engine_strategy", "overlap_engine_order", "overlap_quality_mode",
+        "selected_assembler_id", "selected_assembler_name", "assembler_mode", "selection_reason",
+        "audit_status", "audit_overlap_identity", "audit_overlap_quality", "audit_overlap_orientation",
+    ]
+    with output_tsv.open("w", encoding="utf-8") as fh:
+        fh.write("\t".join(headers) + "\n")
+        for sample_id in sorted(set(paired_samples) | set(missing_samples)):
+            chosen = selected_rows.get(sample_id, {})
+            blast = blast_rows.get(sample_id, {})
+            overlap = (overlap_rows or {}).get(sample_id, {})
+            row = {
+                "sample_id": sample_id,
+                "status": chosen.get("status", "pair_missing" if sample_id in missing_samples else "no_payload"),
+                "assembler": chosen.get("assembler_id", "none"),
+                "contig_len": chosen.get("contig_len", ""),
+                "blast_payload": blast.get("blast_payload", ""),
+                "selected_engine": chosen.get("selected_engine", ""),
+                "configured_engine": "",
+                "merge_status": "",
+                "merge_overlap_len": "",
+                "merge_identity": "",
+                "overlaps_saved": "",
+                "overlaps_removed": "",
+                "primer_mode": primer_mode,
+                "primer_stage": primer_stage,
+                "primer_preset": primer_preset,
+                "primer_source": primer_source,
+                "overlap_engine_strategy": overlap_engine_strategy,
+                "overlap_engine_order": overlap_engine_order,
+                "overlap_quality_mode": overlap_quality_mode,
+                "selected_assembler_id": chosen.get("assembler_id", ""),
+                "selected_assembler_name": chosen.get("assembler_name", ""),
+                "assembler_mode": assembler_mode_label,
+                "selection_reason": blast.get("reason", ""),
+                "audit_status": overlap.get("status", ""),
+                "audit_overlap_identity": overlap.get("overlap_identity", ""),
+                "audit_overlap_quality": overlap.get("overlap_quality", ""),
+                "audit_overlap_orientation": overlap.get("orientation", ""),
+            }
+            fh.write("\t".join(str(row.get(h, "")) for h in headers) + "\n")
 
 def run_full_pipeline(
     infile: Path,
@@ -1252,6 +1430,8 @@ def run_full_pipeline(
     cap3_profile: str = "strict",
     cap3_extra_args: Sequence[str] | None = None,
     cap3_use_qual: bool = True,
+    assembler_id: str | None = None,
+    assembler_mode: str | None = None,
     write_blast_inputs: bool = True,
     use_blast_inputs: bool = True,
     fwd_pattern: str | None = None,
@@ -1330,6 +1510,21 @@ def run_full_pipeline(
 
     is_fasta = infile.suffix.lower() in {".fasta", ".fa", ".fna", ".fas"}
     using_paired = mode == "paired" 
+    resolved_assembler_mode = (assembler_mode or "").strip().lower() or None
+    resolved_assembler_id = (assembler_id or "").strip() or None
+    if resolved_assembler_mode not in {None, "cap3_default", "selected", "all"}:
+        raise ValueError("assembler_mode must be one of: cap3_default, selected, all")
+    if resolved_assembler_mode is None:
+        if resolved_assembler_id in {None, "", "__cap3_default__"}:
+            resolved_assembler_mode = "cap3_default"
+        elif resolved_assembler_id == "__all__":
+            resolved_assembler_mode = "all"
+        else:
+            resolved_assembler_mode = "selected"
+    if resolved_assembler_mode == "all":
+        resolved_assembler_id = None
+    elif resolved_assembler_mode == "cap3_default":
+        resolved_assembler_id = None
 
     if summary_tsv is None and not is_fasta:
         summary_tsv = out_dir / "qc" / "trim_summary.tsv"
@@ -1423,27 +1618,6 @@ def run_full_pipeline(
         pairing_report.parent.mkdir(parents=True, exist_ok=True)
 
         on_stage("Paired assembly")
-        cap3_args = _resolve_cap3_options(cap3_profile, cap3_options, cap3_extra_args)
-        contig_paths = assemble_pairs(
-            assembly_input, 
-            out_dir / "asm",
-            dup_policy=dup_policy,
-            cap3_options=cap3_args,
-            fwd_pattern=fwd_pattern,
-            rev_pattern=rev_pattern,
-            pairing_report=pairing_report,
-            enforce_same_well=enforce_same_well,
-            well_pattern=well_pattern,
-            use_qual=cap3_use_qual
-        )
-        if not contig_paths:
-           summary = _summarize_paired_candidates(assembly_input, fwd_pattern, rev_pattern, enforce_same_well=enforce_same_well, well_pattern=well_pattern)
-           suggestions = _suggest_pairing_patterns(assembly_input)
-           raise ValueError(
-                f"No paired reads detected in {assembly_input}; {summary}. "
-                "If your primer names differ, provide --fwd-pattern/--rev-pattern."
-                f" {suggestions}"
-            ) 
         paired_samples, missing_samples = _collect_pairing_catalog(
             assembly_input,
             fwd_pattern=fwd_pattern,
@@ -1452,7 +1626,45 @@ def run_full_pipeline(
             enforce_same_well=enforce_same_well,
             well_pattern=well_pattern,
         )
-        if pairing_report.exists():
+        if not paired_samples:
+           summary = _summarize_paired_candidates(assembly_input, fwd_pattern, rev_pattern, enforce_same_well=enforce_same_well, well_pattern=well_pattern)
+           suggestions = _suggest_pairing_patterns(assembly_input)
+           raise ValueError(
+                f"No paired reads detected in {assembly_input}; {summary}. "
+                "If your primer names differ, provide --fwd-pattern/--rev-pattern."
+                f" {suggestions}"
+            )
+
+        contig_paths: list[Path] = []
+        if resolved_assembler_mode == "cap3_default":
+            cap3_args = _resolve_cap3_options(cap3_profile, cap3_options, cap3_extra_args)
+            contig_paths = assemble_pairs(
+                assembly_input,
+                out_dir / "asm",
+                dup_policy=dup_policy,
+                cap3_options=cap3_args,
+                fwd_pattern=fwd_pattern,
+                rev_pattern=rev_pattern,
+                pairing_report=pairing_report,
+                enforce_same_well=enforce_same_well,
+                well_pattern=well_pattern,
+                use_qual=cap3_use_qual,
+            )
+        else:
+            if resolved_assembler_mode == "selected":
+                get_assembler_spec(resolved_assembler_id or "")
+            run_compare_assemblers(
+                assembly_input,
+                out_dir,
+                fwd_pattern=fwd_pattern,
+                rev_pattern=rev_pattern,
+                dup_policy=dup_policy,
+                enforce_same_well=enforce_same_well,
+                well_pattern=well_pattern,
+                pairing_report=pairing_report,
+                use_qual=cap3_use_qual,
+            )
+        if resolved_assembler_mode == "cap3_default" and pairing_report.exists():
             report_ids = set(
                 line.split("\t", 1)[0]
                 for line in pairing_report.read_text(encoding="utf-8").splitlines()[1:]
@@ -1481,7 +1693,6 @@ def run_full_pipeline(
         overlap_rows = _load_tsv_rows_by_sample(paths["overlap_audit"]) if paths.get("overlap_audit") else {}
         blast_payload_rows: dict[str, dict[str, str]] = {}
         merged_contigs = out_dir / "asm" / "paired_contigs.fasta"
-        _merge_cap3_contigs(contig_paths, merged_contigs)
 
         if use_blast_inputs and not write_blast_inputs:
             L.warning("use_blast_inputs requested without write_blast_inputs; enabling blast input output.")
@@ -1489,15 +1700,18 @@ def run_full_pipeline(
 
         blast_inputs_fasta = out_dir / "asm" / "blast_inputs.fasta"
         blast_inputs_tsv = out_dir / "asm" / "blast_inputs.tsv"
-        if write_blast_inputs:
-            _build_blast_inputs(
-                out_dir / "asm",
-                paired_samples,
-                missing_samples,
-                blast_inputs_fasta,
-                blast_inputs_tsv,
-            )
-            blast_payload_rows = _load_tsv_rows_by_sample(blast_inputs_tsv)
+
+        if resolved_assembler_mode == "cap3_default":
+            _merge_cap3_contigs(contig_paths, merged_contigs)
+            if write_blast_inputs:
+                _build_blast_inputs(
+                    out_dir / "asm",
+                    paired_samples,
+                    missing_samples,
+                    blast_inputs_fasta,
+                    blast_inputs_tsv,
+                )
+                blast_payload_rows = _load_tsv_rows_by_sample(blast_inputs_tsv)
             if assembly_summary:
                 parse_cap3_reports(
                     out_dir / "asm",
@@ -1517,30 +1731,45 @@ def run_full_pipeline(
                     overlap_quality_mode=overlap_quality_mode,
                 )
 
-        if assembly_summary and not write_blast_inputs:
-            parse_cap3_reports(
-                out_dir / "asm",
-                sorted(set(paired_samples.keys()) | set(missing_samples)),
-                output_tsv=assembly_summary,
-                missing_samples=missing_samples,
-                overlap_status=overlap_status,
-                overlap_rows=overlap_rows,
-                blast_payloads=blast_payload_rows,
-                primer_mode=str(primer_cfg["mode"]),
-                primer_stage=str(primer_cfg["stage"]),
-                primer_preset=str(primer_cfg.get("preset", "")),
-                primer_source=str(primer_cfg.get("primer_source", "custom")),
-                configured_engine=configured_overlap_engine,
-                overlap_engine_strategy=overlap_strategy,
-                overlap_engine_order=overlap_engine_order_str,
-                overlap_quality_mode=overlap_quality_mode,
+            if not reporting_cfg["emit_per_sample_merge_report"]:
+                for sample_id in paired_samples.keys():
+                    rp = (out_dir / "asm" / sample_id / f"{sample_id}_paired.merge_report.tsv")
+                    if rp.exists():
+                        rp.unlink()
+        else:
+            compare_tsv = out_dir / "asm" / "compare_assemblers.tsv"
+            selected_rows = _select_best_compare_rows(
+                compare_tsv,
+                assembler_mode=resolved_assembler_mode,
+                assembler_id=resolved_assembler_id,
             )
-
-        if not reporting_cfg["emit_per_sample_merge_report"]:
-            for sample_id in paired_samples.keys():
-                rp = (out_dir / "asm" / sample_id / f"{sample_id}_paired.merge_report.tsv")
-                if rp.exists():
-                    rp.unlink()
+            no_payload_reason = "selected_backend_no_payload" if resolved_assembler_mode == "selected" else "winner_no_payload"
+            blast_payload_rows = _build_selected_blast_inputs(
+                selected_rows,
+                paired_samples,
+                missing_samples,
+                blast_inputs_fasta,
+                blast_inputs_tsv,
+                no_payload_reason=no_payload_reason,
+            )
+            if assembly_summary:
+                _write_selected_assembly_summary(
+                    assembly_summary,
+                    paired_samples,
+                    missing_samples,
+                    selected_rows,
+                    blast_payload_rows,
+                    resolved_assembler_mode,
+                    primer_mode=str(primer_cfg["mode"]),
+                    primer_stage=str(primer_cfg["stage"]),
+                    primer_preset=str(primer_cfg.get("preset", "") or "custom"),
+                    primer_source=str(primer_cfg.get("primer_source", "custom")),
+                    overlap_engine_strategy=overlap_strategy,
+                    overlap_engine_order=overlap_engine_order_str,
+                    overlap_quality_mode=overlap_quality_mode,
+                    overlap_rows=overlap_rows,
+                )
+            merged_contigs = blast_inputs_fasta
 
         if use_blast_inputs and write_blast_inputs:
             paths["fasta"] = blast_inputs_fasta

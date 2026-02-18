@@ -605,9 +605,13 @@ class MainWindow(QMainWindow):
         self.mode_combo.addItem("Paired", userData="paired")
 
         self.assembler_combo = QComboBox()
+        self.assembler_combo.addItem("CAP3 default (legacy paired pipeline)", userData="__cap3_default__")
+        self.assembler_combo.addItem("All assemblers (compare + pick best contig)", userData="__all__")
         for assembler in list_assemblers():
             self.assembler_combo.addItem(assembler.display_name, userData=assembler.id)
-        self.assembler_combo.setToolTip("Reserved for future selected-assembler workflows.")
+        self.assembler_combo.setToolTip(
+            "Choose legacy CAP3 flow, a single assembler, or all assemblers with auto-selection for BLAST payloads."
+        )
 
         self.compare_assemblers_btn = QPushButton("Compare assemblers")
         self.compare_assemblers_btn.setToolTip("Compare all registered assemblers on paired FASTA inputs and write asm/compare_assemblers.tsv")
@@ -1251,6 +1255,8 @@ class MainWindow(QMainWindow):
         pairing.addWidget(self.preview_pairs_btn)
         pairing.addWidget(self.primer_preview_btn)
         pairing.addWidget(self.compare_assemblers_btn)
+        pairing.addWidget(QLabel("Assembler selection"))
+        pairing.addWidget(self.assembler_combo)
         pairing.addWidget(self.dup_policy_lbl)
         pairing.addWidget(self.dup_policy_combo) 
         pairing.addWidget(self.enforce_well_chk)
@@ -1312,6 +1318,7 @@ class MainWindow(QMainWindow):
             self.preview_pairs_btn,
             self.primer_preview_btn,
             self.compare_assemblers_btn,
+            self.assembler_combo,
             self.dup_policy_lbl,
             self.dup_policy_combo,
             self.advanced_regex_chk,
@@ -1351,6 +1358,7 @@ class MainWindow(QMainWindow):
         use_blast_inputs = self.use_blast_inputs_combo.currentData()
         return {
             "mode": mode, 
+            "assembler_id": self.assembler_combo.currentData(),
             "fwd_pattern": fwd,
             "rev_pattern": rev, 
             "enforce_same_well": self.enforce_well_chk.isChecked(),

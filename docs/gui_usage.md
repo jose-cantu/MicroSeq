@@ -28,7 +28,7 @@ Well enformcement off              Requries A1-H12 plate well labeling so when e
 
 ## Configuring The Run
 * In a future update I will have all the dials adjustable for now they are the default settings so keep that in mind.
-* Use the **Assembly** dropdown to choose **Single** (default) or **Paired** CAP3 runs. Paired mode enables forward/reverse regex fields plus well enforcement and duplicate policy controls.
+* Use the **Assembly** dropdown to choose **Single** (default) or **Paired** runs. Paired mode enables forward/reverse regex fields plus well enforcement, duplicate policy controls, and assembler selection controls.
 * If you want the BIOM file you will need to tick the BIOM box when clicking full pipeline run note you will need to supply a metadata table (GUI will warn if missing).
 * Choose Fast(megablast) for routine Sanger reads; Comprehensive (blastn) for divergent amplicon reads. Note I do have it set up where if the coverage or percent ID doesn't reach 90% blastn will rerun instead given the nature of megablast algorithm.(Fast = NCBI Megablast large 28-bp word, tuned for ≥95 % identity hits between nearly identical Sanger traces; Comprehensive = standard blastn 11-bp word, slower but ∼5× more sensitive to <90 % identity or divergent/gapped matches; MicroSeq auto-falls back to blastn whenever the initial Megablast hit covers <90 % of the read or shows <90 % identity).
 * Primer token detection is available via the primer-set dropdown. Toggle **Advanced regex** when you want to enter explicit forward/reverse regex patterns instead of presets.
@@ -36,7 +36,9 @@ Well enformcement off              Requries A1-H12 plate well labeling so when e
 * Primer trimming now supports three modes: **Off**, **Detect** (report hits, no clipping), and **Clip** (trim matched primer sequence). Stage can be set to **Pre-quality** or **Post-quality**.
 * You can now paste **custom forward/reverse primer sequences** directly in the GUI (one per line). This is independent from pairing token presets and overrides config-based primer lists for the run.
 * **Primer preview** now uses the same GUI primer stage/preset/custom-sequence settings as pipeline execution, but forces detect-only mode so you can validate hits before clipping.
-* Compare assemblers produces `asm/compare_assemblers.tsv`, now shown in the GUI **Compare Assemblers** output tab for side-by-side engine review.
+* **Assembler selection** (paired mode) supports: **CAP3 default (legacy paired pipeline)**, **All assemblers (compare + pick best contig)**, or any single registered assembler from the dropdown.
+* Compare assemblers produces `asm/compare_assemblers.tsv`, now shown in the GUI **Compare Assemblers** output tab for side-by-side engine review. When running full pipeline with **All assemblers**, MicroSeq reuses this comparison and ranks candidates by status (**assembled** > **merged** > others), then length, then deterministic tiebreak for downstream BLAST payloads.
+* In compare-driven **Selected/All assemblers** full-pipeline mode, MicroSeq now writes `qc/pairing_report.tsv`; when a compared backend is CAP3, the **Use per-base quality scores** toggle is also applied to CAP3 input generation.
 * Primer policy in paired mode is explicit in reports: mode (`off|detect|clip`), stage (`pre_quality|post_quality`), and source (`off|preset|custom|mixed`).
 * **Duplicate policy** lets you decide whether duplicate orientations error, keep first/last, merge, or keep separate (runs CAP3 per duplicate). The last selection is persisted between sessions.
 * **Enforce well codes** requires A1-H12 plate tokens in filenames; files with missing or mismatched wells are skipped but reported.
@@ -59,7 +61,8 @@ Think of the paired-assembly widgets as a control panel that flips a handful of 
 
 | Switch | Where to set it | Behaviour |
 | --- | --- | --- |
-| Assembly mode | **Assembly** dropdown (**Single** vs **Paired**) | Paired mode reveals primer/pairing controls and enables the **Preview pairs** flow; single mode hides them and runs CAP3 without pairing. |
+| Assembly mode | **Assembly** dropdown (**Single** vs **Paired**) | Paired mode reveals primer/pairing controls and enables the **Preview pairs** flow; single mode hides paired-only controls. |
+| Assembler mode | **Assembler selection** dropdown (paired mode) | Choose legacy CAP3 behavior, a single assembler backend, or all assemblers with automatic best-contig selection for BLAST inputs. |
 | Primer set preset | **Primer set** dropdown (e.g., `16S (27F/1492R)`,`Custom`) | Prefills forward/reverse token fields and persists the choice via QSettings. Changing tokens by hand flips the preset to **Custom**. |
 | Token vs regex override | **Advanced regex** checkbox | Unchecked uses token fields (`27F, 515F` → `27F|515F`); checked exposes regex fields that bypass tokens entirely so you can enter expressions like `(?i)(27f|8f)` . |
 | Enforce same well | **Enforce well codes** checkbox | When enabled, pairing requires both directions to share the same plate position (A1-H12 by default). |
