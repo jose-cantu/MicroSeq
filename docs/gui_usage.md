@@ -265,7 +265,12 @@ If you get the status `ambiguous_overlap` this means that the overlap selector f
 
 ### Compare Assemblers Tab 
 - Columns shown:
-- sample_id, assembler_id, assembler_name, status, selected_engine, contig_len, warnings.
+- sample_id, assembler_id, assembler_name, status, selected_engine, contig_len, warnings, diag_code_for_machine, diag_detail_for_human, cap3_contigs_n, cap3_singlets_n, warnings.
+- Additional compare TSV-only fields (not shown as table columns) and used by compare-row details/open actions:
+  - cap3_info_path
+  - cap3_stdout_path
+  - cap3_stderr_path
+  - payload_fasta
 - Underlying compare TSV also includes dup_policy and payload_fasta (not displayed in current GUI table).
 - Meanings
     - sample_id
@@ -284,6 +289,26 @@ If you get the status `ambiguous_overlap` this means that the overlap selector f
         - Max contig length produced by that backend row (blank if no payload).
     - warnings
         - Merge warning text or caught exception text for failed run.
+     - dup_policy
+        - Duplicate handling policy used by that backend for this sample (for example `keep_first`, `keep_longest`, etc.).
+    - diag_code_for_machine
+        - Compact machine-readable diagnosis code for the row result. Examples include `pair_missing`, `merge_identity_low`, `cap3_contigs_present`, `cap3_singlets_only`, `cap3_nonzero_exit_with_output`, `cap3_nonzero_exit_no_output`, and `exception`.
+    - diag_detail_for_human
+        - Human-readable diagnostic message matching the machine code above (often includes return code/profile/input filename and contig/singlet counts for CAP3 rows).
+    - cap3_contigs_n
+        - Number of CAP3 contig records detected for that compare row.
+    - cap3_singlets_n
+        - Number of CAP3 singlet records detected for that compare row.
+    - cap3_info_path
+        - Path to CAP3 `.cap.info` artifact for that compare row (when present).
+    - cap3_stdout_path
+        - Path to saved CAP3 stdout log for that compare row.
+    - cap3_stderr_path
+        - Path to saved CAP3 stderr log for that compare row.
+    - payload_fasta
+        - Path to the backend payload FASTA produced by that row; populated when a payload exists and used by compare-row Details/open-file actions.
+
+- Compare tab Details panel is now row-scoped by `(sample_id, assembler_id)` instead of only `sample_id`, so selecting two rows for the same sample but different backends shows backend-specific reasons/artifacts instead of collapsing them together.
 
 - In all/selected modes, winners are chosen per sample by:
     - status rank (assembled > merged > others),
