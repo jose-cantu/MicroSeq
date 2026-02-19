@@ -2556,7 +2556,33 @@ class MainWindow(QMainWindow):
             )
 
             audit_values = [self._audit_rows.get(r.get("sample_id", ""), {}) for r in rows]
-            statuses = 
+            statuses = [audit.get("status", "-") for audit_values if audit]
+            self.detail_overlap_lbl.setText(f"overlap: {self._join_values(statuses)}")
+
+            for key in self._detail_paths:
+                self._detail_paths[key] = []
+            for r in rows:
+                payload = r.get("payload_fasta", "")
+                if payload:
+                    p = Path(payload)
+                    if p.exists():
+                        self._detail_paths["contigs"].append(p)
+                info_txt = r.get("cap3_info_path", "")
+                if info_txt:
+                    info_path = Path(info_txt)
+                    if info_path.exists():
+                        self._detail_paths["info"].append(info_path)
+                        singlet_path = info_path.with_suffix(".singlets")
+                        if singlet_path.exists():
+                            self._detail_paths["singlets"].append(singlet_path)
+
+            self.detail_contigs_btn.setEnabled(bool(self._detail_paths["contigs"]))
+            self.detail_singlets_btn.setEnabled(bool(self._detail_paths["singlets"]))
+            self.detail_info_btn.setEnabled(bool(self._detail_paths["info"]))
+            self.detail_contigs_system_btn.setEnabled(bool(self._detail_paths["contigs"]))
+            self.detail_singlets_system_btn.setEnabled(bool(self._detail_paths["singlets"]))
+            self.detail_info_system_btn.setEnabled(bool(self._detail_paths["info"]))
+            return
 
         summary_vals = [self._summary_rows.get(sid, {}).get("status", "—") for sid in sample_ids]
         reason_vals = [self._blast_rows.get(sid, {}).get("reason", "—") for sid in sample_ids]

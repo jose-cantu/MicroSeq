@@ -13,6 +13,7 @@ from typing import Union, Sequence
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 from Bio.Align import PairwiseAligner
+from numpy import identity
 import pandas as pd 
 import logging
 try:
@@ -1169,8 +1170,15 @@ def run_compare_assemblers(
             selected_engine = ""
             contig_len = ""
             warning = ""
+            diag_code_for_machine = "pair_missing"
+            diag_detail_for_human = "Missing foward/reverse pair for sample"
             payload_fasta = sample_dir / "payload.fasta"
             payload_written = False
+            cap3_contigs_n = ""
+            cap3_singlets_n = ""
+            cap3_info_path = ""
+            cap3_stdout_path = ""
+            cap3_stderr_path = "" 
 
             if sample_id in missing_samples or not entries["F"] or not entries["R"]:
                 status = "pair_missing"
@@ -1200,6 +1208,11 @@ def run_compare_assemblers(
                         status = report.merge_status
                         selected_engine = report.overlap_engine
                         warning = report.merge_warning or ""
+                        diag_code_for_machine = f"merge_{status}"
+                        diag_detail_for_human = (
+                            f"merge_status={status}; overlap_len={report.overlap_len};" 
+                            f"identity={report.identity:.4f}; engine={report.overlap_len}" 
+                        ) 
                         if contig_path and contig_path.exists():
                             payload_records = list(SeqIO.parse(contig_path, "fasta"))
                             if payload_records:
@@ -1213,11 +1226,50 @@ def run_compare_assemblers(
                         import subprocess
 
                         cmd = [cap3_exe, sample_fasta.name, *cap3_args]
-                        subprocess.run(cmd, cwd=sample_dir, capture_output=True, text=True, check=True)
+                        cap3_run = subprocess.run(cmd, cwd=sample_dir, capture_output=True, text=True, check=False)
+                        cap3_stdout_file = sample_dir / "cap3.stdout.txt"
+                        cap3_stderr_file = sample_dir / "cap3.stderr.txt"
+                        cap3_stdout_file.write_text(cap3_run.stdout or "", encoding="utf-8")
+                        cap3_stderr_file.write_text(cap3_run.stderr or "", encoding="utf-8")
+                        cap3_stdout_path = str(cap3_stdout_file)
+                        cap3_stderr_path = str(cap3_stderr_file)
+
                         cap_contigs = sample_dir / f"{sample_fasta.name}.cap.contigs"
+                        cap_singlets = sample_dir / f"{sample_fasta.name}.cap.singlets"
+                        cap_info = sample_dir / f"{sample_fasta.name}.cap.info"
+
                         payload_records = list(SeqIO.parse(cap_contigs, "fasta")) if cap_contigs.exists() else []
-                        status = "assembled" if payload_records else "cap3_no_output"
+                        singlet_records = list(SeqIO.parse(cap_singlets, "fasta")) if cap_singlets.exists() else []
+                        cap3_contigs_n = str(len(payload_records))
+                        cap3_singlets_n = str(len(singlet_records))
+                        cap3_info_path = str(cap_info) if cap_info.exists() else ""
                         selected_engine = "cap3"
+
+                        if cap3_run.returncode == 0 and payload_records:
+                            status = "assembled"
+                            diag_code_for_machine = "cap3_contigs_present"
+                        elif cap3_run.returncode == 0 and singlet_records:
+                            status = "singlets_only"
+                            diag_code_for_machine = "cap3_singlets_only"
+                        elif cap3_run.returncode == 0:
+                            status = "cap3_no_output"
+                            diag_code_for_machine = "cap3_no_contigs_no_singlets"
+                        elif payload_records:
+                            status = "assembled"
+                            diag_code_for_machine = "cap3_nonzero_exit_with_output"
+                        elif singlet_records:
+                            status = "singlets_only"
+                            diag_code_for_machine = "cap3_nonzero_exit_with_output"
+                        else:
+                            status = "error"
+                            diag_code_for_machine = "cap3_nonzero_exit_no_output"
+                            warning = warning or (cap3_run.stderr or cap3_run.stdout or f"CAP3 exited {cap3_run.returncode}")
+
+                        diag_detail_for_human = (
+                            f"returncode={cap3_run.returncode}; profile={spec.cap3_profile or 'strict'}; "
+                            f"input={sample_fasta.name}; contigs={len(payload_records)}; singlets={len(singlet_records)}"
+                        )
+
                         if payload_records:
                             SeqIO.write(payload_records, payload_fasta, "fasta")
                             payload_written = True
@@ -1225,6 +1277,8 @@ def run_compare_assemblers(
                 except Exception as exc:
                     status = "error"
                     warning = str(exc)
+                    diag_code_for_machine = "exception"
+                    diag_detail_for_human = str(exc)
 
             rows.append({
                 "sample_id": sample_id,
@@ -1235,6 +1289,13 @@ def run_compare_assemblers(
                 "selected_engine": selected_engine,
                 "contig_len": contig_len,
                 "warnings": warning,
+                "diag_code_for_machine": diag_code_for_machine,
+                "diag_detail_for_human": diag_detail_for_human,
+                "cap3_contigs_n": cap3_contigs_n,
+                "cap3_singlets_n": cap3_singlets_n,
+                "cap3_info_path": cap3_info_path,
+                "cap3_stdout_path": cap3_stdout_path,
+                "cap3_stderr_path": cap3_stderr_path,
                 "payload_fasta": str(payload_fasta) if payload_written else "",
             })
 
@@ -1244,7 +1305,9 @@ def run_compare_assemblers(
     out_tsv = Path(out_dir) / "asm" / "compare_assemblers.tsv"
     out_tsv.parent.mkdir(parents=True, exist_ok=True)
     headers = [
-        "sample_id", "assembler_id", "assembler_name", "dup_policy", "status", "selected_engine", "contig_len", "warnings", "payload_fasta"
+        "sample_id", "assembler_id", "assembler_name", "dup_policy", "status", "selected_engine", "contig_len", "warnings",
+        "diag_code_for_machine", "diag_detail_for_human", "cap3_contigs_n", "cap3_singlets_n", "cap3_info_path", "cap3_stdout_path", "cap3_stderr_path",
+        "payload_fasta",
     ]
     with out_tsv.open("w", encoding="utf-8") as fh:
         fh.write("\t".join(headers) + "\n")

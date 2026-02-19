@@ -425,6 +425,48 @@ def test_run_compare_assemblers_merge_specs_use_single_engine(tmp_path: Path, mo
     assert (compare_root / "merge_two_reads_ungapped" / "S1").exists()
     assert (compare_root / "merge_two_reads_edlib" / "S1").exists()
 
+def test_run_compare_assemblers_cap3_nonzero_exit_still_records_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    in_dir = tmp_path / "paired_fasta"
+    in_dir.mkdir()
+    (in_dir / "S1_27F.fasta").write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">r\n" + "A" * 120 + "\n", encoding="utf-8")
+
+    specs = (
+        AssemblerSpec(id="cap3:strict", display_name="CAP3 strict", kind="cap3", cap3_profile="strict"),
+    )
+    monkeypatch.setattr("microseq_tests.pipeline.list_assemblers", lambda: specs)
+
+    class FakeCompleted:
+        def __init__(self) -> None:
+            self.returncode = 1
+            self.stdout = "CAP3 stdout"
+            self.stderr = "CAP3 stderr"
+
+    def fake_run(cmd, cwd=None, capture_output=None, text=None, check=None):
+        assert check is False
+        sample_fasta = Path(cwd) / cmd[1]
+        contigs = sample_fasta.with_suffix(sample_fasta.suffix + ".cap.contigs")
+        singlets = sample_fasta.with_suffix(sample_fasta.suffix + ".cap.singlets")
+        info = sample_fasta.with_suffix(sample_fasta.suffix + ".cap.info")
+        contigs.write_text(">c1\n" + "A" * 120 + "\n", encoding="utf-8")
+        singlets.write_text(">s1\n" + "A" * 60 + "\n", encoding="utf-8")
+        info.write_text("cap info\n", encoding="utf-8")
+        return FakeCompleted()
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    out_tsv = run_compare_assemblers(in_dir, tmp_path, fwd_pattern="27F", rev_pattern="1492R")
+    text = out_tsv.read_text(encoding="utf-8")
+
+    assert "cap3_nonzero_exit_with_output" in text
+    assert "returncode=1; profile=strict" in text
+    assert "	assembled	cap3	120	" in text
+    assert "cap3.stdout.txt" in text
+    assert "cap3.stderr.txt" in text
+
 
 def test_overlap_helper_prefers_end_overlap_over_internal_match() -> None:
     """Ensure overlap helper does not accept internal motif matches as valid terminal overlaps."""
