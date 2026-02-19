@@ -59,6 +59,15 @@ microseq assembly --mode paired \
 3) **Well enforcement.** Check **Enforce well codes** to require plate positions (A1–H12 by default). You can edit the regex if your lab uses a different format.
 4) **Duplicate policy.** Choose whether duplicates **Error**, **Keep first**, **Keep last**, **Merge**, or **Keep separate**. The choice persists between sessions via QSettings.
 5) **Preview pairs.** Click **Preview pairs** to see which files were detected as forward/reverse, which detector matched, any missing mates, and suggested regexes. Fix naming if needed, then proceed.
+Going into more detail on this feature. The preview pair uses the same detector that i have built in for pairing assembly. You can use your custom F/R primer labels then the built in detector patterns. 
+How the F/R is recognized: each file name is parsed to a sample ID, the orientation F/R and then optionally the well codes A1 - H12. 
+Detected Column shows the resolved orientation per file. 
+Issues Column: reports why a name is non canonical by MicroSeq standards. (For example missing F/R label, primer label not delimited -/_ or well mismatch when well match enforcement is on). 
+Suggested rename column: proposes the canonical so filenames stay reproducible across runs. 
+Manual helper actions: These were created if you wanted to rename outside of the GUI (Copy rename map, Copy rename commands, or Open container folder). 
+Need to test if bug fixed: Note on minimize it may still lock the main GUI I changed it to modeless beahvior to refactor this behavior in the chance it still does this, avoid using minimize for now and just close the window instead. I will patch it in a future release. 
+
+
 6) **Run assembly.** The GUI launches CAP3 per paired sample, rewrites BLAST input headers, and writes `asm/blast_inputs.tsv` for traceability. Logs include the pairing report so you can audit wells, detectors, and duplicate handling.
 
 ## Tips

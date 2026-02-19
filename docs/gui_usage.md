@@ -259,6 +259,209 @@ If you get the status `ambiguous_overlap` this means that the overlap selector f
 `best_identity_orientation`: Orientation associated with best identity candidate. 
 `anchoring_feasible`: Whether at least one candidate can satify end anchor + thresholds. 
 `end_anchored_possible`: Whether any candidate is end anchored at all. 
+`selected_engine`: Overlap engine selected for audit row.
+`fallback_used`: yes/no if cascade/all strategy had to move off first engine.
+`overlap_engine` (UI label; file writes configured_engine): Configured default overlap engine from config (auto, ungapped, etc.).
+
+### Compare Assemblers Tab 
+- Columns shown:
+- sample_id, assembler_id, assembler_name, status, selected_engine, contig_len, warnings.
+- Underlying compare TSV also includes dup_policy and payload_fasta (not displayed in current GUI table).
+- Meanings
+    - sample_id
+        - Sample being evaluated by each backend.
+    - assembler_id
+        - Internal id like merge_two_reads:biopython, cap3:strict, etc.
+    - assembler_name
+        - Human-readable label shown in dropdown/table.
+    - status
+        - Per-backend run outcome:
+            - merge backend: merged, identity_low, overlap_too_short, quality_low, ambiguous_overlap, not_end_anchored, high_conflict, etc.
+            - CAP3 backend: assembled or cap3_no_output; error on exception.
+    - selected_engine
+        - Merge overlap engine used (merge rows) or cap3 (CAP3 rows).
+    - contig_len
+        - Max contig length produced by that backend row (blank if no payload).
+    - warnings
+        - Merge warning text or caught exception text for failed run.
+
+- In all/selected modes, winners are chosen per sample by:
+    - status rank (assembled > merged > others),
+    - contig length,
+    - assembler id tie-break.
+- That winner selection affects what appears in Assembly Summary/BLAST Inputs for that sample.
+
 
 ### What does anchoring feasability even mean? 
+Lets cover some core terms first. 
+
+Overlap: This means I have a forward (F) and reverse (R) reads from the same sample. The assembler tries to find where they cover the same DNA region. That shared region is the overlap. 
+
+Candidate: A candidate is one possible overlap alignment the algorithm found. There can be mutlple alignments because:
+* alignment can shift slightly
+* orentation may differ (forward versus reversus complimentation {revcomp})
+* different engines may score differently. 
+
+The pipeline will then score/filter these candidates and picks one that is best or marks is ambiguous because the overlap would be good from a top 2. 
+
+End anchored: This means the overlap is not just somewhere in the middle, so it behaves like a read merge should where one read's end meets the other read. 
+If an overlap exists but doesn't satisfy this boundary behavior then the status will be marked as `not_end_anchored` to denote that merge quality constraint. 
+
+Geometrically 
+This refers to the shape/placement of the alignment so think here the position of the overall alignment not just percentage identity. So geometric feasability refers to the alignment being biologically plausible end overlap not just an arbitrary internal match. 
+
+### What metrics are being used to assess alignment?
+From config defaults (config/config.yaml) and overlap logic:
+
+Minimum overlap length: min_overlap = 100
+
+Minimum identity: min_identity = 0.8 (80%)
+
+Minimum overlap quality: min_quality = 20.0 (mean Phred in overlap, when quality is available which is the default)
+
+Quality policy: warning or blocking (blocking enforces quality threshold if quality is expected)
+
+So a candidate is considered “good/feasible” when it clears the required gates (length + identity + geometry, plus quality).
+
+Putting it together 
+end_anchored_possible = yes
+then at least one candidate had valid end anchor geometry alignment.
+
+anchoring_feasible = yes
+then at least one candidate was end anchored and met threshold checks (length/identity/(quality policy)).
+
+ambiguous_overlap
+then multiple top candidates are effectively tied, so selector refuses to choose one confidently.
+
+### Going into more detail on the algorithms MicroSeq uses for assemblies 
+
+MicroSeq’s Assembly step has two distinct problem settings:
+
+Single-read assembly: assemble/clean one-direction reads (or read sets) into contigs/singlets.
+
+Paired-read assembly: assemble a forward (F) and reverse (R) read from the same sample into a single contig (or report why that failed).
+
+In the GUI, paired mode additionally exposes an Assembler selection that routes the paired workflow into one of multiple backends (legacy CAP3 path, a user-selected backend, or “run-all + deterministically pick best”).
+
+CAP3 assembler (Overlap–Layout–Consensus, quality-aware)
+
+What it is
+CAP3 is a classical OLC (Overlap–Layout–Consensus) assembler designed for Sanger-style reads. Its core workflow is:
+
+Preprocessing / clipping: CAP3 can clip low-quality regions at the ends of reads.
+
+Overlap detection: it computes overlaps between reads (optionally using base quality values in scoring).
+
+Layout + alignment: it constructs read layouts and multiple sequence alignments for contig construction.
+
+Consensus calling: it generates consensus sequences and uses quality values to reduce consensus errors.
+
+Forward–reverse constraints: CAP3 can use direction/orientation constraints to correct errors and link contigs.
+
+Why it matters in MicroSeq
+
+CAP3 is the “legacy paired pipeline” default and the canonical contig builder for paired reads when you want OLC behavior.
+
+When Use per-base quality scores is enabled, MicroSeq can feed quality information into CAP3’s overlap/consensus steps (CAP3 explicitly supports using base quality values for overlaps, alignments, and consensus generation).
+
+Two-read overlap merge (deterministic F/R merge, “merge_two_reads” backend)
+
+What it is
+This is a specialized assembler for the paired-read case: rather than assembling a graph of many reads, it tries to merge exactly two reads (F and reverse-complemented R) into one contig by finding and validating an overlap.
+
+Algorithmically, it’s the same class of method as paired-end read mergers used in short-read pipelines (find an overlap, score candidates, pick the best merge, and emit a merged sequence or a failure mode), even though MicroSeq’s inputs are typically Sanger-derived rather than Illumina.
+
+Core mechanics
+Given forward read 𝐹
+F and reverse read 𝑅
+R:Reverse-complement 𝑅
+R so both are in the same orientation.
+
+Generate overlap candidates (multiple possible offsets/orientations/alignments depending on engine).
+
+Apply feasibility gates (the “geometry” and threshold logic described):
+
+End-anchored geometry: overlap must behave like a plausible end-to-end merge (read ends meet as expected for forward/reverse Sanger geometry), not an arbitrary internal match.
+
+Minimum overlap length and minimum identity gates.
+
+Quality gate (when quality is available/expected): compute mean Phred in the overlap and require it under a configured policy (warning vs blocking).
+
+Select a best candidate deterministically:
+
+rank by status/feasibility, then by identity/length/quality as configured,
+
+detect near-ties and emit ambiguous_overlap if multiple candidates are effectively equivalent.
+
+Consensus construction in the overlap:
+
+if bases agree then emit base,
+
+if bases disagree then prefer higher-quality base (or mark/handle conflicts per policy),
+
+track high-conflict cases.
+
+Why it matters in MicroSeq
+
+It provides a fast, explicit, interpretable paired-read merge path (with clear failure categories like overlap too short, identity too low, quality too low, ambiguous overlap).
+
+In “compare-driven” operation (Selected / All assemblers), MicroSeq can run this backend side-by-side with CAP3 and pick the best payload deterministically.
+
+*Scientific references for the method class*
+Overlap-based merging of paired reads is a standard approach in sequencing pipelines; FLASH and PEAR are widely cited examples of the overlap-then-merge paradigm (candidate overlap scoring + merge selection).
+
+Alignment / overlap engines used to generate candidates
+
+MicroSeq’s paired merging logic relies on an overlap engine to propose/score candidate alignments. Different engines trade off speed, sensitivity to indels, and determinism. The key families are:
+
+Dynamic-programming gapped alignment (Needleman–Wunsch / Smith–Waterman style)
+
+When you allow mismatches and indels, classical dynamic programming (DP) provides an optimal alignment under a scoring model:
+
+Needleman–Wunsch is the canonical global alignment DP formulation.
+
+Smith–Waterman is the canonical local alignment DP formulation.
+
+In practice, MicroSeq can use Biopython’s alignment machinery as an implementation substrate for DP-based pairwise alignment and scoring.
+
+Exact edit-distance alignment (Edlib)
+
+Edlib is a high-performance library for exact sequence alignment using edit distance, optimized for speed while still returning exact results under the edit-distance model. It’s useful when you want deterministic exactness under an indel-aware distance metric (particularly for near-identical overlaps).
+
+Quality scores as a first-class signal (Phred)
+
+When per-base quality is available, MicroSeq’s overlap evaluation and conflict resolution can incorporate Phred quality scores, which represent log-scaled error probabilities:
+
+Q=−10log10 P(error)
+
+Phred base calling and the error-probability interpretation are described in the original Genome Research papers.
+
+This matters in two places:
+
+Overlap feasibility: mean Phred in the overlap can be used as a gate or warning signal.
+
+Consensus resolution: when F and R disagree, quality-guided selection reduces error propagation into the merged contig (and CAP3 itself is explicitly quality-aware for overlap scoring and consensus).
+
+References used here in my thinking. 
+
+Huang X, Madan A. CAP3: A DNA sequence assembly program. Genome Research (1999).
+
+Magoč T, Salzberg SL. FLASH: fast length adjustment of short reads to improve genome assemblies. Bioinformatics (2011).
+
+Zhang J, Kobert K, Flouri T, Stamatakis A. PEAR: a fast and accurate Illumina Paired-End reAd mergeR. Bioinformatics (2014).
+
+Šošić M, Šikić M. Edlib: a C/C++ library for fast, exact sequence alignment using edit distance. Bioinformatics (2017).
+
+Needleman SB, Wunsch CD. A general method applicable to the search for similarities in the amino acid sequence of two proteins. J Mol Biol (1970).
+
+Smith TF, Waterman MS. Identification of common molecular subsequences. J Mol Biol (1981).
+
+Cock PJA et al. Biopython: freely available Python tools for computational molecular biology and bioinformatics. Bioinformatics (2009).
+
+Ewing B, Hillier L, Wendl MC, Green P. Base-calling of automated sequencer traces using phred. I. Accuracy assessment. Genome Research (1998).
+
+Ewing B, Green P. Base-calling of automated sequencer traces using phred. II. Error probabilities. Genome Research (1998)
+
+
+
 
