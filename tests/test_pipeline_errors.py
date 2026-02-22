@@ -182,3 +182,68 @@ def test_selected_summary_includes_cap3_compatible_telemetry_columns(tmp_path: P
         "overlap_quality_mode",
     ]:
         assert col in header
+
+
+def test_build_selected_blast_inputs_emits_payload_contract_and_hypothesis_ids(tmp_path: Path):
+    payload = tmp_path / "payload.fasta"
+    payload.write_text(">alt1\nACGT\n>alt2\nACGA\n", encoding="utf-8")
+
+    rows = pipeline._build_selected_blast_inputs(
+        selected_rows={
+            "S1": {
+                "assembler_id": "merge_two_reads:biopython",
+                "assembler_name": "Merge two reads (Biopython overlap)",
+                "status": "ambiguous_topk",
+                "payload_fasta": str(payload),
+            }
+        },
+        paired_samples={"S1": {"F": [tmp_path / "f.fasta"], "R": [tmp_path / "r.fasta"]}},
+        missing_samples=set(),
+        output_fasta=tmp_path / "blast_inputs.fasta",
+        output_tsv=tmp_path / "blast_inputs.tsv",
+        no_payload_reason="winner_no_payload",
+    )
+
+    row = rows["S1"]
+    assert row["payload_kind"] == "contig_alt"
+    assert row["payload_n"] == "2"
+    assert row["ambiguity_flag"] == "1"
+    assert "hyp1" in row["payload_ids"] and "hyp2" in row["payload_ids"]
+
+
+def test_select_best_compare_rows_handles_missing_payload_contract_columns(tmp_path: Path):
+    compare_tsv = tmp_path / "compare.tsv"
+    compare_tsv.write_text(
+        "sample_id\tassembler_id\tassembler_name\tstatus\tcontig_len\n"
+        "S1\tcap3:relaxed\tCAP3\tassembled\t100\n",
+        encoding="utf-8",
+    )
+
+    winners = pipeline._select_best_compare_rows(compare_tsv, assembler_mode="all")
+    assert winners["S1"]["assembler_id"] == "cap3:relaxed"
+
+
+def test_build_selected_blast_inputs_reconciles_missing_payload_file_to_none(tmp_path: Path):
+    rows = pipeline._build_selected_blast_inputs(
+        selected_rows={
+            "S1": {
+                "assembler_id": "merge_two_reads:biopython",
+                "assembler_name": "Merge two reads (Biopython overlap)",
+                "status": "merged",
+                "payload_fasta": str(tmp_path / "missing_payload.fasta"),
+                "payload_kind": "contig",
+                "payload_n": "1",
+                "payload_max_len": "1200",
+            }
+        },
+        paired_samples={"S1": {"F": [tmp_path / "f.fasta"], "R": [tmp_path / "r.fasta"]}},
+        missing_samples=set(),
+        output_fasta=tmp_path / "blast_inputs.fasta",
+        output_tsv=tmp_path / "blast_inputs.tsv",
+        no_payload_reason="winner_no_payload",
+    )
+
+    row = rows["S1"]
+    assert row["blast_payload"] == "no_payload"
+    assert row["payload_kind"] == "none"
+    assert row["reason"] == "payload_missing_or_empty"

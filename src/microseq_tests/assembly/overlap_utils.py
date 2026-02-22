@@ -285,6 +285,29 @@ def _is_feasible_candidate(
     return True
 
 
+def rank_feasible_overlaps(
+    candidates: Sequence[OverlapCandidate | AlignedOverlapCandidate],
+    *,
+    min_overlap: int,
+    min_identity: float,
+    min_quality: float,
+    quality_mode: str = "warning",
+) -> list[OverlapCandidate | AlignedOverlapCandidate]:
+    """Return feasible candidates sorted by merge preference (best first)."""
+    feasible = [
+        c
+        for c in candidates
+        if _is_feasible_candidate(
+            c,
+            min_overlap=min_overlap,
+            min_identity=min_identity,
+            min_quality=min_quality,
+            quality_mode=quality_mode,
+        )
+    ]
+    return sorted(feasible, key=_candidate_sort_key, reverse=True)
+
+
 def select_best_overlap(
     candidates: Sequence[OverlapCandidate | AlignedOverlapCandidate],
     *,

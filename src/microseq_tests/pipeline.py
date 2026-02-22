@@ -209,6 +209,25 @@ def _load_tsv_rows_by_sample(path: Path) -> dict[str, dict[str, str]]:
     return rows
 
 
+def _count_fasta_records(path: Path) -> int:
+    if not path.exists():
+        return 0
+    return sum(1 for _ in SeqIO.parse(path, "fasta"))
+
+
+def _infer_compare_row_flags(status: str, warning: str) -> tuple[str, str, str]:
+    status_norm = (status or "").strip().lower()
+    warning_norm = (warning or "").strip().lower()
+    ambiguity_flag = "1" if status_norm in {"ambiguous_topk", "ambiguous_overlap", "ambiguous_overlap_singlets", "merged_best_guess"} else "0"
+    safety_flag = "none"
+    if "high_conflict" in warning_norm or "high_conflict" in status_norm:
+        safety_flag = "high_conflict"
+    review_reason = ""
+    if ambiguity_flag == "1":
+        review_reason = "ambiguous_payload"
+    return ambiguity_flag, safety_flag, review_reason
+
+
 # ───────────────────────────────────────────────────────── trimming
 def run_trim(
     input_path: PathLike,
@@ -1152,6 +1171,8 @@ def run_compare_assemblers(
     high_conflict_q_threshold = int(merge_cfg.get("high_conflict_q_threshold", 30))
     high_conflict_action = str(merge_cfg.get("high_conflict_action", "warn")).strip().lower()
     anchor_tolerance_bases = int(merge_cfg.get("anchor_tolerance_bases", 30))
+    ambiguous_policy = str(merge_cfg.get("ambiguous_policy", "topk")).strip().lower()
+    ambiguous_top_k = int(merge_cfg.get("ambiguous_top_k", 3))
 
     specs = list_assemblers()
     rows: list[dict[str, str]] = []
@@ -1174,6 +1195,10 @@ def run_compare_assemblers(
             diag_detail_for_human = "Missing foward/reverse pair for sample"
             payload_fasta = sample_dir / "payload.fasta"
             payload_written = False
+            payload_kind = "none"
+            payload_n = "0"
+            payload_max_len = "0"
+            decision_source = "auto"
             cap3_contigs_n = ""
             cap3_singlets_n = ""
             cap3_info_path = ""
@@ -1204,21 +1229,38 @@ def run_compare_assemblers(
                             overlap_engine_strategy="single",
                             overlap_engine_order=None,
                             anchor_tolerance_bases=anchor_tolerance_bases,
+                            ambiguous_policy=ambiguous_policy,
+                            ambiguous_top_k=ambiguous_top_k,
                         )
                         status = report.merge_status
                         selected_engine = report.overlap_engine
+                        contig_len = str(report.contig_len)
                         warning = report.merge_warning or ""
+                        if status == "ambiguous_overlap" and not warning:
+                            warning = "Overlap candidates were tied; no unique contig selected"
                         diag_code_for_machine = f"merge_{status}"
                         diag_detail_for_human = (
-                            f"merge_status={status}; overlap_len={report.overlap_len};" 
-                            f"identity={report.identity:.4f}; engine={report.overlap_len}" 
-                        ) 
+                            f"merge_status={status}; overlap_len={report.overlap_len};"
+                            f"identity={report.identity:.4f}; engine={report.overlap_engine}"
+                        )
                         if contig_path and contig_path.exists():
                             payload_records = list(SeqIO.parse(contig_path, "fasta"))
                             if payload_records:
                                 SeqIO.write(payload_records, payload_fasta, "fasta")
                                 payload_written = True
+                                payload_n = str(len(payload_records))
+                                payload_kind = "contig_alt" if status == "ambiguous_topk" else "contig"
                                 contig_len = str(max(len(rec.seq) for rec in payload_records))
+                                payload_max_len = contig_len
+                        else:
+                            singlets_path = sample_dir / f"{sample_id}_paired.fasta.cap.singlets"
+                            singlet_records = list(SeqIO.parse(singlets_path, "fasta")) if singlets_path.exists() else []
+                            if singlet_records:
+                                SeqIO.write(singlet_records, payload_fasta, "fasta")
+                                payload_written = True
+                                payload_kind = "singlet"
+                                payload_n = str(len(singlet_records))
+                                payload_max_len = str(max(len(rec.seq) for rec in singlet_records))
                     else:
                         cap3_args = _resolve_cap3_options(spec.cap3_profile or "strict", None, None)
                         sample_fasta = sample_dir / f"{sample_id}_paired.fasta"
@@ -1270,16 +1312,27 @@ def run_compare_assemblers(
                             f"input={sample_fasta.name}; contigs={len(payload_records)}; singlets={len(singlet_records)}"
                         )
 
-                        if payload_records:
-                            SeqIO.write(payload_records, payload_fasta, "fasta")
+                        payload_source = payload_records if payload_records else singlet_records
+                        if payload_source:
+                            SeqIO.write(payload_source, payload_fasta, "fasta")
                             payload_written = True
-                            contig_len = str(max(len(rec.seq) for rec in payload_records))
+                            payload_n = str(len(payload_source))
+                            payload_kind = "contig" if payload_records else "singlet"
+                            payload_max_len = str(max(len(rec.seq) for rec in payload_source))
+                            if payload_records:
+                                contig_len = str(max(len(rec.seq) for rec in payload_records))
+                                payload_max_len = contig_len
                 except Exception as exc:
                     status = "error"
                     warning = str(exc)
                     diag_code_for_machine = "exception"
                     diag_detail_for_human = str(exc)
 
+            ambiguity_flag, safety_flag, review_reason = _infer_compare_row_flags(status, warning)
+            if not payload_written:
+                payload_kind = "none"
+                payload_n = "0"
+                payload_max_len = "0"
             rows.append({
                 "sample_id": sample_id,
                 "assembler_id": spec.id,
@@ -1297,6 +1350,13 @@ def run_compare_assemblers(
                 "cap3_stdout_path": cap3_stdout_path,
                 "cap3_stderr_path": cap3_stderr_path,
                 "payload_fasta": str(payload_fasta) if payload_written else "",
+                "payload_kind": payload_kind,
+                "payload_n": payload_n,
+                "payload_max_len": payload_max_len,
+                "ambiguity_flag": ambiguity_flag,
+                "safety_flag": safety_flag,
+                "decision_source": decision_source,
+                "review_reason": review_reason,
             })
 
             done += 1
@@ -1307,7 +1367,7 @@ def run_compare_assemblers(
     headers = [
         "sample_id", "assembler_id", "assembler_name", "dup_policy", "status", "selected_engine", "contig_len", "warnings",
         "diag_code_for_machine", "diag_detail_for_human", "cap3_contigs_n", "cap3_singlets_n", "cap3_info_path", "cap3_stdout_path", "cap3_stderr_path",
-        "payload_fasta",
+        "payload_fasta", "payload_kind", "payload_n", "payload_max_len", "ambiguity_flag", "safety_flag", "decision_source", "review_reason",
     ]
     with out_tsv.open("w", encoding="utf-8") as fh:
         fh.write("\t".join(headers) + "\n")
@@ -1341,12 +1401,23 @@ def _select_best_compare_rows(
             winners[str(sample_id)] = {str(k): "" if pd.isna(v) else str(v) for k, v in row.items()}
         return winners
 
-    status_rank = {"assembled": 2, "merged": 1}
+    payload_rank = {"contig": 3, "contig_alt": 2, "singlet": 1, "none": 0}
     for sample_id, group in df.groupby("sample_id"):
         group = group.copy()
-        group["_status_rank"] = group["status"].map(lambda v: status_rank.get(str(v), 0))
-        group["_len"] = pd.to_numeric(group.get("contig_len", ""), errors="coerce").fillna(-1)
-        group = group.sort_values(by=["_status_rank", "_len", "assembler_id"], ascending=[False, False, True])
+
+        kind_raw = group["payload_kind"] if "payload_kind" in group.columns else "none"
+        amb_raw = group["ambiguity_flag"] if "ambiguity_flag" in group.columns else "0"
+        len_raw = group["payload_max_len"] if "payload_max_len" in group.columns else group.get("contig_len", "")
+
+        kind_series = pd.Series(kind_raw, index=group.index).fillna("none").astype(str)
+        amb_series = pd.Series(amb_raw, index=group.index).fillna("0").astype(str)
+        len_series = pd.Series(len_raw, index=group.index)
+
+        group["_payload_rank"] = kind_series.map(lambda v: payload_rank.get(v, 0))
+        group["_amb_penalty"] = amb_series.map(lambda v: 1 if v == "1" else 0)
+        group["_len"] = pd.to_numeric(len_series, errors="coerce").fillna(-1)
+
+        group = group.sort_values(by=["_payload_rank", "_amb_penalty", "_len", "assembler_id"], ascending=[False, True, False, True])
         row = group.iloc[0].to_dict()
         winners[str(sample_id)] = {str(k): "" if pd.isna(v) else str(v) for k, v in row.items()}
     return winners
@@ -1374,18 +1445,65 @@ def _build_selected_blast_inputs(
 
         payload = "pair_missing" if sample_id in missing_samples else "no_payload"
         reason = "pair_missing" if sample_id in missing_samples else no_payload_reason
+        payload_kind = str(chosen.get("payload_kind", "none") or "none")
+        payload_n = str(chosen.get("payload_n", "0") or "0")
+        payload_max_len = str(chosen.get("payload_max_len", "0") or "0")
+        ambiguity_flag = str(chosen.get("ambiguity_flag", "0") or "0")
+        safety_flag = str(chosen.get("safety_flag", "none") or "none")
+        decision_source = str(chosen.get("decision_source", "auto") or "auto")
+        review_reason = str(chosen.get("review_reason", "") or "")
+
+        # Backward compatibility: if old compare rows omit contract fields but provide payload records.
+        selected_status = str(chosen.get("status", "") or "").strip().lower()
+        if payload_records and payload_kind == "none":
+            if selected_status in {"ambiguous_topk"}:
+                payload_kind = "contig_alt"
+                ambiguity_flag = "1"
+                if not review_reason:
+                    review_reason = "ambiguous_payload"
+            elif selected_status == "singlets_only":
+                payload_kind = "singlet"
+            else:
+                payload_kind = "contig"
+
+        claimed_payload = bool(chosen.get("payload_fasta")) or payload_kind != "none"
+
         payload_ids: list[str] = []
-        if payload_records:
-            payload = "contig"
+        if payload_records and payload_kind != "none":
+            payload = "singlet" if payload_kind == "singlet" else "contig"
             reason = "selected_payload"
             label = asm_id.replace(":", "_") if asm_id else "selected"
             for idx, rec in enumerate(payload_records, start=1):
-                new_id = f"{sample_id}|contig|{label}{idx}"
+                if payload_kind == "contig_alt":
+                    suffix = f"hyp{idx}"
+                elif payload_kind == "singlet":
+                    suffix = f"singlet{idx}"
+                else:
+                    suffix = f"contig{idx}"
+                new_id = f"{sample_id}|{label}|{suffix}"
                 payload_ids.append(f"{new_id}={rec.id}")
                 rec.id = new_id
                 rec.name = new_id
                 rec.description = ""
                 records.append(rec)
+            payload_n = str(len(payload_records))
+            payload_max_len = str(max(len(rec.seq) for rec in payload_records))
+        elif sample_id in missing_samples:
+            payload_kind = "none"
+            payload_n = "0"
+            payload_max_len = "0"
+        elif claimed_payload:
+            # Reconcile stale/missing payload path with contract claims.
+            payload_kind = "none"
+            payload_n = "0"
+            payload_max_len = "0"
+            ambiguity_flag = "0"
+            review_reason = ""
+            reason = "payload_missing_or_empty"
+        else:
+            payload_kind = "none"
+            payload_n = "0"
+            payload_max_len = "0"
 
         rows.append({
             "sample_id": sample_id,
@@ -1395,6 +1513,13 @@ def _build_selected_blast_inputs(
             "selected_assembler_id": asm_id,
             "selected_assembler_name": chosen.get("assembler_name", ""),
             "selected_status": chosen.get("status", ""),
+            "payload_kind": payload_kind,
+            "payload_n": payload_n,
+            "payload_max_len": payload_max_len,
+            "ambiguity_flag": ambiguity_flag,
+            "safety_flag": safety_flag,
+            "decision_source": decision_source,
+            "review_reason": review_reason,
         })
 
     if records:
@@ -1405,6 +1530,7 @@ def _build_selected_blast_inputs(
     headers = [
         "sample_id", "blast_payload", "payload_ids", "reason",
         "selected_assembler_id", "selected_assembler_name", "selected_status",
+        "payload_kind", "payload_n", "payload_max_len", "ambiguity_flag", "safety_flag", "decision_source", "review_reason",
     ]
     with output_tsv.open("w", encoding="utf-8") as fh:
         fh.write("\t".join(headers) + "\n")
@@ -1412,6 +1538,95 @@ def _build_selected_blast_inputs(
             fh.write("\t".join(row.get(h, "") for h in headers) + "\n")
 
     return {row["sample_id"]: row for row in rows}
+
+def _write_review_queue(
+    tax_tsv: Path,
+    output_tsv: Path,
+    *,
+    blast_rows: dict[str, dict[str, str]],
+) -> None:
+    output_tsv.parent.mkdir(parents=True, exist_ok=True)
+    header = "sample_id	status	review_reason	hypothesis_count	top_labels\n"
+    if not tax_tsv.exists():
+        output_tsv.write_text(header, encoding="utf-8")
+        return
+
+    try:
+        df = pd.read_csv(tax_tsv, sep="	")
+    except Exception:
+        output_tsv.write_text(header, encoding="utf-8")
+        return
+
+    if df.empty or "qseqid" not in df.columns:
+        output_tsv.write_text(header, encoding="utf-8")
+        return
+
+    label_col = "taxonomy" if "taxonomy" in df.columns else ("stitle" if "stitle" in df.columns else ("sseqid" if "sseqid" in df.columns else None))
+    if label_col is None:
+        output_tsv.write_text(header, encoding="utf-8")
+        return
+
+    temp = df.copy()
+    temp["sample_id"] = temp["qseqid"].astype(str).str.split("|").str[0]
+    for c in ("bitscore", "pident", "qcovhsp", "evalue"):
+        if c in temp.columns:
+            temp[c] = pd.to_numeric(temp[c], errors="coerce")
+
+    rows: list[dict[str, str]] = []
+    sort_cols: list[str] = []
+    ascending: list[bool] = []
+    if "bitscore" in temp.columns:
+        sort_cols.append("bitscore")
+        ascending.append(False)
+    if "pident" in temp.columns:
+        sort_cols.append("pident")
+        ascending.append(False)
+    if "qcovhsp" in temp.columns:
+        sort_cols.append("qcovhsp")
+        ascending.append(False)
+    if "evalue" in temp.columns:
+        sort_cols.append("evalue")
+        ascending.append(True)
+
+    for sample_id, group in temp.groupby("sample_id"):
+        if sort_cols:
+            ranked = group.sort_values(by=sort_cols, ascending=ascending)
+            per_hyp = ranked.groupby("qseqid", as_index=False).first()
+        else:
+            per_hyp = group.groupby("qseqid", as_index=False).first()
+        labels = [str(v) for v in per_hyp[label_col].fillna("") if str(v).strip()]
+        unique_labels = sorted(set(labels))
+        hypothesis_count = len(per_hyp)
+
+        blast_meta = blast_rows.get(str(sample_id), {})
+        default_reason = str(blast_meta.get("review_reason", "") or "")
+        safety_flag = str(blast_meta.get("safety_flag", "none") or "none")
+        status = "resolved_by_blast"
+        reason = ""
+        if safety_flag != "none":
+            status = "needs_manual_review"
+            reason = safety_flag
+        elif hypothesis_count > 1 and len(unique_labels) > 1:
+            status = "needs_manual_review"
+            reason = "ambiguous_taxonomy"
+        elif default_reason and default_reason != "ambiguous_payload":
+            status = "needs_manual_review"
+            reason = default_reason
+
+        rows.append(
+            {
+                "sample_id": str(sample_id),
+                "status": status,
+                "review_reason": reason,
+                "hypothesis_count": str(hypothesis_count),
+                "top_labels": "|".join(unique_labels[:5]),
+            }
+        )
+
+    with output_tsv.open("w", encoding="utf-8") as fh:
+        fh.write(header)
+        for row in sorted(rows, key=lambda r: r["sample_id"]):
+            fh.write("	".join([row["sample_id"], row["status"], row["review_reason"], row["hypothesis_count"], row["top_labels"]]) + "\n")
 
 def _write_selected_assembly_summary(
     output_tsv: Path,
@@ -1433,6 +1648,7 @@ def _write_selected_assembly_summary(
     output_tsv.parent.mkdir(parents=True, exist_ok=True)
     headers = [
         "sample_id", "status", "assembler", "contig_len", "blast_payload",
+        "payload_kind", "payload_n", "payload_max_len", "ambiguity_flag", "safety_flag", "decision_source", "review_reason",
         "selected_engine", "configured_engine", "merge_status", "merge_overlap_len",
         "merge_identity", "overlaps_saved", "overlaps_removed", "primer_mode", "primer_stage",
         "primer_preset", "primer_source", "overlap_engine_strategy", "overlap_engine_order", "overlap_quality_mode",
@@ -1451,6 +1667,13 @@ def _write_selected_assembly_summary(
                 "assembler": chosen.get("assembler_id", "none"),
                 "contig_len": chosen.get("contig_len", ""),
                 "blast_payload": blast.get("blast_payload", ""),
+                "payload_kind": blast.get("payload_kind", "none"),
+                "payload_n": blast.get("payload_n", "0"),
+                "payload_max_len": blast.get("payload_max_len", "0"),
+                "ambiguity_flag": blast.get("ambiguity_flag", "0"),
+                "safety_flag": blast.get("safety_flag", "none"),
+                "decision_source": blast.get("decision_source", "auto"),
+                "review_reason": blast.get("review_reason", ""),
                 "selected_engine": chosen.get("selected_engine", ""),
                 "configured_engine": "",
                 "merge_status": "",
@@ -1608,6 +1831,7 @@ def run_full_pipeline(
         "replicate_weights": None,
         "assembly_summary": out_dir / "asm" / "assembly_summary.tsv" if using_paired else None,
         "overlap_audit": out_dir / "qc" / "overlap_audit.tsv" if (using_paired and overlap_audit) else None,
+        "review_queue": out_dir / "qc" / "review_queue.tsv" if using_paired else None,
     }
 
     extra_stages = int(collapse_replicates) + int(chimera_mode != "off")
@@ -2004,6 +2228,11 @@ def run_full_pipeline(
                 tax_df.to_csv(paths["tax"], sep="\t", index=False) 
         except Exception as exc:
             L.warning("Failed to add paired sample_id column to taxonomy table: %s", exc)
+
+        try:
+            _write_review_queue(paths["tax"], paths["review_queue"], blast_rows=blast_payload_rows)
+        except Exception as exc:
+            L.warning("Failed to write review queue: %s", exc)
 
     # 5 – Optional post-BLAST
     if postblast:

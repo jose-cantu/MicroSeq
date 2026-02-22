@@ -13,6 +13,7 @@ from microseq_tests.assembly.overlap_utils import (
     AlignedOverlapCandidate,
     OverlapResult,
     iter_end_anchored_overlaps,
+    rank_feasible_overlaps,
     select_best_overlap,
 )
 from microseq_tests.assembly.overlap_backends import (
@@ -187,6 +188,8 @@ def merge_two_reads(
     overlap_engine_strategy: str = "single",
     overlap_engine_order: list[str] | None = None,
     anchor_tolerance_bases: int = 30,
+    ambiguous_policy: str = "strict",
+    ambiguous_top_k: int = 3,
 ) -> tuple[Path | None, MergeReport]:
     f_count = _count_fasta_records(fwd_path)
     r_count = _count_fasta_records(rev_path)
@@ -327,8 +330,76 @@ def merge_two_reads(
     report_path = output_dir / f"{sample_id}_paired.merge_report.tsv"
     cap_info_path = output_dir / f"{sample_id}_paired.fasta.cap.info"
 
+    ambiguous_mode = (ambiguous_policy or "strict").strip().lower()
+    if ambiguous_mode in {"topk", "top_k"}:
+        ambiguous_mode = "topk"
+    elif ambiguous_mode in {"best_guess", "bestguess"}:
+        ambiguous_mode = "best_guess"
+    elif ambiguous_mode in {"singlet", "singlets"}:
+        ambiguous_mode = "singlets"
+    elif ambiguous_mode not in {"strict", "singlets", "best_guess", "topk"}:
+        ambiguous_mode = "strict"
+
     if overlap.status == "ambiguous_overlap":
+        ranked_feasible = rank_feasible_overlaps(
+            candidates,
+            min_overlap=min_overlap,
+            min_identity=min_identity,
+            min_quality=min_quality,
+            quality_mode=quality_mode,
+        )
+
+        if ambiguous_mode == "best_guess" and ranked_feasible:
+            chosen = ranked_feasible[0]
+            guess_rev_qual = list(reversed(rev_qual)) if (chosen.orientation == "revcomp" and rev_qual is not None) else rev_qual
+            consensus = _build_consensus(chosen.aligned_fwd, chosen.aligned_rev, fwd_qual, guess_rev_qual)
+            SeqIO.write([SeqRecord(Seq(consensus), id=f"{sample_id}_best_guess", description="")], contig_path, "fasta")
+            report = MergeReport(
+                sample_id,
+                resolved_overlap_engine,
+                chosen.orientation,
+                chosen.overlap_len,
+                chosen.identity,
+                chosen.mismatches,
+                len(consensus),
+                "merged_best_guess",
+                qualities,
+                "ambiguous_overlap;policy=best_guess",
+                0,
+            )
+            _write_stub_cap_info(cap_info_path)
+            _write_merge_report(report_path, report)
+            return contig_path, report
+
+        if ambiguous_mode == "topk" and ranked_feasible:
+            top_k = max(1, int(ambiguous_top_k))
+            alt_records: list[SeqRecord] = []
+            best = ranked_feasible[0]
+            for idx, cand in enumerate(ranked_feasible[:top_k], start=1):
+                cand_rev_qual = list(reversed(rev_qual)) if (cand.orientation == "revcomp" and rev_qual is not None) else rev_qual
+                consensus = _build_consensus(cand.aligned_fwd, cand.aligned_rev, fwd_qual, cand_rev_qual)
+                alt_records.append(SeqRecord(Seq(consensus), id=f"{sample_id}_alt{idx}", description=f"engine={resolved_overlap_engine};identity={cand.identity:.4f};overlap_len={cand.overlap_len}"))
+            SeqIO.write(alt_records, contig_path, "fasta")
+            report = MergeReport(
+                sample_id,
+                resolved_overlap_engine,
+                best.orientation,
+                best.overlap_len,
+                best.identity,
+                best.mismatches,
+                max(len(r.seq) for r in alt_records),
+                "ambiguous_topk",
+                qualities,
+                f"ambiguous_overlap;policy=topk;alternatives={len(alt_records)}",
+                0,
+            )
+            _write_stub_cap_info(cap_info_path)
+            _write_merge_report(report_path, report)
+            return contig_path, report
+
         SeqIO.write([fwd_record, rev_record], singlets_path, "fasta")
+        status = "ambiguous_overlap_singlets" if ambiguous_mode == "singlets" else "ambiguous_overlap"
+        warning = "ambiguous_overlap;policy=singlets" if ambiguous_mode == "singlets" else ""
         report = MergeReport(
             sample_id,
             resolved_overlap_engine,
@@ -337,9 +408,9 @@ def merge_two_reads(
             overlap.identity,
             overlap.mismatches,
             0,
-            "ambiguous_overlap",
+            status,
             qualities,
-            "",
+            warning,
             0,
         )
         _write_stub_cap_info(cap_info_path)

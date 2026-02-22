@@ -54,6 +54,7 @@ from microseq_tests.assembly.two_read_merge import merge_two_reads
 from microseq_tests.assembly.overlap_backends import compute_overlap_candidates, resolve_overlap_engine
 from microseq_tests.pipeline import (
     _build_blast_inputs,
+    _build_selected_blast_inputs,
     _classify_overlap_status,
     _collect_pairing_catalog,
     _evaluate_overlap,
@@ -402,6 +403,10 @@ def test_run_compare_assemblers_merge_specs_use_single_engine(tmp_path: Path, mo
             self.merge_status = "merged"
             self.overlap_engine = overlap_engine
             self.merge_warning = ""
+            self.overlap_len = 120
+            self.identity = 1.0
+            self.contig_len = 120
+            self.mismatches = 0
 
     def fake_merge_two_reads(*, sample_id, fwd_path, rev_path, output_dir, overlap_engine, overlap_engine_strategy, **_kwargs):
         calls.append((overlap_engine, overlap_engine_strategy))
@@ -414,6 +419,9 @@ def test_run_compare_assemblers_merge_specs_use_single_engine(tmp_path: Path, mo
 
     assert out_tsv.exists()
     out_text = out_tsv.read_text(encoding="utf-8")
+    assert "payload_kind" in out_text
+    assert "payload_n" in out_text
+    assert "decision_source" in out_text
     assert "merge_two_reads:biopython" in out_text
     assert "merge_two_reads:ungapped" in out_text
     assert "merge_two_reads:edlib" in out_text
@@ -424,6 +432,38 @@ def test_run_compare_assemblers_merge_specs_use_single_engine(tmp_path: Path, mo
     assert (compare_root / "merge_two_reads_biopython" / "S1").exists()
     assert (compare_root / "merge_two_reads_ungapped" / "S1").exists()
     assert (compare_root / "merge_two_reads_edlib" / "S1").exists()
+
+
+
+def test_run_compare_assemblers_ambiguous_overlap_reports_zero_contig_len(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    in_dir = tmp_path / "paired_fasta"
+    in_dir.mkdir()
+    (in_dir / "S1_27F.fasta").write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">r\n" + "A" * 120 + "\n", encoding="utf-8")
+
+    specs = (
+        AssemblerSpec(id="merge_two_reads:biopython", display_name="b", kind="merge_two_reads", overlap_engine="biopython"),
+    )
+    monkeypatch.setattr("microseq_tests.pipeline.list_assemblers", lambda: specs)
+
+    class FakeReport:
+        merge_status = "ambiguous_overlap"
+        overlap_engine = "biopython"
+        merge_warning = ""
+        overlap_len = 80
+        identity = 0.99
+        contig_len = 0
+
+    def fake_merge_two_reads(*, sample_id, output_dir, **_kwargs):
+        return None, FakeReport()
+
+    monkeypatch.setattr("microseq_tests.pipeline.merge_two_reads", fake_merge_two_reads)
+    out_tsv = run_compare_assemblers(in_dir, tmp_path, fwd_pattern="27F", rev_pattern="1492R")
+
+    text = out_tsv.read_text(encoding="utf-8")
+    assert "ambiguous_overlap" in text
+    assert "	biopython	0	" in text
+    assert "Overlap candidates were tied; no unique contig selected" in text
 
 def test_run_compare_assemblers_cap3_nonzero_exit_still_records_artifacts(
     tmp_path: Path,
@@ -766,6 +806,49 @@ def test_end_anchoring_guard_rejects_internal_repeat_match(tmp_path: Path) -> No
     assert report.merge_status in {"not_end_anchored", "identity_low", "overlap_too_short"}
 
 
+def test_merge_two_reads_ambiguous_topk_emits_alternative_payloads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fwd_path = tmp_path / "S4_27F.fasta"
+    rev_path = tmp_path / "S4_1492R.fasta"
+    fwd_path.write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
+    rev_path.write_text(">r\n" + "T" * 120 + "\n", encoding="utf-8")
+
+    from microseq_tests.assembly.overlap_utils import AlignedOverlapCandidate, OverlapResult
+
+    fake_candidates = [
+        AlignedOverlapCandidate("revcomp", 60, 1, 0.98, 30.0, "A" * 120, "A" * 120),
+        AlignedOverlapCandidate("revcomp", 60, 1, 0.98, 30.0, "A" * 110 + "C" * 10, "A" * 110 + "G" * 10),
+        AlignedOverlapCandidate("revcomp", 59, 1, 0.97, 29.0, "A" * 100 + "C" * 20, "A" * 100 + "G" * 20),
+    ]
+
+    monkeypatch.setattr(
+        "microseq_tests.assembly.two_read_merge.select_best_overlap",
+        lambda *_a, **_k: OverlapResult("revcomp", 60, 0.98, 1, 30.0, "A" * 120, "A" * 120, "ambiguous_overlap"),
+    )
+    monkeypatch.setattr(
+        "microseq_tests.assembly.two_read_merge.rank_feasible_overlaps",
+        lambda *_a, **_k: fake_candidates,
+    )
+
+    contig_path, report = merge_two_reads(
+        sample_id="S4",
+        fwd_path=fwd_path,
+        rev_path=rev_path,
+        output_dir=tmp_path,
+        min_overlap=40,
+        min_identity=0.9,
+        min_quality=20.0,
+        quality_mode="warning",
+        overlap_engine="biopython",
+        ambiguous_policy="topk",
+        ambiguous_top_k=3,
+    )
+
+    assert contig_path is not None
+    assert report.merge_status == "ambiguous_topk"
+    assert "policy=topk" in report.merge_warning
+    alt_records = list(SeqIO.parse(contig_path, "fasta"))
+    assert len(alt_records) == 3
+
 def test_overlap_selection_prefers_long_feasible_candidate() -> None:
     """Ensure overlap selection prefers the longest feasible candidate over shorter alternatives."""
     fwd = "A" * 55 + "C" * 44 + "G"
@@ -808,6 +891,81 @@ def test_merge_two_reads_sets_qualities_absent_warning_and_cap_info(tmp_path: Pa
     assert report.merge_warning == "qualities_absent"
     cap_info = tmp_path / "S1_paired.fasta.cap.info"
     assert cap_info.exists()
+
+
+def test_build_selected_blast_inputs_legacy_ambiguous_topk_infers_contig_alt(tmp_path: Path) -> None:
+    payload = tmp_path / "alt_payload.fasta"
+    payload.write_text(">a1\nACGT\n>a2\nACGA\n", encoding="utf-8")
+
+    rows = _build_selected_blast_inputs(
+        selected_rows={
+            "S1": {
+                "assembler_id": "merge_two_reads:biopython",
+                "assembler_name": "Merge two reads (Biopython overlap)",
+                "status": "ambiguous_topk",
+                "payload_fasta": str(payload),
+            }
+        },
+        paired_samples={"S1": {"F": [tmp_path / "f.fasta"], "R": [tmp_path / "r.fasta"]}},
+        missing_samples=set(),
+        output_fasta=tmp_path / "blast_inputs.fasta",
+        output_tsv=tmp_path / "blast_inputs.tsv",
+        no_payload_reason="winner_no_payload",
+    )
+
+    row = rows["S1"]
+    assert row["payload_kind"] == "contig_alt"
+    assert row["ambiguity_flag"] == "1"
+    assert "hyp1" in row["payload_ids"] and "hyp2" in row["payload_ids"]
+
+
+def test_build_selected_blast_inputs_keeps_no_payload_reason_when_unclaimed(tmp_path: Path) -> None:
+    rows = _build_selected_blast_inputs(
+        selected_rows={"S1": {"assembler_id": "merge_two_reads:biopython", "status": "identity_low"}},
+        paired_samples={"S1": {"F": [tmp_path / "f.fasta"], "R": [tmp_path / "r.fasta"]}},
+        missing_samples=set(),
+        output_fasta=tmp_path / "blast_inputs.fasta",
+        output_tsv=tmp_path / "blast_inputs.tsv",
+        no_payload_reason="winner_no_payload",
+    )
+
+    row = rows["S1"]
+    assert row["payload_kind"] == "none"
+    assert row["reason"] == "winner_no_payload"
+
+
+def test_build_selected_blast_inputs_respects_singlet_payload_contract(tmp_path: Path) -> None:
+    payload = tmp_path / "singlet_payload.fasta"
+    payload.write_text(">S1_F\nAAAA\n>S1_R\nTTTT\n", encoding="utf-8")
+
+    rows = _build_selected_blast_inputs(
+        selected_rows={
+            "S1": {
+                "assembler_id": "cap3:relaxed",
+                "assembler_name": "CAP3 (Relaxed profile)",
+                "status": "singlets_only",
+                "payload_fasta": str(payload),
+                "payload_kind": "singlet",
+                "payload_n": "2",
+                "payload_max_len": "4",
+                "ambiguity_flag": "0",
+                "safety_flag": "none",
+                "decision_source": "auto",
+                "review_reason": "",
+            }
+        },
+        paired_samples={"S1": {"F": [tmp_path / "f.fasta"], "R": [tmp_path / "r.fasta"]}},
+        missing_samples=set(),
+        output_fasta=tmp_path / "blast_inputs.fasta",
+        output_tsv=tmp_path / "blast_inputs.tsv",
+        no_payload_reason="winner_no_payload",
+    )
+
+    row = rows["S1"]
+    assert row["blast_payload"] == "singlet"
+    assert row["payload_kind"] == "singlet"
+    assert row["payload_n"] == "2"
+    assert "singlet1" in row["payload_ids"] and "singlet2" in row["payload_ids"]
 
 
 def test_parse_cap3_reports_merge_only_no_missing_info_warning(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
