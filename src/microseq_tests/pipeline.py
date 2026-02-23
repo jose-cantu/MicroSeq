@@ -936,8 +936,13 @@ def _collect_primer_trim_bases_by_sample(report_path: Path | None) -> dict[str, 
     rows = pd.read_csv(report_path, sep="\t")
     out: dict[str, dict[str, int]] = defaultdict(lambda: {"F": 0, "R": 0})
     for _, row in rows.iterrows():
-        name = str(row.get("file", ""))
-        parsed = extract_sid_orientation(Path(name))
+        raw_name = row.get("file", "")
+        if pd.isna(raw_name):
+            continue
+        name = str(raw_name).strip()
+        if not name:
+            continue
+        parsed = extract_sid_orientation(Path(name).name)
         if not parsed:
             continue
         sample_id, orient = parsed
