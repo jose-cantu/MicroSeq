@@ -4,6 +4,9 @@ title: Paired CAP3 assembly
 permalink: /paired-assembly/
 ---
 
+
+> See also: [Workflow Resolution Funnel](workflow_resolution.md) for how ambiguous hypotheses are collapsed into sample-level resolution states.
+
 MicroSeq now ships a forward/reverse pairing workflow that works in both the CLI and GUI.
 It can auto-detect primer tokens in filenames, enforce plate well consistency, and run CAP3 per sample with duplicate-handling policies.
 
@@ -146,6 +149,7 @@ The paired pipeline now produces the following key files under the run folder:
 * `asm/paired_contigs.fasta` : merged contigs-only FASTA (for contigs-only BLAST).
 * `asm/blast_inputs.fasta` : contigs+singlets BLAST payload FASTA.
 * `asm/blast_inputs.tsv` : payload manifest with `blast_payload`, `reason`, and `payload_ids`.
+  It now also includes `payload_entity_n`, `hypothesis_map` (`qseqid -> structural_hypothesis`), and `source_id_map` (`qseqid -> original source id`) so users can distinguish structural decision branches from raw payload provenance.
 
 ## Diagnosing singlets and overlap failures
 

@@ -10,6 +10,7 @@ from contextlib import nullcontext
 from collections import Counter, defaultdict
 import re 
 from typing import Union, Sequence
+from dataclasses import dataclass
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 from Bio.Align import PairwiseAligner
@@ -29,6 +30,7 @@ import shutil
 from microseq_tests.trimming.quality_trim import  trim_fastq_inputs
 from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq as ab1_to_fastq
 from microseq_tests.trimming.biopy_trim import trim_folder as biopy_trim, build_trim_summary_row
+from microseq_tests.trimming.ab1_qc import summarize_ab1_folder
 from microseq_tests.trimming.fastq_to_fasta import (
     fastq_folder_to_fasta as fastq_to_fasta,
 )
@@ -82,6 +84,92 @@ __all__ = [
 
 PathLike = Union[str, Path]
 L = logging.getLogger(__name__)
+
+
+BLAST_INPUTS_HEADERS: list[str] = [
+    "sample_id", "blast_payload", "payload_ids", "reason",
+    "selected_assembler_id", "selected_assembler_name", "selected_status",
+    "payload_kind", "payload_n", "payload_entity_n", "payload_max_len",
+    "ambiguity_flag", "safety_flag", "decision_source",
+    "review_reason", "warning_flags",
+    "structural_hypothesis_n", "hypotheses_with_hits_n", "missing_hits_n",
+    "hypothesis_map", "source_id_map",
+    "resolution_state", "resolved_hypothesis", "resolution_reason",
+    "review_action", "advisory_reason",
+    "trace_status", "trace_status_f", "trace_status_r", "trace_flags",
+]
+
+@dataclass
+class ResolutionContractRow:
+    sample_id: str
+    review_action: str = "none"
+    review_reason: str = ""
+    advisory_reason: str = ""
+    warning_flags: str = ""
+    structural_hypothesis_n: int = 0
+    hypotheses_with_hits_n: int = 0
+    missing_hits_n: int = 0
+    top_labels: str = ""
+    resolution_state: str = "needs_review"
+    resolved_hypothesis: str = ""
+    resolution_reason: str = "taxonomy_missing"
+    trace_status: str = "NA"
+    trace_flags: str = ""
+
+    def normalize(self) -> "ResolutionContractRow":
+        allowed_states = {"unambiguous", "resolved_by_evidence", "needs_review"}
+        if self.resolution_state not in allowed_states:
+            self.resolution_state = "needs_review"
+        allowed_actions = {"none", "queue"}
+        if self.review_action not in allowed_actions:
+            self.review_action = "queue" if self.resolution_state == "needs_review" else "none"
+
+        flags = sorted({f.strip() for f in str(self.warning_flags or "").split(";") if f.strip()})
+        self.warning_flags = ";".join(flags)
+        if self.review_action != "queue":
+            self.review_reason = ""
+        if self.missing_hits_n < 0:
+            self.missing_hits_n = 0
+        return self
+
+    @staticmethod
+    def header() -> list[str]:
+        return [
+            "sample_id",
+            "review_action",
+            "review_reason",
+            "advisory_reason",
+            "warning_flags",
+            "structural_hypothesis_n",
+            "hypotheses_with_hits_n",
+            "missing_hits_n",
+            "top_labels",
+            "resolution_state",
+            "resolved_hypothesis",
+            "resolution_reason",
+            "trace_status",
+            "trace_flags",
+        ]
+
+    def to_dict(self) -> dict[str, str]:
+        self.normalize()
+        return {
+            "sample_id": self.sample_id,
+            "review_action": self.review_action,
+            "review_reason": self.review_reason,
+            "advisory_reason": self.advisory_reason,
+            "warning_flags": self.warning_flags,
+            "structural_hypothesis_n": str(self.structural_hypothesis_n),
+            "hypotheses_with_hits_n": str(self.hypotheses_with_hits_n),
+            "missing_hits_n": str(self.missing_hits_n),
+            "top_labels": self.top_labels,
+            "resolution_state": self.resolution_state,
+            "resolved_hypothesis": self.resolved_hypothesis,
+            "resolution_reason": self.resolution_reason,
+            "trace_status": self.trace_status,
+            "trace_flags": self.trace_flags,
+        }
+
 
 _PRIMER_PRESETS: dict[str, dict[str, object]] = trim_presets()
 
@@ -210,6 +298,21 @@ def _load_tsv_rows_by_sample(path: Path) -> dict[str, dict[str, str]]:
     return rows
 
 
+def _write_tsv_rows_by_sample(
+    path: Path,
+    rows: dict[str, dict[str, str]],
+    *,
+    headers: list[str] | None = None,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cols = headers or BLAST_INPUTS_HEADERS
+    with path.open("w", encoding="utf-8") as fh:
+        fh.write("\t".join(cols) + "\n")
+        for sample_id in sorted(rows):
+            row = rows[sample_id]
+            fh.write("\t".join(str(row.get(c, "")) for c in cols) + "\n")
+
+
 def _count_fasta_records(path: Path) -> int:
     if not path.exists():
         return 0
@@ -240,6 +343,7 @@ def run_trim(
     mee_max: float | None = None,
     mee_min_len: int | None = None, 
     primer_cfg_override: dict | None = None,
+    trace_qc_flags: str = "auto",
 
 ) -> int:
     """Trim reads and convert if needed.
@@ -311,10 +415,21 @@ def run_trim(
             if primer_cfg["mode"] == "clip":
                 quality_input_dir = pre_quality_primer_dir
 
+        apply_thresholds: bool | None
+        if trace_qc_flags == "on":
+            apply_thresholds = True
+        elif trace_qc_flags == "off":
+            apply_thresholds = False
+        else:
+            apply_thresholds = None
+
+        trace_qc = summarize_ab1_folder(dst, apply_thresholds=apply_thresholds)
+
         biopy_trim(
             quality_input_dir,
             work / "qc",
             combined_tsv=summary_tsv,
+            trace_qc=trace_qc,
             method=str(trim_policy["sanger_method"]),
             cutoff_q=int(trim_policy["sanger_cutoff_q"]),
             window_size=int(trim_policy["sanger_window_size"]),
@@ -1272,6 +1387,20 @@ def _build_blast_inputs(
                     "blast_payload": "pair_missing",
                     "payload_ids": "",
                     "reason": "pair_missing",
+                    "payload_kind": "none",
+                    "payload_n": "0",
+                    "payload_entity_n": "0",
+                    "payload_max_len": "0",
+                    "ambiguity_flag": "0",
+                    "safety_flag": "none",
+                    "decision_source": "auto",
+                    "review_reason": "pair_missing",
+                    "warning_flags": "",
+                    "structural_hypothesis_n": "0",
+                    "hypotheses_with_hits_n": "0",
+                    "missing_hits_n": "0",
+                    "hypothesis_map": "",
+                    "source_id_map": "",
                 }
             )
             continue
@@ -1299,13 +1428,39 @@ def _build_blast_inputs(
             label = "cap3"
 
         payload_ids: list[str] = []
+        hypothesis_map: list[str] = []
+        source_id_map: list[str] = []
         for idx, record in enumerate(source_records, start=1):
             new_id = f"{sample_id}|{payload}|{label}{idx}"
-            payload_ids.append(f"{new_id}={record.id}")
+            source_id = str(record.id)
+            structural_id = f"{payload}{idx}" if payload == "contig_alt" else "struct1"
+            payload_ids.append(f"{new_id}={source_id}")
+            hypothesis_map.append(f"{new_id}={structural_id}")
+            source_id_map.append(f"{new_id}={source_id}")
             record.id = new_id
             record.name = new_id
             record.description = ""
             records_to_write.append(record)
+
+        payload_kind = "none"
+        payload_n = "0"
+        payload_entity_n = "0"
+        payload_max_len = "0"
+        ambiguity_flag = "0"
+        review_reason = ""
+        warning_flags = ""
+        structural_hypothesis_n = 0
+        if payload in {"contig", "singlet"}:
+            payload_kind = payload
+            payload_n = str(len(source_records))
+            payload_entity_n = payload_n
+            payload_max_len = str(max(len(rec.seq) for rec in source_records)) if source_records else "0"
+            # CAP3 default emits payload entities; structural ambiguity is not implied by multi-contig.
+            structural_hypothesis_n = 1
+            if len(source_records) > 1:
+                warning_flags = "multi_payload"
+        elif payload == "no_payload":
+            review_reason = "no_payload"
 
         rows.append(
             {
@@ -1313,16 +1468,243 @@ def _build_blast_inputs(
                 "blast_payload": payload,
                 "payload_ids": ";".join(payload_ids),
                 "reason": reason,
+                "payload_kind": payload_kind,
+                "payload_n": payload_n,
+                "payload_entity_n": payload_entity_n,
+                "payload_max_len": payload_max_len,
+                "ambiguity_flag": ambiguity_flag,
+                "safety_flag": "none",
+                "decision_source": "auto",
+                "review_reason": review_reason,
+                "warning_flags": warning_flags,
+                "structural_hypothesis_n": str(structural_hypothesis_n),
+                "hypotheses_with_hits_n": "0",
+                "missing_hits_n": str(structural_hypothesis_n),
+                "hypothesis_map": ";".join(hypothesis_map),
+                "source_id_map": ";".join(source_id_map),
             }
         )
 
     with output_fasta.open("w", encoding="utf-8") as fh:
         SeqIO.write(records_to_write, fh, "fasta")
 
+    headers = BLAST_INPUTS_HEADERS
     with output_tsv.open("w", encoding="utf-8") as fh:
-        fh.write("sample_id\tblast_payload\tpayload_ids\treason\n")
+        fh.write("\t".join(headers) + "\n")
         for row in rows:
-            fh.write("\t".join([row["sample_id"], row["blast_payload"], row["payload_ids"], row["reason"]]) + "\n")
+            fh.write("\t".join(row.get(h, "") for h in headers) + "\n")
+
+
+def _canonical_seq_key(name: str) -> str:
+    key = str(name)
+    for suffix in (".fastq.gz", ".fq.gz", ".fasta.gz", ".fa.gz", ".fna.gz", ".fas.gz", ".ab1.gz"):
+        if key.lower().endswith(suffix):
+            key = key[: -len(suffix)]
+            break
+    else:
+        key = Path(key).stem
+    if key.endswith("_trimmed"):
+        key = key[: -len("_trimmed")]
+    return key
+
+
+def _extract_tax_label(value: object, rank: str = "species") -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    rank_alias = {
+        "kingdom": "k",
+        "domain": "k",
+        "phylum": "p",
+        "class": "c",
+        "order": "o",
+        "family": "f",
+        "genus": "g",
+        "species": "s",
+    }
+    rank_key = rank_alias.get(str(rank).strip().lower(), "s")
+
+    rank_map: dict[str, str] = {}
+    for token in [tok.strip() for tok in text.split(";") if tok.strip()]:
+        if "__" in token:
+            prefix, val = token.split("__", 1)
+            key = prefix.strip().lower()[:1]
+            val_norm = val.strip()
+            rank_map[key] = val_norm
+
+    raw = rank_map.get(rank_key, "")
+    if not raw:
+        return ""
+
+    norm = re.sub(r"\s+", " ", raw).strip()
+    if norm.lower() in {"", "uncultured", "unclassified", "unknown", "na", "n/a"}:
+        return ""
+    return norm.lower()
+
+
+def _trace_status_priority(status: str) -> int:
+    order = {"na": 0, "pass": 1, "warn": 2, "fail": 3}
+    return order.get(str(status or "").strip().lower(), 0)
+
+
+def _worst_trace_status(statuses: Sequence[str]) -> str:
+    cleaned = [str(s or "NA").strip().upper() for s in statuses if str(s or "").strip()]
+    if not cleaned:
+        return "NA"
+    return max(cleaned, key=lambda s: _trace_status_priority(s))
+
+
+def _load_trace_qc_by_sample(
+    summary_tsv: Path | None,
+    paired_samples: dict[str, dict[str, list[Path]]],
+) -> dict[str, dict[str, str]]:
+    if summary_tsv is None or not summary_tsv.exists():
+        return {}
+
+    try:
+        df = pd.read_csv(summary_tsv, sep="\t", dtype=str, keep_default_na=False)
+    except Exception:
+        return {}
+
+    required = {"file", "trace_qc_status", "trace_qc_flags"}
+    if df.empty or not required.issubset(set(df.columns)):
+        return {}
+
+    trace_by_key: dict[str, dict[str, str]] = {}
+    mixed_col = "trace_mixed_peak_frac" if "trace_mixed_peak_frac" in df.columns else None
+    for _, row in df.iterrows():
+        file_name = str(row.get("file", "") or "").strip()
+        if not file_name or file_name.startswith("_"):
+            continue
+        key = _canonical_seq_key(file_name)
+        status_raw = str(row.get("trace_qc_status", "") or "").strip().upper()
+        flags_raw = str(row.get("trace_qc_flags", "") or "").strip()
+        mixed_raw = str(row.get(mixed_col, "") if mixed_col else "").strip()
+        trace_by_key[key] = {
+            "trace_qc_status": status_raw if status_raw and status_raw != "NAN" else "NA",
+            "trace_qc_flags": "" if flags_raw.upper() == "NAN" else flags_raw,
+            "trace_mixed_peak_frac": "" if mixed_raw.upper() == "NAN" else mixed_raw,
+        }
+
+    out: dict[str, dict[str, str]] = {}
+    for sample_id, orient_map in paired_samples.items():
+        orient_status: dict[str, str] = {"F": "NA", "R": "NA"}
+        flags: set[str] = set()
+        mixed_values: list[float] = []
+        for orient in ("F", "R"):
+            files = orient_map.get(orient, [])
+            file_statuses: list[str] = []
+            for fp in files:
+                key = _canonical_seq_key(fp.name)
+                trace = trace_by_key.get(key)
+                if not trace:
+                    continue
+                file_statuses.append(trace.get("trace_qc_status", "NA"))
+                for flag in str(trace.get("trace_qc_flags", "")).split(";"):
+                    flag = flag.strip()
+                    if flag:
+                        flags.add(flag)
+                mixed_raw = str(trace.get("trace_mixed_peak_frac", "") or "").strip()
+                if mixed_raw:
+                    try:
+                        mixed_values.append(float(mixed_raw))
+                    except ValueError:
+                        pass
+            orient_status[orient] = _worst_trace_status(file_statuses)
+
+        sample_status = _worst_trace_status([orient_status["F"], orient_status["R"]])
+        out[sample_id] = {
+            "trace_status": sample_status,
+            "trace_status_f": orient_status["F"],
+            "trace_status_r": orient_status["R"],
+            "trace_flags": ";".join(sorted(flags)),
+            "trace_mixed_peak_frac_max": f"{max(mixed_values):.4f}" if mixed_values else "",
+        }
+    return out
+
+
+def _apply_trace_to_blast_payloads(
+    blast_rows: dict[str, dict[str, str]],
+    trace_rows: dict[str, dict[str, str]],
+    *,
+    trace_cfg: dict | None = None,
+) -> dict[str, dict[str, str]]:
+    if not blast_rows:
+        return blast_rows
+
+    cfg = trace_cfg if isinstance(trace_cfg, dict) else load_config().get("trace_qc", {})
+    enable_mixture_inference = bool(cfg.get("enable_mixture_inference", False))
+    try:
+        mixture_thresh = float(cfg.get("mixture_suspect_threshold", cfg.get("mixed_frac_fail", 0.10)))
+    except (TypeError, ValueError):
+        mixture_thresh = 0.10
+
+    out: dict[str, dict[str, str]] = {}
+    for sample_id, row in blast_rows.items():
+        merged = dict(row)
+        trace = trace_rows.get(sample_id, {})
+        trace_status = str(trace.get("trace_status", "NA") or "NA").upper()
+        trace_flags = str(trace.get("trace_flags", "") or "")
+        mixed_max_raw = str(trace.get("trace_mixed_peak_frac_max", "") or "")
+
+        merged["trace_status"] = trace_status
+        merged["trace_status_f"] = str(trace.get("trace_status_f", "NA") or "NA")
+        merged["trace_status_r"] = str(trace.get("trace_status_r", "NA") or "NA")
+        merged["trace_flags"] = trace_flags
+        merged["trace_mixed_peak_frac_max"] = mixed_max_raw
+
+        warning_set = {f for f in str(merged.get("warning_flags", "") or "").split(";") if f}
+        safety_flag = str(merged.get("safety_flag", "none") or "none")
+        review_reason = str(merged.get("review_reason", "") or "")
+
+        if trace_status == "FAIL":
+            merged["safety_flag"] = "trace_fail"
+            if review_reason and review_reason != "trace_fail":
+                warning_set.add(review_reason)
+            merged["review_reason"] = "trace_fail"
+        elif trace_status == "WARN":
+            if safety_flag == "none":
+                merged["safety_flag"] = "trace_warn"
+            warning_set.add("trace_warn")
+
+        if enable_mixture_inference and not merged.get("review_reason") and mixed_max_raw:
+            try:
+                if float(mixed_max_raw) >= mixture_thresh:
+                    merged["review_reason"] = "mixture_suspected"
+            except ValueError:
+                pass
+
+        merged["warning_flags"] = ";".join(sorted(warning_set))
+        out[sample_id] = merged
+    return out
+
+
+def _apply_overlap_diagnostics_to_blast_payloads(
+    blast_rows: dict[str, dict[str, str]],
+    overlap_rows: dict[str, dict[str, str]] | None,
+) -> dict[str, dict[str, str]]:
+    if not blast_rows:
+        return blast_rows
+    overlap_rows = overlap_rows or {}
+    out: dict[str, dict[str, str]] = {}
+
+    for sample_id, row in blast_rows.items():
+        merged = dict(row)
+        warning_set = {f for f in str(merged.get("warning_flags", "") or "").split(";") if f}
+        status = str((overlap_rows.get(sample_id) or {}).get("status", "") or "").strip().lower()
+
+        if status in {"high_conflict"}:
+            merged["safety_flag"] = "high_conflict"
+            if not merged.get("review_reason"):
+                merged["review_reason"] = "high_conflict"
+        elif status in {"identity_low", "overlap_too_short", "quality_low", "ambiguous_overlap", "ambiguous_overlap_singlets", "merged_best_guess"}:
+            warning_set.add(status)
+
+        merged["warning_flags"] = ";".join(sorted(warning_set))
+        out[sample_id] = merged
+
+    return out
 
 
 def _resolve_cap3_options(
@@ -1605,6 +1987,12 @@ def run_compare_assemblers(
                 "safety_flag": safety_flag,
                 "decision_source": decision_source,
                 "review_reason": review_reason,
+                "warning_flags": "",
+                "structural_hypothesis_n": "0",
+                "hypotheses_with_hits_n": "0",
+                "missing_hits_n": "0",
+                "hypothesis_map": "",
+                "source_id_map": "",
             })
 
             done += 1
@@ -1615,7 +2003,9 @@ def run_compare_assemblers(
     headers = [
         "sample_id", "assembler_id", "assembler_name", "dup_policy", "status", "selected_engine", "contig_len", "warnings",
         "diag_code_for_machine", "diag_detail_for_human", "cap3_contigs_n", "cap3_singlets_n", "cap3_info_path", "cap3_stdout_path", "cap3_stderr_path",
-        "payload_fasta", "payload_kind", "payload_n", "payload_max_len", "ambiguity_flag", "safety_flag", "decision_source", "review_reason",
+        "payload_fasta", "payload_kind", "payload_n", "payload_max_len", "ambiguity_flag", "safety_flag", "decision_source", "review_reason", "warning_flags",
+        "structural_hypothesis_n", "hypotheses_with_hits_n", "missing_hits_n", "hypothesis_map", "source_id_map",
+        "resolution_state", "resolved_hypothesis", "resolution_reason", "trace_status", "trace_status_f", "trace_status_r", "trace_flags",
     ]
     with out_tsv.open("w", encoding="utf-8") as fh:
         fh.write("\t".join(headers) + "\n")
@@ -1700,8 +2090,8 @@ def _build_selected_blast_inputs(
         safety_flag = str(chosen.get("safety_flag", "none") or "none")
         decision_source = str(chosen.get("decision_source", "auto") or "auto")
         review_reason = str(chosen.get("review_reason", "") or "")
+        warning_flags = str(chosen.get("warning_flags", "") or "")
 
-        # Backward compatibility: if old compare rows omit contract fields but provide payload records.
         selected_status = str(chosen.get("status", "") or "").strip().lower()
         if payload_records and payload_kind == "none":
             if selected_status in {"ambiguous_topk"}:
@@ -1717,19 +2107,27 @@ def _build_selected_blast_inputs(
         claimed_payload = bool(chosen.get("payload_fasta")) or payload_kind != "none"
 
         payload_ids: list[str] = []
+        hypothesis_map: list[str] = []
+        source_id_map: list[str] = []
         if payload_records and payload_kind != "none":
             payload = "singlet" if payload_kind == "singlet" else "contig"
             reason = "selected_payload"
             label = asm_id.replace(":", "_") if asm_id else "selected"
             for idx, rec in enumerate(payload_records, start=1):
+                source_id = str(rec.id)
                 if payload_kind == "contig_alt":
                     suffix = f"hyp{idx}"
+                    structural_id = suffix
                 elif payload_kind == "singlet":
                     suffix = f"singlet{idx}"
+                    structural_id = "struct1"
                 else:
                     suffix = f"contig{idx}"
+                    structural_id = "struct1"
                 new_id = f"{sample_id}|{label}|{suffix}"
-                payload_ids.append(f"{new_id}={rec.id}")
+                payload_ids.append(f"{new_id}={source_id}")
+                hypothesis_map.append(f"{new_id}={structural_id}")
+                source_id_map.append(f"{new_id}={source_id}")
                 rec.id = new_id
                 rec.name = new_id
                 rec.description = ""
@@ -1741,7 +2139,6 @@ def _build_selected_blast_inputs(
             payload_n = "0"
             payload_max_len = "0"
         elif claimed_payload:
-            # Reconcile stale/missing payload path with contract claims.
             payload_kind = "none"
             payload_n = "0"
             payload_max_len = "0"
@@ -1753,6 +2150,12 @@ def _build_selected_blast_inputs(
             payload_n = "0"
             payload_max_len = "0"
 
+        structural_hypothesis_n = 0
+        if payload_records and payload_kind != "none":
+            structural_hypothesis_n = len(payload_records) if payload_kind == "contig_alt" else 1
+            if len(payload_records) > 1 and payload_kind != "contig_alt":
+                warning_flags = ";".join(sorted(set([f for f in warning_flags.split(";") if f] + ["multi_payload"])))
+
         rows.append({
             "sample_id": sample_id,
             "blast_payload": payload,
@@ -1763,11 +2166,18 @@ def _build_selected_blast_inputs(
             "selected_status": chosen.get("status", ""),
             "payload_kind": payload_kind,
             "payload_n": payload_n,
+            "payload_entity_n": payload_n,
             "payload_max_len": payload_max_len,
             "ambiguity_flag": ambiguity_flag,
             "safety_flag": safety_flag,
             "decision_source": decision_source,
             "review_reason": review_reason,
+            "warning_flags": warning_flags,
+            "structural_hypothesis_n": str(structural_hypothesis_n),
+            "hypotheses_with_hits_n": "0",
+            "missing_hits_n": str(structural_hypothesis_n),
+            "hypothesis_map": ";".join(hypothesis_map),
+            "source_id_map": ";".join(source_id_map),
         })
 
     if records:
@@ -1775,11 +2185,7 @@ def _build_selected_blast_inputs(
     else:
         output_fasta.write_text("", encoding="utf-8")
 
-    headers = [
-        "sample_id", "blast_payload", "payload_ids", "reason",
-        "selected_assembler_id", "selected_assembler_name", "selected_status",
-        "payload_kind", "payload_n", "payload_max_len", "ambiguity_flag", "safety_flag", "decision_source", "review_reason",
-    ]
+    headers = BLAST_INPUTS_HEADERS
     with output_tsv.open("w", encoding="utf-8") as fh:
         fh.write("\t".join(headers) + "\n")
         for row in rows:
@@ -1787,94 +2193,307 @@ def _build_selected_blast_inputs(
 
     return {row["sample_id"]: row for row in rows}
 
+def _pick_advisory_reason(safety_flag: str, warning_flags: str) -> str:
+    warnings = [f for f in str(warning_flags or "").split(";") if f]
+    if safety_flag == "trace_warn":
+        return "trace_warn"
+    priority = ["trace_warn", "multi_payload", "identity_low", "overlap_too_short", "quality_low", "ambiguous_overlap", "ambiguous_overlap_singlets", "merged_best_guess"]
+    present = set(warnings)
+    for reason in priority:
+        if reason in present:
+            return reason
+    return warnings[0] if warnings else ""
+
+
+def _blocking_reason_priority(reason: str) -> int:
+    order = {
+        "trace_fail": 100,
+        "high_conflict": 95,
+        "hypothesis_map_invalid": 90,
+        "mixture_suspected": 80,
+        "pair_missing": 70,
+        "no_payload": 65,
+        "taxonomy_missing": 60,
+        "no_hits": 55,
+        "partial_hits": 50,
+        "rank_missing": 45,
+        "ambiguous_taxonomy": 40,
+        "ambiguous_payload": 30,
+    }
+    return order.get(str(reason or "").strip(), 10)
+
+
+def _resolve_sample_resolution(
+    sample_id: str,
+    per_hyp: pd.DataFrame,
+    *,
+    label_col: str,
+    blast_meta: dict[str, str],
+    tax_rank: str = "species",
+    tax_table_ok: bool = True,
+) -> dict[str, str]:
+    per_hyp = per_hyp.copy() if per_hyp is not None else pd.DataFrame()
+
+    qseq_to_structural: dict[str, str] = {}
+    for pair in str(blast_meta.get("hypothesis_map", "") or "").split(";"):
+        if not pair.strip():
+            continue
+        if "=" not in pair:
+            raise ValueError(f"Invalid hypothesis_map entry (missing '='): {pair!r}")
+        lhs, rhs = pair.split("=", 1)
+        qseqid = lhs.strip()
+        structural_id = rhs.strip()
+        if not structural_id:
+            raise ValueError(f"Invalid hypothesis_map entry (empty structural id): {pair!r}")
+        if qseqid in qseq_to_structural and qseq_to_structural[qseqid] != structural_id:
+            raise ValueError(f"Non-deterministic hypothesis_map for {qseqid}: {qseq_to_structural[qseqid]} vs {structural_id}")
+        qseq_to_structural[qseqid] = structural_id
+
+    hyp_rows: list[dict[str, str | float]] = []
+    for _, hyp in per_hyp.iterrows():
+        qseqid = str(hyp.get("qseqid", "") or "")
+        structural = qseq_to_structural.get(qseqid, qseqid.split("|")[-1] if qseqid else "")
+        label = _extract_tax_label(hyp.get(label_col, ""), rank=tax_rank)
+        bitscore = float(hyp.get("bitscore")) if pd.notna(hyp.get("bitscore")) else float("-inf")
+        pident = float(hyp.get("pident")) if pd.notna(hyp.get("pident")) else float("-inf")
+        qcov = float(hyp.get("qcovhsp")) if pd.notna(hyp.get("qcovhsp")) else float("-inf")
+        evalue = float(hyp.get("evalue")) if pd.notna(hyp.get("evalue")) else float("inf")
+        hyp_rows.append(
+            {
+                "qseqid": qseqid,
+                "structural": structural,
+                "label": label,
+                "bitscore": bitscore,
+                "pident": pident,
+                "qcovhsp": qcov,
+                "evalue": evalue,
+            }
+        )
+
+    hyp_rows = sorted(
+        hyp_rows,
+        key=lambda r: (-float(r["bitscore"]), -float(r["pident"]), -float(r["qcovhsp"]), float(r["evalue"]), str(r["qseqid"])),
+    )
+
+    labels = [str(h["label"]) for h in hyp_rows if str(h["label"])]
+    unique_labels = sorted(set(labels))
+    hypotheses_with_hits_n = len({str(h["structural"]) for h in hyp_rows if str(h["structural"])})
+
+    try:
+        structural_hypothesis_n = int(str(blast_meta.get("structural_hypothesis_n", "0") or "0"))
+    except ValueError:
+        structural_hypothesis_n = 0
+    if structural_hypothesis_n <= 0:
+        structural_hypothesis_n = hypotheses_with_hits_n
+
+    missing_hits_n = max(0, structural_hypothesis_n - hypotheses_with_hits_n)
+
+    default_reason = str(blast_meta.get("review_reason", "") or "")
+    safety_flag = str(blast_meta.get("safety_flag", "none") or "none")
+    trace_status = str(blast_meta.get("trace_status", "NA") or "NA")
+    trace_flags = str(blast_meta.get("trace_flags", "") or "")
+    warning_flags = str(blast_meta.get("warning_flags", "") or "")
+    blast_payload = str(blast_meta.get("blast_payload", "") or "")
+
+    resolved_hypothesis = str(hyp_rows[0]["structural"]) if hyp_rows else ""
+
+    resolution_state = "needs_review"
+    resolution_reason = "taxonomy_missing"
+    if blast_payload == "pair_missing":
+        resolution_reason = "pair_missing"
+    elif blast_payload == "no_payload":
+        resolution_reason = "no_payload"
+    elif structural_hypothesis_n <= 0:
+        resolution_reason = "no_structural_hypotheses"
+    elif hypotheses_with_hits_n == 0:
+        resolution_reason = "no_hits" if tax_table_ok else "taxonomy_missing"
+    elif not labels and len(hyp_rows) > 0:
+        resolution_reason = "rank_missing"
+    elif missing_hits_n > 0:
+        resolution_reason = "partial_hits"
+    elif structural_hypothesis_n == 1:
+        resolution_state = "unambiguous"
+        resolution_reason = "single_hypothesis"
+    elif len(unique_labels) == 1:
+        resolution_state = "resolved_by_evidence"
+        resolution_reason = f"hypotheses_agree_{tax_rank}"
+    else:
+        resolution_reason = "ambiguous_taxonomy"
+
+    if len(hyp_rows) > 0 and not labels and resolution_reason not in {"pair_missing", "no_payload", "no_hits"}:
+        resolution_state = "needs_review"
+        resolution_reason = "rank_missing"
+
+    if safety_flag in {"trace_fail", "high_conflict"}:
+        resolution_state = "needs_review"
+        resolution_reason = safety_flag
+
+    if default_reason == "mixture_suspected":
+        resolution_state = "needs_review"
+        resolution_reason = "mixture_suspected"
+
+    warning_set = {f for f in str(warning_flags or "").split(";") if f}
+
+    review_action = "none"
+    review_reason = ""
+    if resolution_state == "needs_review":
+        review_action = "queue"
+        if default_reason:
+            if _blocking_reason_priority(default_reason) >= _blocking_reason_priority(resolution_reason):
+                review_reason = default_reason
+                if default_reason != resolution_reason:
+                    warning_set.add(resolution_reason)
+            else:
+                review_reason = resolution_reason
+                warning_set.add(default_reason)
+        else:
+            review_reason = resolution_reason
+
+    warning_flags = ";".join(sorted(warning_set))
+
+    row = ResolutionContractRow(
+        sample_id=str(sample_id),
+        review_action=review_action,
+        review_reason=review_reason,
+        advisory_reason=_pick_advisory_reason(safety_flag, warning_flags),
+        warning_flags=warning_flags,
+        structural_hypothesis_n=structural_hypothesis_n,
+        hypotheses_with_hits_n=hypotheses_with_hits_n,
+        missing_hits_n=missing_hits_n,
+        top_labels="|".join(unique_labels[:5]),
+        resolution_state=resolution_state,
+        resolved_hypothesis=resolved_hypothesis,
+        resolution_reason=resolution_reason,
+        trace_status=trace_status,
+        trace_flags=trace_flags,
+    ).to_dict()
+    return row
+
+
+def _annotate_resolution_from_tax(
+    tax_tsv: Path,
+    blast_rows: dict[str, dict[str, str]],
+    *,
+    tax_rank: str = "species",
+) -> dict[str, dict[str, str]]:
+    updated = {k: dict(v) for k, v in blast_rows.items()}
+
+    tax_by_sample: dict[str, pd.DataFrame] = {}
+    label_col: str | None = None
+    tax_table_ok = False
+    if tax_tsv.exists():
+        try:
+            df = pd.read_csv(tax_tsv, sep="\t")
+        except Exception:
+            df = pd.DataFrame()
+        if "qseqid" in df.columns:
+            label_col = "taxonomy" if "taxonomy" in df.columns else (
+                "stitle" if "stitle" in df.columns else ("sseqid" if "sseqid" in df.columns else None)
+            )
+            tax_table_ok = label_col is not None
+            if label_col is not None and not df.empty:
+                temp = df.copy()
+                temp["sample_id"] = temp["qseqid"].astype(str).str.split("|").str[0]
+                for c in ("bitscore", "pident", "qcovhsp", "evalue"):
+                    if c in temp.columns:
+                        temp[c] = pd.to_numeric(temp[c], errors="coerce")
+                sort_cols: list[str] = []
+                ascending: list[bool] = []
+                if "bitscore" in temp.columns:
+                    sort_cols.append("bitscore")
+                    ascending.append(False)
+                if "pident" in temp.columns:
+                    sort_cols.append("pident")
+                    ascending.append(False)
+                if "qcovhsp" in temp.columns:
+                    sort_cols.append("qcovhsp")
+                    ascending.append(False)
+                if "evalue" in temp.columns:
+                    sort_cols.append("evalue")
+                    ascending.append(True)
+                for sample_id, group in temp.groupby("sample_id"):
+                    ranked = group.sort_values(by=sort_cols, ascending=ascending) if sort_cols else group
+                    tax_by_sample[str(sample_id)] = ranked.groupby("qseqid", as_index=False).first()
+
+    for sample_id in sorted(set(updated) | set(tax_by_sample)):
+        per_hyp = tax_by_sample.get(sample_id, pd.DataFrame(columns=["qseqid", label_col or "taxonomy"]))
+        try:
+            resolved = _resolve_sample_resolution(
+                sample_id,
+                per_hyp,
+                label_col=label_col or "taxonomy",
+                blast_meta=updated.get(sample_id, {}),
+                tax_rank=tax_rank,
+                tax_table_ok=tax_table_ok,
+            )
+        except ValueError as exc:
+            meta = dict(updated.get(sample_id, {}))
+            warnings = {f for f in str(meta.get("warning_flags", "") or "").split(";") if f}
+            warnings.add("hypothesis_map_invalid")
+            fallback = ResolutionContractRow(
+                sample_id=str(sample_id),
+                review_action="queue",
+                review_reason="hypothesis_map_invalid",
+                advisory_reason="hypothesis_map_invalid",
+                warning_flags=";".join(sorted(warnings)),
+                structural_hypothesis_n=int(str(meta.get("structural_hypothesis_n", "0") or "0") or 0),
+                hypotheses_with_hits_n=0,
+                missing_hits_n=max(0, int(str(meta.get("structural_hypothesis_n", "0") or "0") or 0)),
+                top_labels="",
+                resolution_state="needs_review",
+                resolved_hypothesis="",
+                resolution_reason="hypothesis_map_invalid",
+                trace_status=str(meta.get("trace_status", "NA") or "NA"),
+                trace_flags=str(meta.get("trace_flags", "") or ""),
+            ).to_dict()
+            L.warning("Invalid hypothesis_map for sample %s: %s", sample_id, exc)
+            resolved = fallback
+        tgt = updated.setdefault(sample_id, {})
+        tgt.update(resolved)
+    return updated
+
+
+def _write_review_queue_from_resolved(
+    output_tsv: Path,
+    resolved_rows: dict[str, dict[str, str]],
+) -> None:
+    output_tsv.parent.mkdir(parents=True, exist_ok=True)
+    headers = ResolutionContractRow.header()
+    with output_tsv.open("w", encoding="utf-8") as fh:
+        fh.write("\t".join(headers) + "\n")
+        for sample_id in sorted(resolved_rows):
+            row = ResolutionContractRow(sample_id=sample_id)
+            data = dict(row.to_dict())
+            data.update({k: str(v) for k, v in resolved_rows[sample_id].items()})
+            # normalize again with provided values
+            normalized = ResolutionContractRow(
+                sample_id=data.get("sample_id", sample_id),
+                review_action=data.get("review_action", "none"),
+                review_reason=data.get("review_reason", ""),
+                advisory_reason=data.get("advisory_reason", ""),
+                warning_flags=data.get("warning_flags", ""),
+                structural_hypothesis_n=int(data.get("structural_hypothesis_n", "0") or 0),
+                hypotheses_with_hits_n=int(data.get("hypotheses_with_hits_n", "0") or 0),
+                missing_hits_n=int(data.get("missing_hits_n", "0") or 0),
+                top_labels=data.get("top_labels", ""),
+                resolution_state=data.get("resolution_state", "needs_review"),
+                resolved_hypothesis=data.get("resolved_hypothesis", ""),
+                resolution_reason=data.get("resolution_reason", "taxonomy_missing"),
+                trace_status=data.get("trace_status", "NA"),
+                trace_flags=data.get("trace_flags", ""),
+            ).to_dict()
+            fh.write("\t".join(normalized.get(h, "") for h in headers) + "\n")
+
+
 def _write_review_queue(
     tax_tsv: Path,
     output_tsv: Path,
     *,
     blast_rows: dict[str, dict[str, str]],
+    tax_rank: str = "species",
 ) -> None:
-    output_tsv.parent.mkdir(parents=True, exist_ok=True)
-    header = "sample_id	status	review_reason	hypothesis_count	top_labels\n"
-    if not tax_tsv.exists():
-        output_tsv.write_text(header, encoding="utf-8")
-        return
-
-    try:
-        df = pd.read_csv(tax_tsv, sep="	")
-    except Exception:
-        output_tsv.write_text(header, encoding="utf-8")
-        return
-
-    if df.empty or "qseqid" not in df.columns:
-        output_tsv.write_text(header, encoding="utf-8")
-        return
-
-    label_col = "taxonomy" if "taxonomy" in df.columns else ("stitle" if "stitle" in df.columns else ("sseqid" if "sseqid" in df.columns else None))
-    if label_col is None:
-        output_tsv.write_text(header, encoding="utf-8")
-        return
-
-    temp = df.copy()
-    temp["sample_id"] = temp["qseqid"].astype(str).str.split("|").str[0]
-    for c in ("bitscore", "pident", "qcovhsp", "evalue"):
-        if c in temp.columns:
-            temp[c] = pd.to_numeric(temp[c], errors="coerce")
-
-    rows: list[dict[str, str]] = []
-    sort_cols: list[str] = []
-    ascending: list[bool] = []
-    if "bitscore" in temp.columns:
-        sort_cols.append("bitscore")
-        ascending.append(False)
-    if "pident" in temp.columns:
-        sort_cols.append("pident")
-        ascending.append(False)
-    if "qcovhsp" in temp.columns:
-        sort_cols.append("qcovhsp")
-        ascending.append(False)
-    if "evalue" in temp.columns:
-        sort_cols.append("evalue")
-        ascending.append(True)
-
-    for sample_id, group in temp.groupby("sample_id"):
-        if sort_cols:
-            ranked = group.sort_values(by=sort_cols, ascending=ascending)
-            per_hyp = ranked.groupby("qseqid", as_index=False).first()
-        else:
-            per_hyp = group.groupby("qseqid", as_index=False).first()
-        labels = [str(v) for v in per_hyp[label_col].fillna("") if str(v).strip()]
-        unique_labels = sorted(set(labels))
-        hypothesis_count = len(per_hyp)
-
-        blast_meta = blast_rows.get(str(sample_id), {})
-        default_reason = str(blast_meta.get("review_reason", "") or "")
-        safety_flag = str(blast_meta.get("safety_flag", "none") or "none")
-        status = "resolved_by_blast"
-        reason = ""
-        if safety_flag != "none":
-            status = "needs_manual_review"
-            reason = safety_flag
-        elif hypothesis_count > 1 and len(unique_labels) > 1:
-            status = "needs_manual_review"
-            reason = "ambiguous_taxonomy"
-        elif default_reason and default_reason != "ambiguous_payload":
-            status = "needs_manual_review"
-            reason = default_reason
-
-        rows.append(
-            {
-                "sample_id": str(sample_id),
-                "status": status,
-                "review_reason": reason,
-                "hypothesis_count": str(hypothesis_count),
-                "top_labels": "|".join(unique_labels[:5]),
-            }
-        )
-
-    with output_tsv.open("w", encoding="utf-8") as fh:
-        fh.write(header)
-        for row in sorted(rows, key=lambda r: r["sample_id"]):
-            fh.write("	".join([row["sample_id"], row["status"], row["review_reason"], row["hypothesis_count"], row["top_labels"]]) + "\n")
+    resolved_rows = _annotate_resolution_from_tax(tax_tsv, blast_rows, tax_rank=tax_rank)
+    _write_review_queue_from_resolved(output_tsv, resolved_rows)
 
 def _write_selected_assembly_summary(
     output_tsv: Path,
@@ -1896,7 +2515,9 @@ def _write_selected_assembly_summary(
     output_tsv.parent.mkdir(parents=True, exist_ok=True)
     headers = [
         "sample_id", "status", "assembler", "contig_len", "blast_payload",
-        "payload_kind", "payload_n", "payload_max_len", "ambiguity_flag", "safety_flag", "decision_source", "review_reason",
+        "payload_kind", "payload_n", "payload_entity_n", "payload_max_len", "ambiguity_flag", "safety_flag", "decision_source", "review_reason", "warning_flags",
+        "structural_hypothesis_n", "hypotheses_with_hits_n", "missing_hits_n", "hypothesis_map", "source_id_map",
+        "resolution_state", "resolved_hypothesis", "resolution_reason", "trace_status", "trace_status_f", "trace_status_r", "trace_flags",
         "selected_engine", "configured_engine", "merge_status", "merge_overlap_len",
         "merge_identity", "overlaps_saved", "overlaps_removed", "primer_mode", "primer_stage",
         "primer_preset", "primer_source", "overlap_engine_strategy", "overlap_engine_order", "overlap_quality_mode",
@@ -1917,11 +2538,27 @@ def _write_selected_assembly_summary(
                 "blast_payload": blast.get("blast_payload", ""),
                 "payload_kind": blast.get("payload_kind", "none"),
                 "payload_n": blast.get("payload_n", "0"),
+                "payload_entity_n": blast.get("payload_entity_n", blast.get("payload_n", "0")),
                 "payload_max_len": blast.get("payload_max_len", "0"),
                 "ambiguity_flag": blast.get("ambiguity_flag", "0"),
                 "safety_flag": blast.get("safety_flag", "none"),
                 "decision_source": blast.get("decision_source", "auto"),
                 "review_reason": blast.get("review_reason", ""),
+                "warning_flags": blast.get("warning_flags", ""),
+                "resolution_state": blast.get("resolution_state", ""),
+                "review_action": blast.get("review_action", "none"),
+                "advisory_reason": blast.get("advisory_reason", ""),
+                "structural_hypothesis_n": blast.get("structural_hypothesis_n", "0"),
+                "hypotheses_with_hits_n": blast.get("hypotheses_with_hits_n", "0"),
+                "missing_hits_n": blast.get("missing_hits_n", "0"),
+                "hypothesis_map": blast.get("hypothesis_map", ""),
+                "source_id_map": blast.get("source_id_map", ""),
+                "resolved_hypothesis": blast.get("resolved_hypothesis", ""),
+                "resolution_reason": blast.get("resolution_reason", ""),
+                "trace_status": blast.get("trace_status", ""),
+                "trace_status_f": blast.get("trace_status_f", ""),
+                "trace_status_r": blast.get("trace_status_r", ""),
+                "trace_flags": blast.get("trace_flags", ""),
                 "selected_engine": chosen.get("selected_engine", ""),
                 "configured_engine": "",
                 "merge_status": "",
@@ -1946,6 +2583,65 @@ def _write_selected_assembly_summary(
                 "audit_overlap_orientation": overlap.get("orientation", ""),
             }
             fh.write("\t".join(str(row.get(h, "")) for h in headers) + "\n")
+
+
+def _apply_resolution_to_assembly_summary(
+    assembly_summary: Path | None,
+    blast_rows: dict[str, dict[str, str]],
+) -> None:
+    if assembly_summary is None or not assembly_summary.exists():
+        return
+    try:
+        df = pd.read_csv(assembly_summary, sep="\t")
+    except Exception:
+        return
+    if df.empty or "sample_id" not in df.columns:
+        return
+
+    for col in (
+        "resolution_state",
+        "resolved_hypothesis",
+        "resolution_reason",
+        "review_action",
+        "advisory_reason",
+        "warning_flags",
+        "structural_hypothesis_n",
+        "hypotheses_with_hits_n",
+        "missing_hits_n",
+        "hypothesis_map",
+        "source_id_map",
+        "trace_status",
+        "trace_status_f",
+        "trace_status_r",
+        "trace_flags",
+    ):
+        if col not in df.columns:
+            df[col] = ""
+
+    for idx, row in df.iterrows():
+        sid = str(row.get("sample_id", "") or "")
+        payload = blast_rows.get(sid, {})
+        for col in (
+            "resolution_state",
+            "resolved_hypothesis",
+            "resolution_reason",
+            "review_action",
+            "advisory_reason",
+            "warning_flags",
+            "structural_hypothesis_n",
+            "hypotheses_with_hits_n",
+            "missing_hits_n",
+            "hypothesis_map",
+            "source_id_map",
+            "trace_status",
+            "trace_status_f",
+            "trace_status_r",
+            "trace_flags",
+        ):
+            if payload.get(col, ""):
+                df.at[idx, col] = str(payload.get(col, ""))
+
+    df.to_csv(assembly_summary, sep="\t", index=False)
 
 def run_full_pipeline(
     infile: Path,
@@ -2248,6 +2944,7 @@ def run_full_pipeline(
         assembly_summary = paths["assembly_summary"]
         overlap_rows = _load_tsv_rows_by_sample(paths["overlap_audit"]) if paths.get("overlap_audit") else {}
         blast_payload_rows: dict[str, dict[str, str]] = {}
+        trace_by_sample = _load_trace_qc_by_sample(summary_tsv, paired_samples)
         merged_contigs = out_dir / "asm" / "paired_contigs.fasta"
 
         if use_blast_inputs and not write_blast_inputs:
@@ -2267,7 +2964,15 @@ def run_full_pipeline(
                     blast_inputs_fasta,
                     blast_inputs_tsv,
                 )
-                blast_payload_rows = _load_tsv_rows_by_sample(blast_inputs_tsv)
+                blast_payload_rows = _apply_trace_to_blast_payloads(
+                    _apply_overlap_diagnostics_to_blast_payloads(
+                        _load_tsv_rows_by_sample(blast_inputs_tsv),
+                        overlap_rows,
+                    ),
+                    trace_by_sample,
+                    trace_cfg=cfg.get("trace_qc", {}),
+                )
+                _write_tsv_rows_by_sample(blast_inputs_tsv, blast_payload_rows)
             if assembly_summary:
                 parse_cap3_reports(
                     out_dir / "asm",
@@ -2300,14 +3005,22 @@ def run_full_pipeline(
                 assembler_id=resolved_assembler_id,
             )
             no_payload_reason = "selected_backend_no_payload" if resolved_assembler_mode == "selected" else "winner_no_payload"
-            blast_payload_rows = _build_selected_blast_inputs(
+            blast_payload_rows = _apply_trace_to_blast_payloads(
+                _apply_overlap_diagnostics_to_blast_payloads(
+                    _build_selected_blast_inputs(
                 selected_rows,
                 paired_samples,
                 missing_samples,
                 blast_inputs_fasta,
                 blast_inputs_tsv,
                 no_payload_reason=no_payload_reason,
+                    ),
+                    overlap_rows,
+                ),
+                trace_by_sample,
+                trace_cfg=cfg.get("trace_qc", {}),
             )
+            _write_tsv_rows_by_sample(blast_inputs_tsv, blast_payload_rows)
             if assembly_summary:
                 _write_selected_assembly_summary(
                     assembly_summary,
@@ -2499,7 +3212,11 @@ def run_full_pipeline(
             L.warning("Failed to add paired sample_id column to taxonomy table: %s", exc)
 
         try:
-            _write_review_queue(paths["tax"], paths["review_queue"], blast_rows=blast_payload_rows)
+            resolved_rows = _annotate_resolution_from_tax(paths["tax"], blast_payload_rows)
+            _apply_resolution_to_assembly_summary(paths.get("assembly_summary"), resolved_rows)
+            _write_review_queue_from_resolved(paths["review_queue"], resolved_rows)
+            _write_tsv_rows_by_sample(blast_inputs_tsv, resolved_rows)
+            blast_payload_rows = resolved_rows
         except Exception as exc:
             L.warning("Failed to write review queue: %s", exc)
 

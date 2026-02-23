@@ -7,7 +7,32 @@ from typing import Iterable, List, Optional
 
 from Bio import SeqIO
 
+from microseq_tests.trimming.ab1_qc import TRACE_QC_COLUMNS, TraceQcSummary
+
 L = logging.getLogger(__name__)
+
+
+def _trace_lookup_keys(file_stem: str) -> list[str]:
+    """Return ordered candidate keys for trace-QC lookup."""
+    stem = str(file_stem or "").strip()
+    if not stem:
+        return []
+    out: list[str] = []
+
+    def _add(value: str) -> None:
+        if value and value not in out:
+            out.append(value)
+
+    _add(stem)
+    if stem.endswith("_trimmed"):
+        _add(stem[: -len("_trimmed")])
+
+    # primer-trim suffix variants used by stage labels in some runs
+    for suf in ("_primer", "_primer_trimmed", "_pre_quality", "_post_quality"):
+        if stem.endswith(suf):
+            _add(stem[: -len(suf)])
+
+    return out
 
 TRIM_SUMMARY_COLUMNS = [
     "file",
@@ -155,6 +180,7 @@ def _trim_all(
     failed_dir: Path,
     stats_root: Path,
     comb: Optional[open],
+    trace_qc: dict[str, TraceQcSummary] | None,
     bar,
 ) -> None:
     _ = (mee_max, mee_min_len, min_reads_kept, max_drop_fraction)
@@ -212,7 +238,14 @@ def _trim_all(
                 qc_status=qc_status,
                 trim_policy=policy_desc,
             )
-            comb.write("\t".join(row) + "\n")
+            trace_row = []
+            if trace_qc:
+                match = next((k for k in _trace_lookup_keys(fq.stem) if k in trace_qc), None)
+                if match is not None:
+                    trace_row = trace_qc[match].to_row()
+            if not trace_row:
+                trace_row = ["" for _ in TRACE_QC_COLUMNS]
+            comb.write("\t".join(row + trace_row) + "\n")
 
         _tick_safe(bar)
 
@@ -232,6 +265,7 @@ def trim_folder(
     min_reads_kept: int | None = None,
     max_drop_fraction: float | None = None,
     combined_tsv: str | Path | None = None,
+    trace_qc: dict[str, TraceQcSummary] | None = None,
     threads: int = 1,
     **kwargs,
 ) -> None:
@@ -247,7 +281,7 @@ def trim_folder(
     if combined_tsv:
         comb = open(combined_tsv, "a", encoding="utf-8")
         if comb.tell() == 0:
-            comb.write("\t".join(TRIM_SUMMARY_COLUMNS) + "\n")
+            comb.write("\t".join(TRIM_SUMMARY_COLUMNS + TRACE_QC_COLUMNS) + "\n")
 
     fastqs = sorted(input_dir.glob("*.fastq"))
 
@@ -271,6 +305,7 @@ def trim_folder(
             failed_dir=failed_dir,
             stats_root=output_dir,
             comb=comb,
+            trace_qc=trace_qc,
             bar=bar,
         )
 

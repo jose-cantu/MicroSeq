@@ -12,6 +12,7 @@ For version control, please see the changelog I have attached. [CHANGELOG](https
 
 For the docs that go into more detail, such as for example how to use the GUI I have attached it here. [GUI walkthrough](https://jose-cantu.github.io/MicroSeq/gui/)
 You can also just select docs view and it will take you to the landing page for full detailed documentation. =) 
+For the resolution model used to collapse multiple hypotheses into sample-level outcomes, see [Workflow Resolution Funnel](docs/workflow_resolution.md).
 
 ---
 
@@ -66,6 +67,21 @@ In short: MicroSeq is the only open-source package that ingests raw Sanger or FA
 
   * Collapse hits, choose ID/Q‑cov cut‑offs, export BIOM / CSV tables (`microseq postblast`).
 * **Config‑driven defaults** for duplicate‑policy & ID‑normalisers (regex or built‑ins).
+* **Resolution contract + review queue semantics**
+
+  * Paired assembly manifests now use an explicit mapping split:
+    * `hypothesis_map` = `qseqid -> structural_hypothesis_id`
+    * `source_id_map` = `qseqid -> original_source_id`
+  * `payload_entity_n` is tracked separately from `structural_hypothesis_n` so multi-entity payloads are not automatically treated as structural ambiguity.
+  * `asm/blast_inputs.tsv` now uses a stable superset schema across assembler modes and is rewritten after trace/overlap enrichment and after taxonomy resolution so persisted fields match runtime decisions.
+  * Resolution outputs include `resolution_state`, `resolution_reason`, `review_action`, `review_reason`, `advisory_reason`, and normalized `warning_flags` for deterministic queue behavior.
+  * Taxonomy failure modes distinguish `taxonomy_missing` (unusable taxonomy table/schema) from `no_hits` (valid taxonomy table with no sample hits).
+
+* **Trace-QC to resolution plumbing (paired mode)**
+
+  * Trace `FAIL` is sticky and forces queue semantics (`trace_fail`), while prior reasons are retained as warnings for audit context.
+  * `mixture_suspected` can escalate to review when configured/derived.
+  * AB1 keying is symlink-safe for `--link-raw`: trace keys avoid resolved symlink targets; output FASTQ names keep legacy `<stem>` when unique and only fall back to path-derived keys on collisions.
 * **Robust logging**  – session-based logs via $MICROSEQ_SESSION_ID or timestamp fallback; logs can live anywhere you point `MICROSEQ_LOG_DIR`.
 * **TSV normalisation** (`microseq-fix-tsv`) – convert CSV or space‑delimited tables into proper TSV.
 * **Portable**  – pure‑Python (≥3.10) + external binaries already in Conda env (BLAST+, TaxonKit, CAP3).
@@ -280,6 +296,7 @@ Below is an index of every sub‑command with a one‑line summary.  Click the �
 | `-o / --output PATH`     |          | `qc/trimmed.fastq`            | Override auto‑named file in `workdir/qc/`.                                 |
 | `--sanger / --no-sanger` |          | `--sanger`                    | Use BioPython’s Sanger‑specific trim as a preference.                      |
 | `--link-raw`             |          |                               | Symlink AB1 traces into `workdir/raw_ab1` instead of copying (saves disk). |
+| `--trace-qc-flags`       |          | `on` / `off` / `auto`         | Override AB1 trace-flag behavior (`auto` uses `trace_qc.enable_flags`).    |
 
 | Flag                    | Required | Example                                  |
 | ----------------------- | -------- | ---------------------------------------- |
@@ -415,9 +432,30 @@ microseq postblast    -b hits_tax.tsv -m meta.tsv -o results.biom --json \
 | Mode              | Trigger                                                                     | Toolchain                                               | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------------- | --------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **General FASTQ** | input is `.fastq` and `--no-sanger` *(default)*                             | **Trimmomatic SE** (`SLIDINGWINDOW:5:20`, `MINLEN:200`) | Reads whose 5‑bp window drops below Q20 or end < 200 bp are discarded; survivors go to `workdir/qc/trimmed.fastq`.                                                                                                                                                                                                                                                                                                                                                    |
-| **Sanger traces** | one or more `.ab1` chromatograms **or** any FASTQ processed with `--sanger` | **BioPython + MicroSeq**                                | 1. **AB1 -> FASTQ** (`ab1_to_fastq.py`) – one FASTQ per trace.<br>2. **Dynamic sliding‑window trim** (5 bp window, Q ≥ 20) per read.<br>3. Per‑read Phred, length & per‑file averages -> `*_avg_qual.txt`.<br>4. File passes if avg Q ≥ 20 -> `passed_qc_fastq/`; otherwise goes to `failed_qc_fastq/` with its stats.<br>5. Combined TSV summarises file‑level metrics.<br>6. **Passed FASTQs merged** into `workdir/qc/trimmed.fasta` for downstream assembly & BLAST. |
+| **Sanger traces** | one or more `.ab1` chromatograms **or** any FASTQ processed with `--sanger` | **BioPython + MicroSeq**                                | 1. **AB1 -> FASTQ** (`ab1_to_fastq.py`) – one FASTQ per trace.<br>2. **Dynamic sliding‑window trim** (5 bp window, Q ≥ 20) per read.<br>3. Per‑read Phred, length & per‑file averages -> `*_avg_qual.txt`.<br>4. File passes if avg Q ≥ 20 -> `passed_qc_fastq/`; otherwise goes to `failed_qc_fastq/` with its stats.<br>5. Combined TSV summarises file‑level metrics, plus trace QC fields (S/N tags when present, mixed‑base fraction, mixed‑peak and SNR metrics) for AB1 inputs.<br>6. **Passed FASTQs merged** into `workdir/qc/trimmed.fasta` for downstream assembly & BLAST. |
 
 *Why two paths?* AB1 chromatograms carry single‑end Sanger qualities that behave differently from generic FASTQ scores; the lightweight BioPython route avoids over‑trimming while still filtering low‑quality tails.
+
+### Trace QC configuration (AB1 only)
+
+MicroSeq always reports trace metrics (mixed-base fraction, peak/noise/SNR summaries, vendor tags when present) in `qc/trim_summary.tsv`.
+Threshold-based PASS/WARN/FAIL flags are **opt-in**. Enable them in `config/config.yaml`
+or force behavior per run with `microseq trim --trace-qc-flags on|off|auto` (`auto` defers to config):
+
+```yaml
+trace_qc:
+  enable_flags: true
+  mixed_ratio_thresh: 0.25
+  mixed_frac_fail: 0.10
+  min_peak_height_for_mixed: 100.0
+  snr_warn: 100.0
+  snr_fail: 25.0
+  peak_window: 8
+```
+
+If `enable_flags` is `false`, `trace_qc_flags` and `trace_qc_status` remain empty while metrics are still reported.
+When flags are enabled and AB1 trace primitives are missing (`DATA*`/`PLOC*`) or critical metrics are undefined,
+MicroSeq emits deterministic missing-data flags and sets `trace_qc_status=NA`.
 
 ## CAP3 (microseq assembly)
 
@@ -500,5 +538,3 @@ The Conda environment downloads `vsearch`, distributed under GPL v3 (see `LICENS
 If you use MicroSeq in a publication, please cite me! =) 
 
 > ---
-
-

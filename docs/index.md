@@ -10,6 +10,7 @@ title: MicroSeq Docs
 * [Paired CAP3 Assembly Tutorial](paired_assembly.md)
 * [VSEARCH Chimera & Replicate Filters](vsearch_filters.md) 
 * [CLI Workflows](cli_workflow_tutorial.md)
+* [Workflow Resolution Funnel](workflow_resolution.md) *(includes resolution-contract fields like `review_action`, `advisory_reason`, `payload_entity_n`, `source_id_map` and what they mean in practice)*
 * [MicroSeq's Design: Questions & Answers](microseq_design_questions.md)
 
 

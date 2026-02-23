@@ -22,6 +22,16 @@ databases:
     taxonomy: ${MICROSEQ_DB_HOME}/ncbi/taxonomy.tsv
 metadata:
   sample_id_normaliser: strip_suffix_legacy
+trace_qc:
+  enable_flags: false
+  mixed_ratio_thresh: 0.25
+  mixed_frac_fail: 0.10
+  min_peak_height_for_mixed: 100.0
+  snr_warn: 100.0
+  snr_fail: 25.0
+  peak_window: 8
+  enable_mixture_inference: false
+  mixture_suspect_threshold: 0.10
 primer_trim:
   mode: off
   stage: post_quality

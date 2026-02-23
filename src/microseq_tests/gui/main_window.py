@@ -2546,7 +2546,10 @@ class MainWindow(QMainWindow):
                 "payload_max_len": self._fmt_table_value(row.get("payload_max_len", "0")),
                 "ambiguity_flag": self._fmt_table_value(row.get("ambiguity_flag", "0")),
                 "safety_flag": self._fmt_table_value(row.get("safety_flag", "none")),
+                "review_action": self._fmt_table_value(row.get("review_action", row.get("status", "none"))),
                 "review_reason": self._fmt_table_value(row.get("review_reason", "")),
+                "advisory_reason": self._fmt_table_value(row.get("advisory_reason", "")),
+                "warning_flags": self._fmt_table_value(row.get("warning_flags", "")),
             } 
 
         self._configure_table_view(self.compare_table)
@@ -2663,7 +2666,10 @@ class MainWindow(QMainWindow):
                     r.get("diag_detail_for_human", ""),
                     r.get("warnings", ""),
                     r.get("safety_flag", ""),
+                    r.get("review_action", ""),
                     r.get("review_reason", ""),
+                    r.get("advisory_reason", ""),
+                    r.get("warning_flags", ""),
                 ]
                 reason_bits.append(" | ".join(p for p in parts if p and p != "none") or "-")
             self.detail_reason_lbl.setText(f"reason: {self._join_values(reason_bits)}")

@@ -48,6 +48,12 @@ def main() -> None:
     p_trim.set_defaults(sanger=None) # default = auto-detect in this case 
     p_trim.add_argument("--link-raw", action="store_true", help="Symlink AB1 traces into workdir instead of copying")
     p_trim.add_argument("--combined-tsv", metavar="TSV", help="Write trim summary TSV")
+    p_trim.add_argument(
+        "--trace-qc-flags",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help="Toggle threshold-based AB1 trace QC flags (auto=use config trace_qc.enable_flags)",
+    )
     
     # ── AB1 -> FASTQ -------------------------------------------------------
     p_ab1 = sp.add_parser("ab1-to-fastq",
@@ -247,7 +253,8 @@ def main() -> None:
             summary_tsv=args.combined_tsv,
             link_raw=args.link_raw,
             mee_max=args.mee_max,
-            mee_min_len=args.mee_min_len
+            mee_min_len=args.mee_min_len,
+            trace_qc_flags=args.trace_qc_flags,
 
         )
         fasta = workdir / "qc" / "trimmed.fasta"

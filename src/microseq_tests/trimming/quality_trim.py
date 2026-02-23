@@ -10,6 +10,7 @@ from typing import Iterable
 from Bio import SeqIO
 
 from microseq_tests.trimming.biopy_trim import TRIM_SUMMARY_COLUMNS, build_trim_summary_row
+from microseq_tests.trimming.ab1_qc import TRACE_QC_COLUMNS
 from microseq_tests.utility.utils import load_config, setup_logging
 
 L = logging.getLogger(__name__)
@@ -137,7 +138,7 @@ def trim_fastq_inputs(input_path: PathLike, trim_dir: PathLike, *, summary_tsv: 
 
         with summary_fp.open("a", encoding="utf-8") as comb:
             if write_header:
-                comb.write("\t".join(TRIM_SUMMARY_COLUMNS) + "\n")
+                comb.write("\t".join(TRIM_SUMMARY_COLUMNS + TRACE_QC_COLUMNS) + "\n")
             for name, reads, avg_len, avg_q, qc_status in summary_rows:
                 row_fields = build_trim_summary_row(
                     file_name=name,
@@ -147,7 +148,7 @@ def trim_fastq_inputs(input_path: PathLike, trim_dir: PathLike, *, summary_tsv: 
                     qc_status=qc_status,
                     trim_policy=policy_desc,
                 )
-                comb.write("\t".join(row_fields) + "\n")
+                comb.write("\t".join(row_fields + ["" for _ in TRACE_QC_COLUMNS]) + "\n")
             combined_row = build_trim_summary_row(
                 file_name="_combined",
                 reads=total_reads,
@@ -156,7 +157,7 @@ def trim_fastq_inputs(input_path: PathLike, trim_dir: PathLike, *, summary_tsv: 
                 qc_status="combined",
                 trim_policy=policy_desc,
             )
-            comb.write("\t".join(combined_row) + "\n")
+            comb.write("\t".join(combined_row + ["" for _ in TRACE_QC_COLUMNS]) + "\n")
     return out_fq
 
 
