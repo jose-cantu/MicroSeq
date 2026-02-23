@@ -23,6 +23,7 @@ def _find_repo_root(start: Path | None = None) -> Path:
 ROOT      = _find_repo_root()
 LOG_ROOT  = ROOT / "logs"
 CONF_PATH = ROOT / "config" / "config.yaml"
+_SESSION_WARNED = False
 
 # ── tiny helpers  ──────────────────────────────────────────────────────
 def load_config(path: str | Path = CONF_PATH):
@@ -68,6 +69,24 @@ def setup_logging(
     and only when backup_count > 0 so I kept this behavior in by default. Might just remove pruning later on. 
     """
 
+    global _SESSION_WARNED
+
+    # ── short-circuit if already configured ---------------------------
+    root_logger = logging.getLogger()
+    if root_logger.handlers and not force:
+        for handler in root_logger.handlers:
+            base_filename = getattr(handler, "baseFilename", None)
+            if base_filename:
+                return Path(base_filename)
+        if os.getenv("MICROSEQ_LOG_FILE"):
+            return Path(os.getenv("MICROSEQ_LOG_FILE")).expanduser()
+        fallback_dir = (
+            Path(log_dir).expanduser()
+            if log_dir is not None
+            else Path(os.getenv("MICROSEQ_LOG_DIR", LOG_ROOT)).expanduser()
+        )
+        return fallback_dir / f"{log_file_prefix}_latest.log"
+
     # ── size-rotation helper ------------------------------------------
     if max_bytes:
         rotate_bytes = max_bytes
@@ -94,11 +113,16 @@ def setup_logging(
         if not sess_id:
             ts = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
             sess_id = f"{ts}-{secrets.token_hex(2)}"
-            if warn_if_generated:
+            os.environ[session_env] = sess_id
+            warned_marker = f"{session_env}_AUTO_GENERATED"
+            warn_once = warn_if_generated and not _SESSION_WARNED and not os.getenv(warned_marker)
+            if warn_once:
                 sys.stderr.write(
                     f"⚠️  {session_env} not set – using auto session ID {sess_id}\n"
                     f"   (export {session_env}=YOUR_ID to aggregate multiple commands)\n"
                 )
+                _SESSION_WARNED = True
+            os.environ.setdefault(warned_marker, "1")
 
         # ── prune old auto logs --------------------------------------
         is_auto = sess_id.count("-") == 2         # timestamp-rand pattern
@@ -113,11 +137,6 @@ def setup_logging(
                     pass
 
         logfile = root_dir / f"{log_file_prefix}_{sess_id}.log"
-
-    # ── short-circuit if already configured ---------------------------
-    root_logger = logging.getLogger()
-    if root_logger.handlers and not force:
-        return logfile
 
     root_logger.handlers.clear()
     root_logger.setLevel(level or logging.INFO)
@@ -153,4 +172,3 @@ def setup_logging(
 
     root_logger.info("Logging to %s", logfile)
     return logfile
-

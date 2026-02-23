@@ -21,6 +21,53 @@ Well enformcement off              Requries A1-H12 plate well labeling so when e
 
 
 
+
+## Linux/Wayland stability mode
+
+If you are on Linux Wayland and see maximize crashes (`xdg_surface buffer ... does not match configured state`), MicroSeq now defaults to `QT_QPA_PLATFORM=xcb` for stability.
+
+Override options:
+
+* `MICROSEQ_QT_BACKEND=wayland microseq-gui` (opt into native Wayland)
+* `MICROSEQ_QT_BACKEND=xcb microseq-gui` (force XWayland)
+* `MICROSEQ_QT_BACKEND=offscreen microseq-gui` (headless diagnostics)
+
+The GUI also persists normal geometry and restores maximized state only after first show to reduce Wayland configure/resize timing hazards.
+
+To make this automatic in your MicroSeq conda environment (so you do not export every run), add activate/deactivate hooks:
+
+```bash
+mkdir -p "$CONDA_PREFIX/etc/conda/activate.d" "$CONDA_PREFIX/etc/conda/deactivate.d"
+
+cat > "$CONDA_PREFIX/etc/conda/activate.d/microseq_qt_backend.sh" <<'EOF'
+export _MICROSEQ_OLD_QT_QPA_PLATFORM="${QT_QPA_PLATFORM-}"
+export QT_QPA_PLATFORM=xcb
+EOF
+
+cat > "$CONDA_PREFIX/etc/conda/deactivate.d/microseq_qt_backend.sh" <<'EOF'
+if [ -n "${_MICROSEQ_OLD_QT_QPA_PLATFORM+x}" ]; then
+  export QT_QPA_PLATFORM="$_MICROSEQ_OLD_QT_QPA_PLATFORM"
+else
+  unset QT_QPA_PLATFORM
+fi
+unset _MICROSEQ_OLD_QT_QPA_PLATFORM
+EOF
+```
+
+Then run `conda deactivate && conda activate MicroSeq` once to apply.
+
+## Logging vs Run Outputs
+
+MicroSeq writes **runtime logs** and **pipeline artifacts** to different places:
+
+* Logs: `logs/microseq_<session>.log` (and `logs/microseq_latest.log` symlink)
+* Run outputs: your selected output/work directory (for example `*_microseq/`) containing artifacts such as `qc/`, `asm/`, `reads.fasta`, `hits.tsv`, and `hits_tax.tsv`
+
+Examples:
+
+* CAP3 subprocess progress emitted through Python logging appears in `logs/microseq_<session>.log`.
+* CAP3 per-sample captured streams remain in run artifacts like `asm/<sample>/cap3.stdout.txt` and `asm/<sample>/cap3.stderr.txt` when produced by compare/selection paths.
+
 ## Select Input 
 * First you click Browse...and pick in this case a folder with ab1 files. In order to access folder selection it's impertative you click cancel first then choose folder will pop up for it. Then you can go down into the nested folders until you find the desired folder which directly in that file houses the .ab1 files you want to blast against. You can also type in the path in the search bar as well. 
 * During execution the status bar shown the current stage and ETA; log pane streams MicroSeq's standard logging I have embedded in it.
@@ -500,7 +547,6 @@ Cock PJA et al. Biopython: freely available Python tools for computational molec
 Ewing B, Hillier L, Wendl MC, Green P. Base-calling of automated sequencer traces using phred. I. Accuracy assessment. Genome Research (1998).
 
 Ewing B, Green P. Base-calling of automated sequencer traces using phred. II. Error probabilities. Genome Research (1998)
-
 
 
 

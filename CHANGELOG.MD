@@ -61,6 +61,7 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 - vsearch docs and tests added for derep / uchime plus replicate weights tsv applied in BIOM. 
 - Added CLI workflow scripts that will make it easier to use the CLI and provided examples in the /docs how to use them in the test sample datasets. 
 - Paired contigs outputs now support `paired_contigs.fasta` which is contigs only or `blast_inputs.fasta` (which is the contigs + singlets fallback) for BLAST, with payload tracebility in `asm/blast_inputs.tsv`. 
+- Clarified log-vs-artifact behavior in GUI/CLI/docs: runtime execution logs write to `logs/microseq_<session>.log`, while run outputs remain in the selected work/output directories (`qc/`, `asm/`, `hits.tsv`, etc.); also documented conda `activate.d`/`deactivate.d` hooks for persistent `QT_QPA_PLATFORM=xcb` on Wayland.
 
 ### Fixed Bugs 
 - Percent signs escape properly for `argparse`.
@@ -73,6 +74,7 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 - Fixed paired preview helper signature and added well-pattern parameters; primer token scanning uses contiguous regex to avoid missing matches. 
 - Resolved GUI dry run toggle glitches and missing message text in dialog box. 
 - Perserved original `qseqid` while adding `sample_id` during taxonomy join so downstream merges do not drop identifiers. 
+- Made logging bootstrap idempotent so repeated `setup_logging()` calls no longer duplicate `MICROSEQ_SESSION_ID` auto-generation warnings, and auto-generated session IDs are persisted for reuse in-process.
 
 
 ---

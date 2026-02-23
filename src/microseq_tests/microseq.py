@@ -31,7 +31,7 @@ from microseq_tests import __version__
 def main() -> None:
     cfg = load_config() 
     ap = argparse.ArgumentParser(
-    prog="microseq", description="MicroSeq QC-trim Fastq; optional CAP3 assembly; blastn search; taxonomy join; optional BIOM export")
+    prog="microseq", description="MicroSeq QC-trim Fastq; optional CAP3 assembly; blastn search; taxonomy join; optional BIOM export. Logs are written under logs/microseq_<session>.log, while run artifacts remain in your work/output directories (qc/, asm/, hits.tsv, etc.).")
     # adding global flags here ......
     ap.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}", help="Show me the current Version of MicroSeq and exit") 
     ap.add_argument("--workdir", default=cfg.get("default_workdir","data"), help="Root folder for intermediate outputs (default: ./data) note: Yaml is placed as a 2ndary place for a shared repo project which can you modify and change without using workdir flag otherwise use --workdir to point where you want to set up your individual project")
@@ -484,6 +484,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main() 
-
 
 

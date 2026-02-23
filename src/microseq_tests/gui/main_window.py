@@ -16,22 +16,6 @@ import atexit
 import re
 import pandas as pd 
 
-# Pick the first visible backend that has a server.........
-if "WSL_DISTRO_NAME" in os.environ:  # running inside WSL
-    if os.environ.get("WAYLAND_DISPLAY"):  # WSLg comositor up for windows 11
-        # here let Qt auto-select 'wayland' which is best performance
-        pass
-    elif os.environ.get("DISPLAY"):  # using external X-server/ Xwayland
-        os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
-    else:  # headless CI, SSH
-        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-elif platform.system() == "Linux":  # native Linux desktop
-    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")  # native X11
-
-    # macOS defaults to its own so no need for one here...... it would be
-    # 'Darwin' and defaults to 'cocoa' just incase for reference and i forget
-
 import sys, logging, traceback, subprocess, shlex, time
 from pathlib import Path
 from typing import Optional
@@ -576,6 +560,21 @@ class MainWindow(QMainWindow):
         self.settings = QSettings("MicroSeq", "MicroSeq")
         self.setWindowTitle("MicroSeq GUI v1.0") # title for it
         self.resize(800, 520) # size of app considering also log space here
+
+        normal_geom = self.settings.value("window_normal_geometry", None)
+        if isinstance(normal_geom, (list, tuple)) and len(normal_geom) == 4:
+            try:
+                x, y, w, h = [int(v) for v in normal_geom]
+                self.setGeometry(x, y, w, h)
+            except (TypeError, ValueError):
+                pass
+        else:
+            # Legacy migration path from old saveGeometry blob key.
+            geom = self.settings.value("window_geometry")
+            if geom is not None:
+                self.restoreGeometry(geom)
+
+        self._start_maximized = self.settings.value("window_start_maximized", False, type=bool)
 
         # widgets --------------------------------------------------------
         self.fasta_lbl = QLabel("Input: —")
@@ -2808,6 +2807,13 @@ class MainWindow(QMainWindow):
                 event.ignore()                         # keep window open
                 self.log_model.append("Waiting for BLAST thread to finish…")
                 return
+        is_max = self.isMaximized()
+        normal_rect = self.normalGeometry() if is_max else self.geometry()
+        self.settings.setValue(
+            "window_normal_geometry",
+            [normal_rect.x(), normal_rect.y(), normal_rect.width(), normal_rect.height()],
+        )
+        self.settings.setValue("window_start_maximized", is_max)
         self._cleanup_input_staging()
         self._flush_logs() 
         event.accept()
@@ -2844,6 +2850,22 @@ def launch():
     QtCore.qInstallMessageHandler(qt_message_handler) 
     win = MainWindow()
     win.show()
+    QTimer.singleShot(0, lambda: win.showMaximized() if win._start_maximized else None)
+
+    logging.info(
+        "GUI platform session: XDG_SESSION_TYPE=%s QT_QPA_PLATFORM=%s WAYLAND_DISPLAY=%s",
+        os.environ.get("XDG_SESSION_TYPE", ""),
+        os.environ.get("QT_QPA_PLATFORM", ""),
+        os.environ.get("WAYLAND_DISPLAY", ""),
+    )
+    logging.info(
+        "Qt backend decision: chosen_qt_backend=%s reason=%s",
+        os.environ.get("QT_QPA_PLATFORM", ""),
+        os.environ.get("MICROSEQ_QT_BACKEND_REASON", "unknown"),
+    )
+    logging.info(
+        "Logging vs outputs: execution logs go to logs/microseq_<session>.log; run artifacts (qc/, asm/, hits.tsv, hits_tax.tsv) are written under each run output directory."
+    )
     sys.exit(app.exec())
 
 # allow: python -m microseq_tests.gui
