@@ -41,6 +41,7 @@ from microseq_tests.assembly.overlap_utils import (
     iter_end_anchored_overlaps,
     select_best_overlap,
     pick_best_identity_candidate,
+    rank_feasible_overlaps,
 )
 from microseq_tests.assembly.overlap_backends import (
     compute_overlap_candidates,
@@ -786,6 +787,15 @@ def _resolve_overlap_thresholds(cfg: dict | None = None) -> tuple[int, float, fl
     return min_overlap, min_identity, min_quality
 
 
+
+
+def _resolve_ambiguity_thresholds(cfg: dict | None = None) -> tuple[float, float]:
+    config = cfg if cfg is not None else load_config()
+    overlap_cfg = config.get("overlap_eval", {})
+    merge_cfg = config.get("merge_two_reads", {})
+    identity_delta = float(overlap_cfg.get("ambiguity_identity_delta", merge_cfg.get("ambiguity_identity_delta", 0.0025)))
+    quality_epsilon = float(overlap_cfg.get("ambiguity_quality_epsilon", merge_cfg.get("ambiguity_quality_epsilon", 0.1)))
+    return max(0.0, identity_delta), max(0.0, quality_epsilon)
 def _classify_overlap_status(
     overlap_len: int,
     identity: float,
@@ -804,6 +814,28 @@ def _classify_overlap_status(
         return "overlap_quality_low"
     return "ok"
 
+def _collect_primer_trim_bases_by_sample(report_path: Path | None) -> dict[str, dict[str, int]]:
+    """Aggregate primer-trimmed bases from primer_trim_report.tsv by sample/orientation."""
+    if report_path is None or not report_path.exists():
+        return {}
+    rows = pd.read_csv(report_path, sep="\t")
+    out: dict[str, dict[str, int]] = defaultdict(lambda: {"F": 0, "R": 0})
+    for _, row in rows.iterrows():
+        name = str(row.get("file", ""))
+        parsed = extract_sid_orientation(Path(name))
+        if not parsed:
+            continue
+        sample_id, orient = parsed
+        if orient not in {"F", "R"}:
+            continue
+        try:
+            bases_trimmed = int(float(row.get("bases_trimmed", 0)))
+        except (TypeError, ValueError):
+            bases_trimmed = 0
+        out[sample_id][orient] += max(0, bases_trimmed)
+    return dict(out)
+
+
 def _write_overlap_audit(
     paired_samples: dict[str, dict[str, list[Path]]],
     output_tsv: Path,
@@ -813,6 +845,8 @@ def _write_overlap_audit(
     min_quality: float | None = None,
     quality_mode: str = "warning",
     emit_engine_audit: bool = True,
+    pretrim_paired_samples: dict[str, dict[str, list[Path]]] | None = None,
+    primer_trim_bases_by_sample: dict[str, dict[str, int]] | None = None,
 ) -> dict[str, str]:
     config = load_config()
     merge_cfg = config.get("merge_two_reads", {})
@@ -829,10 +863,168 @@ def _write_overlap_audit(
     anchor_tolerance_bases = int(merge_cfg.get("anchor_tolerance_bases", 30))
 
     if min_overlap is None or min_identity is None or min_quality is None:
-        cfg_overlap, cfg_identity, cfg_quality = _resolve_overlap_thresholds()
+        cfg_overlap, cfg_identity, cfg_quality = _resolve_overlap_thresholds(config)
         min_overlap = cfg_overlap if min_overlap is None else min_overlap
         min_identity = cfg_identity if min_identity is None else min_identity
         min_quality = cfg_quality if min_quality is None else min_quality
+    ambiguity_identity_delta, ambiguity_quality_epsilon = _resolve_ambiguity_thresholds(config)
+
+    def _blank_diag() -> dict[str, str]:
+        return {
+            "fwd_best_identity": "",
+            "revcomp_best_identity": "",
+            "fwd_best_overlap_len": "",
+            "revcomp_best_overlap_len": "",
+            "fwd_anchor_feasible": "no",
+            "revcomp_anchor_feasible": "no",
+            "identity_delta_revcomp_minus_fwd": "",
+            "selected_vs_best_identity_delta": "",
+            "top_candidate_count": "",
+            "top2_identity_delta": "",
+            "top2_overlap_len_delta": "",
+            "top2_quality_delta": "",
+            "tie_reason_code": "",
+            "pretrim_best_identity": "",
+            "posttrim_best_identity": "",
+            "fwd_best_identity_any": "",
+            "revcomp_best_identity_any": "",
+            "fwd_best_overlap_len_any": "",
+            "revcomp_best_overlap_len_any": "",
+            "pretrim_best_overlap_len": "",
+            "posttrim_selected_overlap_len": "",
+            "pretrim_status": "",
+            "posttrim_status": "",
+            "ambiguity_identity_delta_used": "",
+            "ambiguity_quality_epsilon_used": "",
+            "primer_trim_bases_fwd": "0",
+            "primer_trim_bases_rev": "0",
+        }
+
+    def _format_missing(sample_id: str, status: str) -> str:
+        d = _blank_diag()
+        return (
+            f"{sample_id}\t0\t0\t\t\t{status}\t0\t\tno\tno"
+            f"\t{d['fwd_best_identity']}\t{d['revcomp_best_identity']}\t{d['fwd_best_overlap_len']}\t{d['revcomp_best_overlap_len']}"
+            f"\t{d['fwd_anchor_feasible']}\t{d['revcomp_anchor_feasible']}\t{d['identity_delta_revcomp_minus_fwd']}"
+            f"\t{d['selected_vs_best_identity_delta']}\t{d['top_candidate_count']}\t{d['top2_identity_delta']}"
+            f"\t{d['top2_overlap_len_delta']}\t{d['top2_quality_delta']}\t{d['tie_reason_code']}"
+            f"\t{d['fwd_best_identity_any']}\t{d['revcomp_best_identity_any']}\t{d['fwd_best_overlap_len_any']}\t{d['revcomp_best_overlap_len_any']}"
+            f"\t{d['pretrim_best_identity']}\t{d['posttrim_best_identity']}\t{d['pretrim_best_overlap_len']}\t{d['posttrim_selected_overlap_len']}"
+            f"\t{d['pretrim_status']}\t{d['posttrim_status']}\t{d['ambiguity_identity_delta_used']}\t{d['ambiguity_quality_epsilon_used']}"
+            f"\t{d['primer_trim_bases_fwd']}\t{d['primer_trim_bases_rev']}"
+            f"\t{overlap_engine}\tno\t{configured_overlap_engine}\n"
+        )
+
+    def _best_by_orientation(cands: list[AlignedOverlapCandidate], orientation: str) -> AlignedOverlapCandidate | None:
+        oriented = [c for c in cands if c.orientation == orientation and c.overlap_len >= min_overlap]
+        if not oriented:
+            return None
+        return max(
+            oriented,
+            key=lambda c: (c.identity, c.overlap_len, -c.mismatches, c.overlap_quality if c.overlap_quality is not None else float("-inf")),
+        )
+
+    def _best_any_by_orientation(cands: list[AlignedOverlapCandidate], orientation: str) -> AlignedOverlapCandidate | None:
+        oriented = [c for c in cands if c.orientation == orientation]
+        if not oriented:
+            return None
+        return max(
+            oriented,
+            key=lambda c: (c.identity, c.overlap_len, -c.mismatches, c.overlap_quality if c.overlap_quality is not None else float("-inf")),
+        )
+
+    def _orientation_anchor_feasible(cands: list[AlignedOverlapCandidate], orientation: str) -> bool:
+        return any(
+            c.orientation == orientation
+            and getattr(c, "end_anchored", True)
+            and c.overlap_len >= min_overlap
+            and c.identity >= min_identity
+            and (
+                quality_mode != "blocking"
+                or (c.overlap_quality is not None and c.overlap_quality >= min_quality)
+            )
+            for c in cands
+        )
+
+    def _compute_diag_fields(
+        overlap_candidates: list[AlignedOverlapCandidate],
+        selected_overlap,
+        best_identity_val: float,
+        selected_status: str,
+    ) -> dict[str, str]:
+        d = _blank_diag()
+        if not overlap_candidates:
+            return d
+        fwd_best = _best_by_orientation(overlap_candidates, "forward")
+        rev_best = _best_by_orientation(overlap_candidates, "revcomp")
+        fwd_best_any = _best_any_by_orientation(overlap_candidates, "forward")
+        rev_best_any = _best_any_by_orientation(overlap_candidates, "revcomp")
+        fwd_best_identity = fwd_best.identity if fwd_best is not None else None
+        rev_best_identity = rev_best.identity if rev_best is not None else None
+        d["fwd_best_identity"] = "" if fwd_best_identity is None else f"{fwd_best_identity:.4f}"
+        d["revcomp_best_identity"] = "" if rev_best_identity is None else f"{rev_best_identity:.4f}"
+        d["fwd_best_overlap_len"] = "" if fwd_best is None else str(fwd_best.overlap_len)
+        d["revcomp_best_overlap_len"] = "" if rev_best is None else str(rev_best.overlap_len)
+        d["fwd_anchor_feasible"] = "yes" if _orientation_anchor_feasible(overlap_candidates, "forward") else "no"
+        d["revcomp_anchor_feasible"] = "yes" if _orientation_anchor_feasible(overlap_candidates, "revcomp") else "no"
+        d["fwd_best_identity_any"] = "" if fwd_best_any is None else f"{fwd_best_any.identity:.4f}"
+        d["revcomp_best_identity_any"] = "" if rev_best_any is None else f"{rev_best_any.identity:.4f}"
+        d["fwd_best_overlap_len_any"] = "" if fwd_best_any is None else str(fwd_best_any.overlap_len)
+        d["revcomp_best_overlap_len_any"] = "" if rev_best_any is None else str(rev_best_any.overlap_len)
+        if fwd_best_identity is not None and rev_best_identity is not None:
+            d["identity_delta_revcomp_minus_fwd"] = f"{(rev_best_identity - fwd_best_identity):.4f}"
+        d["selected_vs_best_identity_delta"] = f"{(best_identity_val - selected_overlap.identity):.4f}"
+
+        ranked = rank_feasible_overlaps(
+            overlap_candidates,
+            min_overlap=min_overlap,
+            min_identity=min_identity,
+            min_quality=min_quality,
+            quality_mode=quality_mode,
+        )
+        if len(ranked) > 1:
+            top1, top2 = ranked[0], ranked[1]
+            d["top2_identity_delta"] = f"{abs(top1.identity - top2.identity):.4f}"
+            d["top2_overlap_len_delta"] = str(abs(top1.overlap_len - top2.overlap_len))
+            if top1.overlap_quality is not None and top2.overlap_quality is not None:
+                d["top2_quality_delta"] = f"{abs(top1.overlap_quality - top2.overlap_quality):.4f}"
+            if selected_status == "ambiguous_overlap":
+                reason_parts: list[str] = []
+                if top1.overlap_len == top2.overlap_len:
+                    reason_parts.append("len_equal")
+                if top1.mismatches == top2.mismatches:
+                    reason_parts.append("mismatch_equal")
+                if abs(top1.identity - top2.identity) <= ambiguity_identity_delta:
+                    reason_parts.append("identity_eps")
+                if (
+                    top1.overlap_quality is not None
+                    and top2.overlap_quality is not None
+                    and abs(top1.overlap_quality - top2.overlap_quality) <= ambiguity_quality_epsilon
+                ):
+                    reason_parts.append("quality_eps")
+                d["tie_reason_code"] = ";".join(reason_parts)
+                d["top_candidate_count"] = str(
+                    sum(
+                        1
+                        for cand in ranked
+                        if cand.overlap_len == top1.overlap_len
+                        and cand.mismatches == top1.mismatches
+                        and (
+                            abs(top1.identity - cand.identity) <= ambiguity_identity_delta
+                            or (
+                                top1.overlap_quality is not None
+                                and cand.overlap_quality is not None
+                                and abs(top1.overlap_quality - cand.overlap_quality) <= ambiguity_quality_epsilon
+                            )
+                        )
+                    )
+                )
+        d["posttrim_best_identity"] = f"{best_identity_val:.4f}"
+        d["posttrim_selected_overlap_len"] = str(selected_overlap.overlap_len)
+        d["posttrim_status"] = selected_status
+        d["ambiguity_identity_delta_used"] = f"{ambiguity_identity_delta:.4f}"
+        d["ambiguity_quality_epsilon_used"] = f"{ambiguity_quality_epsilon:.4f}"
+        return d
 
     output_tsv.parent.mkdir(parents=True, exist_ok=True)
     engines_tsv = output_tsv.with_name("overlap_audit_engines.tsv")
@@ -843,6 +1035,14 @@ def _write_overlap_audit(
         fh.write(
             "sample_id	overlap_len	overlap_identity	overlap_quality	orientation	status"
             "	best_identity	best_identity_orientation	anchoring_feasible	end_anchored_possible"
+            "	fwd_best_identity	revcomp_best_identity	fwd_best_overlap_len	revcomp_best_overlap_len"
+            "	fwd_anchor_feasible	revcomp_anchor_feasible	identity_delta_revcomp_minus_fwd"
+            "	selected_vs_best_identity_delta	top_candidate_count	top2_identity_delta"
+            "	top2_overlap_len_delta	top2_quality_delta	tie_reason_code"
+            "	fwd_best_identity_any	revcomp_best_identity_any	fwd_best_overlap_len_any	revcomp_best_overlap_len_any"
+            "	pretrim_best_identity	posttrim_best_identity	pretrim_best_overlap_len	posttrim_selected_overlap_len"
+            "	pretrim_status	posttrim_status	ambiguity_identity_delta_used	ambiguity_quality_epsilon_used"
+            "	primer_trim_bases_fwd	primer_trim_bases_rev"
             "	selected_engine	fallback_used	configured_engine\n"
         )
         if efh:
@@ -854,21 +1054,21 @@ def _write_overlap_audit(
             if not entries["F"] or not entries["R"]:
                 status = "overlap_missing_reads"
                 status_map[sample_id] = status
-                fh.write(f"{sample_id}	0	0			{status}	0		no	no	{overlap_engine}	no	{configured_overlap_engine}\n")
+                fh.write(_format_missing(sample_id, status))
                 continue
             fwd_path = entries["F"][0]
             rev_path = entries["R"][0]
             if not fwd_path.exists() or not rev_path.exists():
                 status = "overlap_missing_reads"
                 status_map[sample_id] = status
-                fh.write(f"{sample_id}	0	0			{status}	0		no	no	{overlap_engine}	no	{configured_overlap_engine}\n")
+                fh.write(_format_missing(sample_id, status))
                 continue
             fwd_record = _read_first_record(fwd_path, "fasta")
             rev_record = _read_first_record(rev_path, "fasta")
             if fwd_record is None or rev_record is None:
                 status = "overlap_missing_reads"
                 status_map[sample_id] = status
-                fh.write(f"{sample_id}	0	0			{status}	0		no	no	{overlap_engine}	no	{configured_overlap_engine}\n")
+                fh.write(_format_missing(sample_id, status))
                 continue
 
             fwd_qual = _load_qual_record(Path(f"{fwd_path}.qual"), fwd_record.id)
@@ -876,10 +1076,10 @@ def _write_overlap_audit(
 
             engines_to_run = [overlap_engine] if overlap_strategy == "single" else engine_order
             selected_engine = engines_to_run[0]
-            selected_overlap: OverlapResult | None = None
+            selected_overlap = None
             best_identity_val = 0.0
             best_identity_orientation = ""
-            per_engine_rows: list[tuple[str, OverlapResult, str, bool, bool, bool]] = []
+            per_engine_rows: list[tuple[str, object, str, bool, bool, list[AlignedOverlapCandidate]]] = []
 
             for idx, engine_name in enumerate(engines_to_run):
                 if engine_name == "ungapped":
@@ -926,6 +1126,8 @@ def _write_overlap_audit(
                     min_identity=min_identity,
                     min_quality=min_quality,
                     quality_mode=quality_mode,
+                    ambiguity_identity_delta=ambiguity_identity_delta,
+                    ambiguity_quality_epsilon=ambiguity_quality_epsilon,
                 )
                 best_identity = pick_best_identity_candidate(overlap_candidates, min_overlap=min_overlap)
                 end_anchored_possible = any(getattr(c, "end_anchored", True) for c in overlap_candidates)
@@ -951,7 +1153,7 @@ def _write_overlap_audit(
                         min_quality=min_quality,
                         quality_mode=quality_mode,
                     )
-                per_engine_rows.append((engine_name, overlap, status, end_anchored_possible, anchoring_feasible, status == "ok"))
+                per_engine_rows.append((engine_name, overlap, status, end_anchored_possible, anchoring_feasible, overlap_candidates))
 
                 if selected_overlap is None:
                     selected_engine = engine_name
@@ -979,26 +1181,72 @@ def _write_overlap_audit(
             selected_status = row[2] if row else "overlap_missing_reads"
             end_anchored_possible_selected = row[3] if row else False
             anchoring_feasible_selected = row[4] if row else False
+            selected_candidates = row[5] if row else []
             status_map[sample_id] = selected_status
 
             if selected_overlap is None:
-                selected_overlap = OverlapResult("forward", 0, 0.0, 0, None, "", "")
+                selected_overlap = select_best_overlap([], min_overlap=min_overlap, min_identity=min_identity, min_quality=min_quality, quality_mode=quality_mode, ambiguity_identity_delta=ambiguity_identity_delta, ambiguity_quality_epsilon=ambiguity_quality_epsilon)
 
             fallback_used = "yes" if (overlap_strategy in {"cascade", "all"} and selected_engine != engines_to_run[0]) else "no"
             overlap_quality = selected_overlap.overlap_quality
+            diag = _compute_diag_fields(selected_candidates, selected_overlap, best_identity_val, selected_status)
+
+            pre_entries = pretrim_paired_samples.get(sample_id) if pretrim_paired_samples else None
+            if pre_entries and pre_entries.get("F") and pre_entries.get("R"):
+                pre_fwd = pre_entries["F"][0]
+                pre_rev = pre_entries["R"][0]
+                pre_f = _read_first_record(pre_fwd, "fasta") if pre_fwd.exists() else None
+                pre_r = _read_first_record(pre_rev, "fasta") if pre_rev.exists() else None
+                if pre_f is not None and pre_r is not None:
+                    pre_candidates = list(iter_end_anchored_overlaps(str(pre_f.seq), str(pre_r.seq), None, None))
+                    pre_best = pick_best_identity_candidate(pre_candidates, min_overlap=min_overlap)
+                    pre_overlap = select_best_overlap(
+                        pre_candidates,
+                        min_overlap=min_overlap,
+                        min_identity=min_identity,
+                        min_quality=min_quality,
+                        quality_mode=quality_mode,
+                        ambiguity_identity_delta=ambiguity_identity_delta,
+                        ambiguity_quality_epsilon=ambiguity_quality_epsilon,
+                    )
+                    pre_status = pre_overlap.status if pre_overlap.status in {"not_end_anchored", "ambiguous_overlap"} else _classify_overlap_status(
+                        pre_overlap.overlap_len,
+                        pre_overlap.identity,
+                        pre_overlap.overlap_quality,
+                        min_overlap=min_overlap,
+                        min_identity=min_identity,
+                        min_quality=min_quality,
+                        quality_mode=quality_mode,
+                    )
+                    diag["pretrim_best_identity"] = f"{(pre_overlap.identity if pre_best is None else pre_best.identity):.4f}"
+                    diag["pretrim_best_overlap_len"] = str(pre_overlap.overlap_len)
+                    diag["pretrim_status"] = pre_status
+
+            sample_primer = primer_trim_bases_by_sample.get(sample_id, {}) if primer_trim_bases_by_sample else {}
+            diag["primer_trim_bases_fwd"] = str(sample_primer.get("F", 0))
+            diag["primer_trim_bases_rev"] = str(sample_primer.get("R", 0))
+
             fh.write(
-                f"{sample_id}	{selected_overlap.overlap_len}	{selected_overlap.identity:.4f}	"
-                f"{'' if overlap_quality is None else f'{overlap_quality:.2f}'}	"
-                f"{selected_overlap.orientation}	{selected_status}	{best_identity_val:.4f}	{best_identity_orientation}"
-                f"	{'yes' if anchoring_feasible_selected else 'no'}	{'yes' if end_anchored_possible_selected else 'no'}"
+                f"{sample_id}\t{selected_overlap.overlap_len}\t{selected_overlap.identity:.4f}\t"
+                f"{'' if overlap_quality is None else f'{overlap_quality:.2f}'}\t"
+                f"{selected_overlap.orientation}\t{selected_status}\t{best_identity_val:.4f}\t{best_identity_orientation}"
+                f"\t{'yes' if anchoring_feasible_selected else 'no'}\t{'yes' if end_anchored_possible_selected else 'no'}"
+                f"\t{diag['fwd_best_identity']}\t{diag['revcomp_best_identity']}\t{diag['fwd_best_overlap_len']}\t{diag['revcomp_best_overlap_len']}"
+                f"\t{diag['fwd_anchor_feasible']}\t{diag['revcomp_anchor_feasible']}\t{diag['identity_delta_revcomp_minus_fwd']}"
+                f"\t{diag['selected_vs_best_identity_delta']}\t{diag['top_candidate_count']}\t{diag['top2_identity_delta']}"
+                f"\t{diag['top2_overlap_len_delta']}\t{diag['top2_quality_delta']}\t{diag['tie_reason_code']}"
+                f"\t{diag['fwd_best_identity_any']}\t{diag['revcomp_best_identity_any']}\t{diag['fwd_best_overlap_len_any']}\t{diag['revcomp_best_overlap_len_any']}"
+                f"\t{diag['pretrim_best_identity']}\t{diag['posttrim_best_identity']}\t{diag['pretrim_best_overlap_len']}\t{diag['posttrim_selected_overlap_len']}"
+                f"\t{diag['pretrim_status']}\t{diag['posttrim_status']}\t{diag['ambiguity_identity_delta_used']}\t{diag['ambiguity_quality_epsilon_used']}"
+                f"\t{diag['primer_trim_bases_fwd']}\t{diag['primer_trim_bases_rev']}"
                 f"\t{selected_engine}\t{fallback_used}\t{configured_overlap_engine}\n"
             )
             if efh:
-                for engine_name, overlap, status, end_anchored_possible_e, anchoring_feasible_e, _selected_ok in per_engine_rows:
+                for engine_name, overlap, status, end_anchored_possible_e, anchoring_feasible_e, _cands in per_engine_rows:
                     efh.write(
-                        f"{sample_id}	{engine_name}	{overlap.orientation}	{status}	{overlap.overlap_len}"
-                        f"	{overlap.identity:.4f}	{'' if overlap.overlap_quality is None else f'{overlap.overlap_quality:.2f}'}"
-                        f"	{'yes' if end_anchored_possible_e else 'no'}	{'yes' if anchoring_feasible_e else 'no'}"
+                        f"{sample_id}\t{engine_name}\t{overlap.orientation}\t{status}\t{overlap.overlap_len}"
+                        f"\t{overlap.identity:.4f}\t{'' if overlap.overlap_quality is None else f'{overlap.overlap_quality:.2f}'}"
+                        f"\t{'yes' if end_anchored_possible_e else 'no'}\t{'yes' if anchoring_feasible_e else 'no'}"
                         f"\t{'yes' if engine_name == selected_engine else 'no'}\n"
                     )
     return status_map
@@ -1874,6 +2122,7 @@ def run_full_pipeline(
             return written
 
         assembly_input = infile
+        pretrim_fasta_dir: Path | None = None
         if not is_fasta:
             on_stage("Trim")
             run_trim(infile, out_dir, sanger=True, summary_tsv=summary_tsv, primer_cfg_override=primer_cfg_override)
@@ -1894,6 +2143,11 @@ def run_full_pipeline(
             pct += step
             on_progress(pct)
 
+            pretrim_fastq_dir = out_dir / "passed_qc_fastq"
+            if any(pretrim_fastq_dir.glob("*.fastq")):
+                pretrim_fasta_dir = out_dir / "qc" / "paired_fasta_pretrim"
+                _fastq_to_paired_fastas(pretrim_fastq_dir, pretrim_fasta_dir, use_qual=cap3_use_qual)
+
             fasta_dir = out_dir / "qc" / "paired_fasta"
             generated_fastas = _fastq_to_paired_fastas(fastq_dir, fasta_dir, use_qual=cap3_use_qual)
             if not generated_fastas:
@@ -1903,6 +2157,9 @@ def run_full_pipeline(
 
         pairing_report = out_dir / "qc" / "pairing_report.tsv"
         pairing_report.parent.mkdir(parents=True, exist_ok=True)
+
+        pretrim_paired_samples: dict[str, dict[str, list[Path]]] | None = None
+        primer_trim_bases_by_sample = _collect_primer_trim_bases_by_sample(out_dir / "qc" / "primer_trim_report.tsv")
 
         on_stage("Paired assembly")
         paired_samples, missing_samples = _collect_pairing_catalog(
@@ -1920,6 +2177,16 @@ def run_full_pipeline(
                 f"No paired reads detected in {assembly_input}; {summary}. "
                 "If your primer names differ, provide --fwd-pattern/--rev-pattern."
                 f" {suggestions}"
+            )
+
+        if pretrim_fasta_dir is not None and pretrim_fasta_dir.exists():
+            pretrim_paired_samples, _pretrim_missing = _collect_pairing_catalog(
+                pretrim_fasta_dir,
+                fwd_pattern=fwd_pattern,
+                rev_pattern=rev_pattern,
+                dup_policy=dup_policy,
+                enforce_same_well=enforce_same_well,
+                well_pattern=well_pattern,
             )
 
         contig_paths: list[Path] = []
@@ -1972,6 +2239,8 @@ def run_full_pipeline(
                     min_quality=overlap_min_quality,
                     quality_mode=overlap_quality_mode,
                     emit_engine_audit=reporting_cfg["emit_engine_audit"],
+                    pretrim_paired_samples=pretrim_paired_samples,
+                    primer_trim_bases_by_sample=primer_trim_bases_by_sample,
                 )
             else:
                 L.warning("Overlap audit skipped; paired input is not a directory: %s", assembly_input)

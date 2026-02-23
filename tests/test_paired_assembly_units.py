@@ -323,8 +323,17 @@ def test_overlap_audit_writes_best_identity_columns(tmp_path: Path) -> None:
     values = lines[1].split("\t")
     assert "best_identity" in header
     assert "best_identity_orientation" in header
+    assert "fwd_best_identity" in header
+    assert "revcomp_best_identity" in header
+    assert "top2_identity_delta" in header
+    assert "pretrim_best_identity" in header
+    assert "posttrim_selected_overlap_len" in header
+    assert "fwd_best_identity_any" in header
+    assert "ambiguity_identity_delta_used" in header
     row = dict(zip(header, values))
     assert float(row["best_identity"]) >= float(row["overlap_identity"])
+    assert row["posttrim_status"] == row["status"]
+    assert row["posttrim_selected_overlap_len"] == row["overlap_len"]
 
 
 def test_overlap_audit_missing_reads_rows_have_expected_columns(tmp_path: Path) -> None:
@@ -334,10 +343,62 @@ def test_overlap_audit_missing_reads_rows_have_expected_columns(tmp_path: Path) 
     _write_overlap_audit(paired, out)
     header = out.read_text(encoding="utf-8").splitlines()[0].split("\t")
     values = out.read_text(encoding="utf-8").splitlines()[1].split("\t")
-    assert len(header) == 13
-    assert len(values) == 13
+    assert len(header) == 40
+    assert len(values) == 40
 
 
+
+
+
+def test_overlap_audit_exposes_any_orientation_metrics_for_short_high_identity_revcomp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure *_any columns preserve short high-identity revcomp evidence below min_overlap."""
+    from microseq_tests.assembly.overlap_backends import OverlapBackendResult
+
+    fwd = tmp_path / "S2_27F.fasta"
+    rev = tmp_path / "S2_1492R.fasta"
+    fwd.write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
+    rev.write_text(">r\n" + "A" * 120 + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "microseq_tests.pipeline.load_config",
+        lambda: {
+            "merge_two_reads": {
+                "overlap_engine": "biopython",
+                "overlap_engine_strategy": "single",
+                "overlap_engine_order": ["biopython"],
+                "anchor_tolerance_bases": 30,
+                "min_overlap": 50,
+                "min_identity": 0.5,
+            },
+            "overlap_eval": {
+                "min_overlap": 50,
+                "min_identity": 0.5,
+                "min_quality": 20.0,
+                "ambiguity_identity_delta": 0.003,
+                "ambiguity_quality_epsilon": 0.2,
+            },
+        },
+    )
+
+    def _fake_backend(*_args, **_kwargs):
+        return [
+            OverlapBackendResult("forward", "A" * 80, "A" * 80, 80, 0.62, 30, 0, 30.0, "", 80, 0, 0, 0, 80, 0, 80, True),
+            OverlapBackendResult("revcomp", "A" * 30, "A" * 30, 30, 0.98, 1, 0, 30.0, "", 30, 0, 0, 0, 30, 0, 30, True),
+        ]
+
+    monkeypatch.setattr("microseq_tests.pipeline.compute_overlap_candidates", _fake_backend)
+
+    out = tmp_path / "overlap_audit.tsv"
+    _write_overlap_audit({"S2": {"F": [fwd], "R": [rev]}}, out, min_overlap=50, min_identity=0.5, min_quality=20.0)
+
+    header, values = [line.split("	") for line in out.read_text(encoding="utf-8").splitlines()]
+    row = dict(zip(header, values))
+    assert row["revcomp_best_identity"] == ""
+    assert row["revcomp_best_identity_any"] == "0.9800"
+    assert row["revcomp_best_overlap_len_any"] == "30"
+    assert row["fwd_best_identity"] == "0.6200"
+    assert row["ambiguity_identity_delta_used"] == "0.0030"
+    assert row["ambiguity_quality_epsilon_used"] == "0.2000"
 
 def test_overlap_audit_emit_engine_audit_false_has_no_engines_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fwd = tmp_path / "S1_27F.fasta"

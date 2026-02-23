@@ -259,6 +259,20 @@ If you get the status `ambiguous_overlap` this means that the overlap selector f
 `best_identity_orientation`: Orientation associated with best identity candidate. 
 `anchoring_feasible`: Whether at least one candidate can satify end anchor + thresholds. 
 `end_anchored_possible`: Whether any candidate is end anchored at all. 
+`fwd_best_identity` / `revcomp_best_identity`: Best identity by orientation within feasibility-space (`overlap_len >= min_overlap`).
+`fwd_best_overlap_len` / `revcomp_best_overlap_len`: Overlap length paired to the feasible orientation best-identity values.
+`fwd_anchor_feasible` / `revcomp_anchor_feasible`: Whether each orientation has any end-anchored candidate that passes thresholds.
+`identity_delta_revcomp_minus_fwd`: `revcomp_best_identity - fwd_best_identity` (feasible-space).
+`selected_vs_best_identity_delta`: Best-identity minus selected overlap identity for the chosen engine.
+`top_candidate_count`: Number of near-tied top feasible candidates using ambiguity epsilons.
+`top2_identity_delta` / `top2_overlap_len_delta` / `top2_quality_delta`: Absolute deltas between top-1 and top-2 feasible candidates.
+`tie_reason_code`: Why a near tie was flagged (`len_equal`, `mismatch_equal`, `identity_eps`, `quality_eps`).
+`fwd_best_identity_any` / `revcomp_best_identity_any`: Best identity by orientation without `min_overlap` filtering (raw evidence-space).
+`fwd_best_overlap_len_any` / `revcomp_best_overlap_len_any`: Overlap lengths paired to the raw evidence-space best-identity values.
+`pretrim_best_identity` / `pretrim_best_overlap_len` / `pretrim_status`: Best-overlap diagnostics recomputed from pre-primer-trim paired FASTA.
+`posttrim_best_identity` / `posttrim_selected_overlap_len` / `posttrim_status`: Post-trim best identity plus the selected overlap length and status in the final run.
+`ambiguity_identity_delta_used` / `ambiguity_quality_epsilon_used`: Effective thresholds used to decide ambiguous/near-tie behavior.
+`primer_trim_bases_fwd` / `primer_trim_bases_rev`: Total primer-trimmed bases per orientation from `qc/primer_trim_report.tsv`.
 `selected_engine`: Overlap engine selected for audit row.
 `fallback_used`: yes/no if cascade/all strategy had to move off first engine.
 `overlap_engine` (UI label; file writes configured_engine): Configured default overlap engine from config (auto, ungapped, etc.).

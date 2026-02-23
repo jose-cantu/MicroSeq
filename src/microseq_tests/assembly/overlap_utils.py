@@ -315,7 +315,7 @@ def select_best_overlap(
     min_identity: float,
     min_quality: float,
     quality_mode: str = "warning",
-    ambiguity_identity_delta: float = 0.0,
+    ambiguity_identity_delta: float = 0.0025,
     ambiguity_quality_epsilon: float = 0.1,
 ) -> OverlapResult:
     candidates = list(candidates)

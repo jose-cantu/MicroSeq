@@ -1005,7 +1005,7 @@ class MainWindow(QMainWindow):
         self.blast_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.blast_table.itemSelectionChanged.connect(self._update_detail_panel)
 
-        self.diagnostics_table = QTableWidget(0, 13)
+        self.diagnostics_table = QTableWidget(0, 40)
         self.diagnostics_table.setHorizontalHeaderLabels(
             [
                 "sample_id",
@@ -1018,6 +1018,33 @@ class MainWindow(QMainWindow):
                 "best_identity_orientation",
                 "anchoring_feasible",
                 "end_anchored_possible",
+                "fwd_best_identity",
+                "revcomp_best_identity",
+                "fwd_best_overlap_len",
+                "revcomp_best_overlap_len",
+                "fwd_anchor_feasible",
+                "revcomp_anchor_feasible",
+                "identity_delta_revcomp_minus_fwd",
+                "selected_vs_best_identity_delta",
+                "top_candidate_count",
+                "top2_identity_delta",
+                "top2_overlap_len_delta",
+                "top2_quality_delta",
+                "tie_reason_code",
+                "fwd_best_identity_any",
+                "revcomp_best_identity_any",
+                "fwd_best_overlap_len_any",
+                "revcomp_best_overlap_len_any",
+                "pretrim_best_identity",
+                "posttrim_best_identity",
+                "pretrim_best_overlap_len",
+                "posttrim_selected_overlap_len",
+                "pretrim_status",
+                "posttrim_status",
+                "ambiguity_identity_delta_used",
+                "ambiguity_quality_epsilon_used",
+                "primer_trim_bases_fwd",
+                "primer_trim_bases_rev",
                 "selected_engine",
                 "fallback_used",
                 "overlap_engine",
@@ -2388,6 +2415,33 @@ class MainWindow(QMainWindow):
                 self._fmt_table_value(row.get("best_identity_orientation", "")),
                 self._fmt_table_value(row.get("anchoring_feasible", "")),
                 self._fmt_table_value(row.get("end_anchored_possible", "")),
+                self._fmt_table_value(row.get("fwd_best_identity", "")),
+                self._fmt_table_value(row.get("revcomp_best_identity", "")),
+                self._fmt_table_value(row.get("fwd_best_overlap_len", "")),
+                self._fmt_table_value(row.get("revcomp_best_overlap_len", "")),
+                self._fmt_table_value(row.get("fwd_anchor_feasible", "")),
+                self._fmt_table_value(row.get("revcomp_anchor_feasible", "")),
+                self._fmt_table_value(row.get("identity_delta_revcomp_minus_fwd", "")),
+                self._fmt_table_value(row.get("selected_vs_best_identity_delta", "")),
+                self._fmt_table_value(row.get("top_candidate_count", "")),
+                self._fmt_table_value(row.get("top2_identity_delta", "")),
+                self._fmt_table_value(row.get("top2_overlap_len_delta", "")),
+                self._fmt_table_value(row.get("top2_quality_delta", "")),
+                self._fmt_table_value(row.get("tie_reason_code", "")),
+                self._fmt_table_value(row.get("fwd_best_identity_any", "")),
+                self._fmt_table_value(row.get("revcomp_best_identity_any", "")),
+                self._fmt_table_value(row.get("fwd_best_overlap_len_any", "")),
+                self._fmt_table_value(row.get("revcomp_best_overlap_len_any", "")),
+                self._fmt_table_value(row.get("pretrim_best_identity", "")),
+                self._fmt_table_value(row.get("posttrim_best_identity", "")),
+                self._fmt_table_value(row.get("pretrim_best_overlap_len", "")),
+                self._fmt_table_value(row.get("posttrim_selected_overlap_len", row.get("posttrim_best_overlap_len", ""))),
+                self._fmt_table_value(row.get("pretrim_status", "")),
+                self._fmt_table_value(row.get("posttrim_status", "")),
+                self._fmt_table_value(row.get("ambiguity_identity_delta_used", "")),
+                self._fmt_table_value(row.get("ambiguity_quality_epsilon_used", "")),
+                self._fmt_table_value(row.get("primer_trim_bases_fwd", "")),
+                self._fmt_table_value(row.get("primer_trim_bases_rev", "")),
                 self._fmt_table_value(row.get("selected_engine", "")),
                 self._fmt_table_value(row.get("fallback_used", "")),
                 self._fmt_table_value(row.get("configured_engine", row.get("overlap_engine", ""))),
@@ -2406,10 +2460,37 @@ class MainWindow(QMainWindow):
                 "best_identity_orientation": row_values[7],
                 "anchoring_feasible": row_values[8],
                 "end_anchored_possible": row_values[9],
-                "selected_engine": row_values[10],
-                "fallback_used": row_values[11],
-                "overlap_engine": row_values[12],
-                "configured_engine": row_values[12],
+                "fwd_best_identity": row_values[10],
+                "revcomp_best_identity": row_values[11],
+                "fwd_best_overlap_len": row_values[12],
+                "revcomp_best_overlap_len": row_values[13],
+                "fwd_anchor_feasible": row_values[14],
+                "revcomp_anchor_feasible": row_values[15],
+                "identity_delta_revcomp_minus_fwd": row_values[16],
+                "selected_vs_best_identity_delta": row_values[17],
+                "top_candidate_count": row_values[18],
+                "top2_identity_delta": row_values[19],
+                "top2_overlap_len_delta": row_values[20],
+                "top2_quality_delta": row_values[21],
+                "tie_reason_code": row_values[22],
+                "fwd_best_identity_any": row_values[23],
+                "revcomp_best_identity_any": row_values[24],
+                "fwd_best_overlap_len_any": row_values[25],
+                "revcomp_best_overlap_len_any": row_values[26],
+                "pretrim_best_identity": row_values[27],
+                "posttrim_best_identity": row_values[28],
+                "pretrim_best_overlap_len": row_values[29],
+                "posttrim_selected_overlap_len": row_values[30],
+                "pretrim_status": row_values[31],
+                "posttrim_status": row_values[32],
+                "ambiguity_identity_delta_used": row_values[33],
+                "ambiguity_quality_epsilon_used": row_values[34],
+                "primer_trim_bases_fwd": row_values[35],
+                "primer_trim_bases_rev": row_values[36],
+                "selected_engine": row_values[37],
+                "fallback_used": row_values[38],
+                "overlap_engine": row_values[39],
+                "configured_engine": row_values[39],
             }
         self._configure_table_view(self.diagnostics_table)
 
@@ -2671,6 +2752,16 @@ class MainWindow(QMainWindow):
                 f"q {audit.get('overlap_quality', '—')}, "
                 f"orient {audit.get('orientation', '—')}, "
                 f"best-id {audit.get('best_identity', '—')} @ {audit.get('best_identity_orientation', '—')}, "
+                f"fwd-best-id {audit.get('fwd_best_identity', '—')} (any {audit.get('fwd_best_identity_any', '—')}), rev-best-id {audit.get('revcomp_best_identity', '—')} (any {audit.get('revcomp_best_identity_any', '—')}), "
+                f"delta(rev-fwd) {audit.get('identity_delta_revcomp_minus_fwd', '—')}, "
+                f"selected-vs-best-delta {audit.get('selected_vs_best_identity_delta', '—')}, "
+                f"fwd-anchor-feasible {audit.get('fwd_anchor_feasible', '—')}, rev-anchor-feasible {audit.get('revcomp_anchor_feasible', '—')}, "
+                f"top-cands {audit.get('top_candidate_count', '—')}, top2-id-delta {audit.get('top2_identity_delta', '—')}, "
+                f"top2-len-delta {audit.get('top2_overlap_len_delta', '—')}, top2-q-delta {audit.get('top2_quality_delta', '—')}, "
+                f"tie-reason {audit.get('tie_reason_code', '—')} (id_eps {audit.get('ambiguity_identity_delta_used', '—')}, q_eps {audit.get('ambiguity_quality_epsilon_used', '—')}), "
+                f"pretrim {audit.get('pretrim_status', '—')} id {audit.get('pretrim_best_identity', '—')} len {audit.get('pretrim_best_overlap_len', '—')}, "
+                f"posttrim {audit.get('posttrim_status', '—')} id {audit.get('posttrim_best_identity', '—')} len-selected {audit.get('posttrim_selected_overlap_len', '—')}, "
+                f"primer-trim-bases F {audit.get('primer_trim_bases_fwd', '—')} R {audit.get('primer_trim_bases_rev', '—')}, "
                 f"anchored-feasible {audit.get('anchoring_feasible', '—')}, "
                 f"end-anchored-possible {audit.get('end_anchored_possible', '—')}, "
                 f"selected-engine {audit.get('selected_engine', '—')}, "
