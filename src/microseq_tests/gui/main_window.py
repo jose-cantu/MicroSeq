@@ -2445,42 +2445,28 @@ class MainWindow(QMainWindow):
                 "sample_id": sample_id,
                 "assembler_id": assembler_id,
                 "assembler_name": row_values[2],
-<<<<<<< ours
                 "dup_policy": row_values[3],
                 "status": row_values[4],
                 "selected_engine": row_values[5],
                 "contig_len": row_values[6],
-                "diag_code_for_machine": row_values[7],
-                "diag_detail_for_human": row_values[8],
-                "cap3_contigs_n": row_values[9],
-                "cap3_singlets_n": row_values[10],
                 "warnings": row_values[11],
-=======
-                "status": row_values[3],
-                "selected_engine": row_values[4],
-                "contig_len": row_values[5],
-                "warnings": row_values[6],
                 "diag_code_for_machine": self._fmt_table_value(row.get("diag_code_for_machine", "")),
                 "diag_detail_for_human": self._normalize_compare_diag_detail(
                     self._fmt_table_value(row.get("diag_detail_for_human", "")),
-                    row_values[4],
+                    row_values[5],
                 ),
                 "cap3_contigs_n": self._fmt_table_value(row.get("cap3_contigs_n", "")),
                 "cap3_singlets_n": self._fmt_table_value(row.get("cap3_singlets_n", "")),
->>>>>>> theirs
                 "cap3_info_path": self._fmt_table_value(row.get("cap3_info_path", "")),
                 "cap3_stdout_path": self._fmt_table_value(row.get("cap3_stdout_path", "")),
                 "cap3_stderr_path": self._fmt_table_value(row.get("cap3_stderr_path", "")),
                 "payload_fasta": self._fmt_table_value(row.get("payload_fasta", "")),
-<<<<<<< ours
-=======
                 "payload_kind": self._fmt_table_value(row.get("payload_kind", "none")),
                 "payload_n": self._fmt_table_value(row.get("payload_n", "0")),
                 "payload_max_len": self._fmt_table_value(row.get("payload_max_len", "0")),
                 "ambiguity_flag": self._fmt_table_value(row.get("ambiguity_flag", "0")),
                 "safety_flag": self._fmt_table_value(row.get("safety_flag", "none")),
                 "review_reason": self._fmt_table_value(row.get("review_reason", "")),
->>>>>>> theirs
             } 
 
         self._configure_table_view(self.compare_table)
