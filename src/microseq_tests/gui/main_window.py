@@ -629,7 +629,7 @@ class MainWindow(QMainWindow):
         for assembler in list_assemblers():
             self.assembler_combo.addItem(assembler.display_name, userData=assembler.id)
         self.assembler_combo.setToolTip(
-            "Choose legacy CAP3 flow, a single assembler, or all assemblers with auto-selection for BLAST payloads."
+                "Choose legacy CAP3 flow, a single assembler (faster: runs only that assembler), or all assemblers with auto-selection for BLAST payloads (in spirit of metawrap compare assebmlest and select best one)."
         )
 
         self.compare_assemblers_btn = QPushButton("Compare assemblers")

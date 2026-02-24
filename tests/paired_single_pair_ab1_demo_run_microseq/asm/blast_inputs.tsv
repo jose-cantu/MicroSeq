@@ -1,2 +1,2 @@
-sample_id	blast_payload	payload_ids	reason
-A+	singlet	A+|singlet|cap3_s1=A+27F;A+|singlet|cap3_s2=A+1492R	singlets_only
+sample_id	blast_payload	payload_ids	reason	selected_assembler_id	selected_assembler_name	selected_status	payload_kind	payload_n	payload_entity_n	payload_max_len	ambiguity_flag	safety_flag	decision_source	review_reason	warning_flags	structural_hypothesis_n	hypotheses_with_hits_n	missing_hits_n	hypothesis_map	source_id_map	resolution_state	resolved_hypothesis	resolution_reason	review_action	advisory_reason	trace_status	trace_status_f	trace_status_r	trace_flags
+A+	contig	A+|cap3_diagnostic|contig1=Contig1	selected_payload	cap3:diagnostic	CAP3 (Diagnostic profile)	assembled	contig	1	1	1355	0	none	auto			1	1	0	A+|cap3_diagnostic|contig1=struct1	A+|cap3_diagnostic|contig1=Contig1	unambiguous	struct1	single_hypothesis	none		NA	NA	NA	

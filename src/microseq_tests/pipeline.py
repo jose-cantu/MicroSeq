@@ -65,7 +65,7 @@ from microseq_tests.vsearch_tools import (
     collapse_replicates_grouped, 
     chimera_check_ref, 
 )
-from microseq_tests.utility.id_normaliser import NORMALISERS
+from microseq_tests.utility.id_normaliser import NORMALISERS, qseqid_to_sample_id 
 from microseq_tests.utility.io_utils import write_fasta_and_qual_from_fastq
 from microseq_tests.post_blast_analysis import run as postblast_run
 
@@ -86,6 +86,8 @@ PathLike = Union[str, Path]
 L = logging.getLogger(__name__)
 
 
+# Contract: qseqid is structural payload id (e.g., S1|contig|cap3_c1)
+# sample_id is biological sample key (e.g., S1) 
 BLAST_INPUTS_HEADERS: list[str] = [
     "sample_id", "blast_payload", "payload_ids", "reason",
     "selected_assembler_id", "selected_assembler_name", "selected_status",
@@ -1416,36 +1418,43 @@ def _build_blast_inputs(
         contigs = list(SeqIO.parse(contigs_path, "fasta")) if contigs_path.exists() else []
         singlets = list(SeqIO.parse(singlets_path, "fasta")) if singlets_path.exists() else []
 
+        # "contig or singlet" means CAP3 contigs are preferred and singlets are a fallback only when no contigs were produced for the sample. 
+        source_group: tuple[str, str, list[SeqIO.SeqRecord]] | None = None 
         if contigs:
-            payload = "contig"
-            source_records = contigs
-            reason = "contigs_present"
-            label = "cap3_c"
+            source_group = ("contig", "cap3_c", contigs) 
+
         elif singlets:
-            payload = "singlet"
-            source_records = singlets
-            reason = "singlets_only"
-            label = "cap3_s"
-        else:
-            payload = "no_payload"
-            source_records = []
-            reason = "cap3_no_output"
-            label = "cap3"
+            source_group = ("singlet", cap3_s", singlet)
 
         payload_ids: list[str] = []
         hypothesis_map: list[str] = []
         source_id_map: list[str] = []
-        for idx, record in enumerate(source_records, start=1):
-            new_id = f"{sample_id}|{payload}|{label}{idx}"
-            source_id = str(record.id)
-            structural_id = f"{payload}{idx}" if payload == "contig_alt" else "struct1"
-            payload_ids.append(f"{new_id}={source_id}")
-            hypothesis_map.append(f"{new_id}={structural_id}")
-            source_id_map.append(f"{new_id}={source_id}")
-            record.id = new_id
-            record.name = new_id
-            record.description = ""
-            records_to_write.append(record)
+
+        payload_max_len_val = 0
+        source_records_total = 0 
+
+        if source_group:
+            payload, label, source_records = source_group
+            for idx, record in enumerate(source_records, start=1):
+                new_id = f"{sample_id}|{payload}|{label}{idx}"
+                source_id = str(record.id)
+                structural_id = "struct1"
+                payload_ids.append(f"{new_id}={source_id}")
+                hypothesis_map.append(f"{new_id}={structural_id}")
+                source_id_map.append(f"{new_id}={source_id}")
+                record.id = new_id 
+                record.name = new_id 
+                record.description = ""
+                records_to_write.append(record)
+                source_records_total += 1
+                payload_max_len_val = max(payload_max_len_val, len(record.seq))
+
+        if source_group:
+            payload = source_group[0]
+            reason = "contig_present" if payload == "contig" else "singlets_only" 
+        else:
+            payload = "no_payload"
+            reason = "cap3_no_output" 
 
         payload_kind = "none"
         payload_n = "0"
@@ -1455,14 +1464,15 @@ def _build_blast_inputs(
         review_reason = ""
         warning_flags = ""
         structural_hypothesis_n = 0
+
         if payload in {"contig", "singlet"}:
             payload_kind = payload
-            payload_n = str(len(source_records))
+            payload_n = str(source_records_total)
             payload_entity_n = payload_n
-            payload_max_len = str(max(len(rec.seq) for rec in source_records)) if source_records else "0"
-            # CAP3 default emits payload entities; structural ambiguity is not implied by multi-contig.
+            payload_max_len = str(payload_max_len_val)  
+            # CAP3 default emits payload entities; structural ambiguity is not implied by multi-contig/singlet.
             structural_hypothesis_n = 1
-            if len(source_records) > 1:
+            if source_records_total > 1:
                 warning_flags = "multi_payload"
         elif payload == "no_payload":
             review_reason = "no_payload"
@@ -1745,6 +1755,7 @@ def run_compare_assemblers(
     input_dir: PathLike,
     out_dir: PathLike,
     *,
+    assembler_ids: Sequence[str] | None = None, 
     fwd_pattern: str | None = None,
     rev_pattern: str | None = None,
     dup_policy: DupPolicy = DupPolicy.ERROR,
@@ -1810,6 +1821,13 @@ def run_compare_assemblers(
     ambiguous_top_k = int(merge_cfg.get("ambiguous_top_k", 3))
 
     specs = list_assemblers()
+    if assembler_ids:
+        allowed = set(assembler_ids)
+        specs = [spec for spec in specs if spec.id in allowed] 
+        if not specs:
+            known = ", ".join(sorted(spec.id for spec in list_assemblers()))
+            asked = ", ".join(sorted(allowed)) 
+            raise ValueError(f"No requested assemblers were found ({asked}). Known ids: {known}") 
     rows: list[dict[str, str]] = []
     total = max(1, len(specs) * len(paired_samples))
     done = 0
@@ -2908,9 +2926,11 @@ def run_full_pipeline(
         else:
             if resolved_assembler_mode == "selected":
                 get_assembler_spec(resolved_assembler_id or "")
+            compare_assembler_ids = [resolved_assembler_id] if resolved_assembler_mode == "selected" and resolved_assembler_id else None 
             run_compare_assemblers(
                 assembly_input,
                 out_dir,
+                assembler_ids=compare_assembler_ids, 
                 fwd_pattern=fwd_pattern,
                 rev_pattern=rev_pattern,
                 dup_policy=dup_policy,
@@ -3208,11 +3228,11 @@ def run_full_pipeline(
     if using_paired:
         try:
             tax_df = pd.read_csv(paths["tax"], sep="\t")
-            if "sample_id" not in tax_df.columns and "qseqid" in tax_df.columns:
-                tax_df["sample_id"] = (
-                    tax_df["qseqid"].astype(str).str.split("|").str[0]
-                )
-                tax_df.to_csv(paths["tax"], sep="\t", index=False) 
+            if "qseqid" in tax_df.columns:
+                normalized_sample_ids = tax_df["qseqid"].map(qseqid_to_sample_id)
+                if "sample_id" not in tax_df.columns or not tax_df["sample_id"].astype(str).equals(normalized_sample_ids.astype(str)):
+                    tax_df["sample_id"] = normalized_sample_ids 
+                    tax_df.to_csv(paths["tax"], sep="\t", index=False)
         except Exception as exc:
             L.warning("Failed to add paired sample_id column to taxonomy table: %s", exc)
 

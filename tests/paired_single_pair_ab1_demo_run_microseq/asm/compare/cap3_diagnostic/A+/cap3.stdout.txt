@@ -1,0 +1,137 @@
+Number of segment pairs = 2; number of pairwise comparisons = 1
+'+' means given segment; '-' means reverse complement
+
+Overlaps            Containments  No. of Constraints Supporting Overlap
+
+******************* Contig 1 ********************
+A+1492R+
+A+27F-
+
+DETAILED DISPLAY OF CONTIGS
+******************* Contig 1 ********************
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              CGCTTCCTAAAGGTTAGCTAACCGGCTTCGGGCGCCCCCAACTCCCATGGTGTGACGGGC
+                      ____________________________________________________________
+consensus             CGCTTCCTAAAGGTTAGCTAACCGGCTTCGGGCGCCCCCAACTCCCATGGTGTGACGGGC
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              GGTGTGTACAAGACCCGGGAACGCATTCACCGCAGCATTCTGATCTGCGATTACTAGTAA
+                      ____________________________________________________________
+consensus             GGTGTGTACAAGACCCGGGAACGCATTCACCGCAGCATTCTGATCTGCGATTACTAGTAA
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              CTCCAGCTTCATGTAGGCGAGTTTCAGCCTACAATCCGAACTGAGAATGGCTTTAAGGGA
+                      ____________________________________________________________
+consensus             CTCCAGCTTCATGTAGGCGAGTTTCAGCCTACAATCCGAACTGAGAATGGCTTTAAGGGA
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              TTAGCTCCACCTCACGGCTTGGCAACCCTCTGTACCACCCATTGTAGCACGTGTGTAGCC
+                      ____________________________________________________________
+consensus             TTAGCTCCACCTCACGGCTTGGCAACCCTCTGTACCACCCATTGTAGCACGTGTGTAGCC
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              CTAAGCATAAGGGGCATGATGATTTGACGTCATCCCCACCTTCCTCCGAGTTATCCTCGG
+                      ____________________________________________________________
+consensus             CTAAGCATAAGGGGCATGATGATTTGACGTCATCCCCACCTTCCTCCGAGTTATCCTCGG
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              CAGTCCCTCTAGAGTGCCCAACTTAATGCTGGCAACTAAAGGCAAGGGTTGCGCTCGTTG
+                      ____________________________________________________________
+consensus             CAGTCCCTCTAGAGTGCCCAACTTAATGCTGGCAACTAAAGGCAAGGGTTGCGCTCGTTG
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              CGGGACTTAACCCAACATCTCACGACACGAGCTGACGACAACCATGCACCACCTGTCACC
+A+27F-                                                                          CC
+                      ____________________________________________________________
+consensus             CGGGACTTAACCCAACATCTCACGACACGAGCTGACGACAACCATGCACCACCTGTCACC
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              ACTGTCCCCGAAGGGAAATCTCCGATTAGGGAGAGGTCAATGGGATGTCAAGCTTAGGTA
+A+27F-                ACTGTCCCCGAAGGGAAATCTCCGATTAGGGAGAGGTCAGTGGGATGTCAAGCTTAGGTA
+                      ____________________________________________________________
+consensus             ACTGTCCCCGAAGGGAAATCTCCGATTAGGGAGAGGTCAATGGGATGTCAAGCTTAGGTA
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              AGGTTCTTCGCGTTGCTTCGAATTAAACCACATGCTCCGCTACTTGTGCGGGTCCCCGTC
+A+27F-                AGGTTCTTCGCGTTGCTTCGAATTAAACCACATGCTCCGCTACTTGTGCGGGTCCCCGTC
+                      ____________________________________________________________
+consensus             AGGTTCTTCGCGTTGCTTCGAATTAAACCACATGCTCCGCTACTTGTGCGGGTCCCCGTC
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              AATTCCTTTGAGTTTCACTCTTGCGAGCGTACTTCCCAGGCGGAGTACTTAATGCGTTAG
+A+27F-                AATTCCTTTGAGTTTCACTCTTGCGAGCGTACTTCCCAGGCGGAGTACTTAATGCGTTAG
+                      ____________________________________________________________
+consensus             AATTCCTTTGAGTTTCACTCTTGCGAGCGTACTTCCCAGGCGGAGTACTTAATGCGTTAG
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              CTGCGGCACCGAGGGGGGTAACCCCCGACACCTAGTACTCATCGTTTACGGCGTGGACTA
+A+27F-                CTGCGGCACCGAGGGGGGTAACCCCCGACACCTAGTACTCATCGTTTACGGCGTGGACTA
+                      ____________________________________________________________
+consensus             CTGCGGCACCGAGGGGGGTAACCCCCGACACCTAGTACTCATCGTTTACGGCGTGGACTA
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              CCAGGGTATCTAATCCTGTTTGCTCCCCACGCTTTCGTGCCTCAGCGTCAGTTACAGTCC
+A+27F-                CCAGGGTATCTAATCCTGTTTGCTCCCCACGCTTTCGTGCCTCAGCGTCAGTTACAGTCC
+                      ____________________________________________________________
+consensus             CCAGGGTATCTAATCCTGTTTGCTCCCCACGCTTTCGTGCCTCAGCGTCAGTTACAGTCC
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              AGAGAGCCGCCTTCGCTACTGGTGTTCCTCCTAATATCTACGCATTTCACCGCTACACTA
+A+27F-                AGAGAGCCGCCTTCGCTACTGGTGTTCCTCCTAATATCTACGCATTTCACCGCTACACTA
+                      ____________________________________________________________
+consensus             AGAGAGCCGCCTTCGCTACTGGTGTTCCTCCTAATATCTACGCATTTCACCGCTACACTA
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              GGAATTCCACTCTCCTCTCCTGCACTCAAGTCCTACAGTTCCAAAAGCTTACTACGGTTG
+A+27F-                GGAATTCCACTCTCCTCTCCTGCACTCAAGTCCTACAGTTCCAAAAGCTTACTACGGTTG
+                      ____________________________________________________________
+consensus             GGAATTCCACTCTCCTCTCCTGCACTCAAGTCCTACAGTTCCAAAAGCTTACTACGGTTG
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              AGCCGTAGCCTTTCACTTCTGGCTTGAAAGACCGCCTACGCACCCTTTACGCCCAGTAAT
+A+27F-                AGCCGTAGCCTTTCACTTCTGGCTTGAAAGACCGCCTACGCACCCTTTACGCCCAGTAAT
+                      ____________________________________________________________
+consensus             AGCCGTAGCCTTTCACTTCTGGCTTGAAAGACCGCCTACGCACCCTTTACGCCCAGTAAT
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              TCCGGATAACGCTAGCCCCCTACGTATTACCGCGGCTGCTGGCACGTAGTTAGCCGGGGC
+A+27F-                TCCGGATAACGCTAGCCCCCTACGTATTACCGCGGCTGCTGGCACGTAGTTAGCCGGGGC
+                      ____________________________________________________________
+consensus             TCCGGATAACGCTAGCCCCCTACGTATTACCGCGGCTGCTGGCACGTAGTTAGCCGGGGC
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+1492R+              TTCCTCCTCAAGTACCGTCAT                                       
+A+27F-                TTCCTCCTCAAGTACCGTCATTATCTTCCTTGAGGACAGAGCTTTACGACCCGAAGGCCT
+                      ____________________________________________________________
+consensus             TTCCTCCTCAAGTACCGTCATTATCTTCCTTGAGGACAGAGCTTTACGACCCGAAGGCCT
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+27F-                TCATCGCTCACGCGGCGTTGCTGCATCAGGCTTTCGCCCATTGTGCAATATTCCCCACTG
+                      ____________________________________________________________
+consensus             TCATCGCTCACGCGGCGTTGCTGCATCAGGCTTTCGCCCATTGTGCAATATTCCCCACTG
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+27F-                CTGCCTCCCGTAGGAGTTTGGACCGTGTCTCAGTTCCAATGTGGCCGATCACCCTCTCAG
+                      ____________________________________________________________
+consensus             CTGCCTCCCGTAGGAGTTTGGACCGTGTCTCAGTTCCAATGTGGCCGATCACCCTCTCAG
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+27F-                GTCGGCTACTGATCGTTGCCTTGGTAAGCCGTTACCTTACCAACTAGCTAATCAGACGCG
+                      ____________________________________________________________
+consensus             GTCGGCTACTGATCGTTGCCTTGGTAAGCCGTTACCTTACCAACTAGCTAATCAGACGCG
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+27F-                GGTCCATCCTGTACCGCCGGAGCTTTGATACAAAAGCCATGCGACTCTCATATGTTATCC
+                      ____________________________________________________________
+consensus             GGTCCATCCTGTACCGCCGGAGCTTTGATACAAAAGCCATGCGACTCTCATATGTTATCC
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+27F-                CGTATTAGCATACCTTTCGGTATGTTATCCGTGTGTACAGGGCAGGTTACCCACGCGTTA
+                      ____________________________________________________________
+consensus             CGTATTAGCATACCTTTCGGTATGTTATCCGTGTGTACAGGGCAGGTTACCCACGCGTTA
+
+                          .    :    .    :    .    :    .    :    .    :    .    :
+A+27F-                CTCACCCGTCCGCCGCTCACCCCGAAGGGTTCGCT
+                      ____________________________________________________________
+consensus             CTCACCCGTCCGCCGCTCACCCCGAAGGGTTCGCT
+
