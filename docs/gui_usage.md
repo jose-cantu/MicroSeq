@@ -111,7 +111,7 @@ Think of the paired-assembly widgets as a control panel that flips a handful of 
 | Assembly mode | **Assembly** dropdown (**Single** vs **Paired**) | Paired mode reveals primer/pairing controls and enables the **Preview pairs** flow; single mode hides paired-only controls. |
 | Assembler mode | **Assembler selection** dropdown (paired mode) | Choose legacy CAP3 behavior, a single assembler backend, or all assemblers with automatic best-contig selection for BLAST inputs. |
 | Primer set preset | **Primer set** dropdown (e.g., `16S (27F/1492R)`,`Custom`) | Prefills forward/reverse token fields and persists the choice via QSettings. Changing tokens by hand flips the preset to **Custom**. |
-| Token vs regex override | **Advanced regex** checkbox | Unchecked uses token fields (`27F, 515F` → `27F|515F`); checked exposes regex fields that bypass tokens entirely so you can enter expressions like `(?i)(27f|8f)` . |
+| Token vs regex override | **Advanced regex** checkbox | Unchecked uses token fields (`27F, 515F` -> `27F|515F`); checked exposes regex fields that bypass tokens entirely so you can enter expressions like `(?i)(27f|8f)` . |
 | Enforce same well | **Enforce well codes** checkbox | When enabled, pairing requires both directions to share the same plate position (A1-H12 by default). |
 | Auto-detected vs manual tokens | **Detect tokens** button vs typing vs presets | Detection scans filenames for `F`/`R` tokens (e.g., `10__27F.ab1`) and fills the token fields; manual edits and presets drive pairing if you do not run detection. |
 
@@ -161,7 +161,7 @@ I will go through how the tree structure looks and the run...
 ```
 reverse_orientation_only_ab1_demo_run_microseq/
 ├── raw_ab1/              # original chromatograms
-├── raw_fastq/            # AB1→FASTQ before trimming
+├── raw_fastq/            # AB1->FASTQ before trimming
 ├── passed_qc_fastq/
 ├── failed_qc_fastq/
 ├── qc/
@@ -242,7 +242,7 @@ Expected outputs are written to `tests/paired_ab1_demo_run/10292025_1080497_micr
 ```
 10292025_1080497_microseq/
 ├── raw_ab1/                 # copies of the original chromatograms
-├── raw_fastq/               # AB1→FASTQ before trimming
+├── raw_fastq/               # AB1->FASTQ before trimming
 ├── qc/
 │   ├── *_avg_qual.txt       # per-read length and avg Phred
 │   ├── trim_summary.tsv     # combined QC + telemetry metrics across reads
@@ -255,7 +255,7 @@ Expected outputs are written to `tests/paired_ab1_demo_run/10292025_1080497_micr
 │   │   ├── *_paired.fasta           # CAP3 contigs for that sample
 │   │   ├── *_paired.fasta.cap.*     # CAP3 provenance (contigs, qual, links, ace)
 │   │   └── *_paired.fasta.cap.singlets # reads that did not assemble into a contig
-│   ├── contig_map.tsv        # input→contig traceability (which FASTQ/FASTA formed each contig)
+│   ├── contig_map.tsv        # input->contig traceability (which FASTQ/FASTA formed each contig)
 │   └── paired_contigs.fasta  # all per-sample contigs concatenated
 ├── hits.tsv                  # BLAST results on assembled contigs
 ├── hits_tax.tsv              # taxonomy-joined results
@@ -271,7 +271,7 @@ Key files to highlight in the GUI doc:
 ## Troublehshooting what the different Status sign means in Assembly Summary Tab
 So in the dropdown menu in Assembler selection for `CAP3 default (legacy paired pipeline)` it will run it on 2 assemblers first and ungapped merged algorithm and if it fails to produce a good quality contig then it will fallback to cap3 based on what profiles you chose on the left side of the gui for `CAP3 Profile` (strict, relaxed, diagnostic). 
 
-If you get `ambiguous_overlap`, MicroSeq found near-tied top feasible overlap candidates and intentionally refused to force a unique merge. For canonical decision rules (including the **“Candidate generation in 3 stages”** walkthrough, feasibility gates, top-1 vs top-2 tie checks, and policy outcomes like `topk`/`best_guess`), see **Workflow Resolution Funnel → “Assemble → Validate handoff: how `ambiguous_overlap` is decided”** in [`docs/workflow_resolution.md`](workflow_resolution.md). 
+If you get `ambiguous_overlap`, MicroSeq found near-tied top feasible overlap candidates and intentionally refused to force a unique merge. For canonical decision rules (including the **“Candidate generation in 3 stages”** walkthrough, feasibility gates, top-1 vs top-2 tie checks, and policy outcomes like `topk`/`best_guess`), see **Workflow Resolution Funnel -> “Assemble -> Validate handoff: how `ambiguous_overlap` is decided”** in [`docs/workflow_resolution.md`](workflow_resolution.md). 
 
 ## Explaning what each of the columns means in the Tabs Assembly Summary, Blast Inputs, Diagnostics, Compare Assemblers 
 

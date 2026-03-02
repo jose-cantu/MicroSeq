@@ -1,0 +1,47 @@
+sample_id	review_action	review_reason	advisory_reason	warning_flags	structural_hypothesis_n	hypotheses_with_hits_n	missing_hits_n	top_labels	resolution_state	resolved_hypothesis	resolution_reason	trace_status	trace_flags
+10292025_1080497_1	none		ambiguous_overlap	ambiguous_overlap	3	3	0	cutibacterium avidum	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_10	none				3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_11	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus capitis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_12	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus equorum	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_13	none		multi_payload	multi_payload	1	1	0	staphylococcus capitis	unambiguous	struct1	single_hypothesis	NA	
+10292025_1080497_14	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus equorum	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_15	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus capitis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_16	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus equorum	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_17	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_18	none		multi_payload	multi_payload	1	1	0	staphylococcus capitis	unambiguous	struct1	single_hypothesis	NA	
+10292025_1080497_2	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus hominis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_23	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus capitis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_24	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_25	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_26	none				3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_27	none				3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_3	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus lugdunensis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_4	none				3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_5	queue	rank_missing	ambiguous_overlap	ambiguous_overlap;ambiguous_payload	3	3	0		needs_review	hyp1	rank_missing	NA	
+10292025_1080497_6	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_7	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus capitis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_8	none				3	3	0	staphylococcus capitis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_9	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus equorum	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_1	none		ambiguous_overlap	ambiguous_overlap	3	3	0	cutibacterium avidum	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_10	none				3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_11	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus capitis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_12	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus equorum	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_13	none		multi_payload	multi_payload	1	1	0	staphylococcus capitis	unambiguous	struct1	single_hypothesis	NA	
+10292025_1080497_microseq_raw_ab1_14	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus equorum	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_15	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus capitis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_16	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus equorum	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_17	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_18	none		multi_payload	multi_payload	1	1	0	staphylococcus capitis	unambiguous	struct1	single_hypothesis	NA	
+10292025_1080497_microseq_raw_ab1_2	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus hominis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_23	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus capitis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_24	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_25	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_26	none				3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_27	none				3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_3	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus lugdunensis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_4	none				3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_5	queue	rank_missing	ambiguous_overlap	ambiguous_overlap;ambiguous_payload	3	3	0		needs_review	hyp1	rank_missing	NA	
+10292025_1080497_microseq_raw_ab1_6	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus epidermidis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_7	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus capitis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_8	none				3	3	0	staphylococcus capitis	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	
+10292025_1080497_microseq_raw_ab1_9	none		ambiguous_overlap	ambiguous_overlap	3	3	0	staphylococcus equorum	resolved_by_evidence	hyp1	hypotheses_agree_species	NA	

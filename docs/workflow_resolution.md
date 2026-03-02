@@ -27,9 +27,9 @@ If there is only one structural path, the sample is structurally unambiguous.
 
 ### Candidate generation in 3 stages
 
-#### Stage 1 — Generate candidate overlaps (the “sliding placements” step)
+#### Stage 1  Generate candidate overlaps (the “sliding placements” step)
 
-Stage 1 — Generate candidates: MicroSeq tries multiple orientations (`R` as-is vs `revcomp(R)`) and multiple relative placements (sliding the reverse read along the forward read). Each placement defines an overlap region. For that overlap, MicroSeq computes overlap length, mismatches, identity, and (when QUAL is available) an overlap-quality score. Candidates that do not connect the reads at their ends are rejected by the end-anchoring rule (`anchor_tolerance_bases` allows small end drift due to trimming).
+Stage 1  Generate candidates: MicroSeq tries multiple orientations (`R` as-is vs `revcomp(R)`) and multiple relative placements (sliding the reverse read along the forward read). Each placement defines an overlap region. For that overlap, MicroSeq computes overlap length, mismatches, identity, and (when QUAL is available) an overlap-quality score. Candidates that do not connect the reads at their ends are rejected by the end-anchoring rule (`anchor_tolerance_bases` allows small end drift due to trimming).
 
 Definition: a **candidate** is one proposed end-anchored overlap between `F` and (`R` or `revcomp(R)`), characterized by relative placement (and, for gapped backends, an alignment path), from which `overlap_len`, `mismatches`, `identity`, and `overlap_quality` are computed.
 
@@ -44,7 +44,7 @@ Definition: a **candidate** is one proposed end-anchored overlap between `F` and
 > to read ends after trimming), not the overlap length itself. Overlaps can still be much longer
 > (for example 100+ bp).
 
-#### Stage 2 — Feasibility filtering (hard gates)
+#### Stage 2  Feasibility filtering (hard gates)
 
 From all generated candidates, MicroSeq keeps only feasible candidates:
 
@@ -58,7 +58,7 @@ Under current repo defaults (`min_overlap=100`, `min_identity=0.8`, `min_quality
 `quality_mode=warning`), quality is advisory by default, while overlap length/identity and
 end-anchoring remain hard feasibility checks.
 
-#### Stage 3 — Final decision (unique best vs `ambiguous_overlap`)
+#### Stage 3  Final decision (unique best vs `ambiguous_overlap`)
 
 Feasible candidates are ranked deterministically (longer overlap first, then fewer mismatches, then
 overlap quality, then identity), and ambiguity is evaluated only on the top-2 candidates.

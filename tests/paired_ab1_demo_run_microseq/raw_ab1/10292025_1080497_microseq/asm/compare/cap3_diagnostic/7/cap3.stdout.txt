@@ -1,0 +1,7 @@
+Number of segment pairs = 2; number of pairwise comparisons = 1
+'+' means given segment; '-' means reverse complement
+
+Overlaps            Containments  No. of Constraints Supporting Overlap
+
+
+DETAILED DISPLAY OF CONTIGS

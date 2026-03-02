@@ -1,0 +1,24 @@
+sample_id	status	review_reason	hypothesis_count	top_labels
+1	resolved_by_blast		3	d__Bacteria; p__Actinomycetota; c__Actinomycetes; o__Propionibacteriales; f__Propionibacteriaceae; g__Cutibacterium; s__Cutibacterium avidum
+10	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis
+11	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus capitis
+12	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus equorum
+13	resolved_by_blast		2	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus capitis
+14	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus equorum
+15	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus capitis
+16	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus equorum
+17	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis
+18	needs_manual_review	ambiguous_taxonomy	2	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__|d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus capitis
+2	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus hominis
+23	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus capitis
+24	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis
+25	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis
+26	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis
+27	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis
+3	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus lugdunensis
+4	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis
+5	resolved_by_blast		3	d__Bacteria; p__Actinomycetota; c__Actinomycetes; o__Mycobacteriales; f__Mycobacteriaceae; g__Corynebacterium; s__
+6	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus epidermidis
+7	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus capitis
+8	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus capitis
+9	resolved_by_blast		3	d__Bacteria; p__Bacillota_I; c__Bacilli_A; o__Staphylococcales; f__Staphylococcaceae; g__Staphylococcus; s__Staphylococcus equorum

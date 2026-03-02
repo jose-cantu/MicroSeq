@@ -6,7 +6,7 @@ permalink: /paired-assembly/
 
 
 > See also: [Workflow Resolution Funnel](workflow_resolution.md) for how ambiguous hypotheses are collapsed into sample-level resolution states.
-> Ambiguous overlap decision rules (feasibility gates, tie conditions, and policy behaviors such as `topk`/`best_guess`) are documented in the Workflow Resolution Funnel section “Assemble → Validate handoff: how `ambiguous_overlap` is decided.”
+> Ambiguous overlap decision rules (feasibility gates, tie conditions, and policy behaviors such as `topk`/`best_guess`) are documented in the Workflow Resolution Funnel section “Assemble -> Validate handoff: how `ambiguous_overlap` is decided.”
 
 MicroSeq now ships a forward/reverse pairing workflow that works in both the CLI and GUI.
 It can auto-detect primer tokens in filenames, enforce plate well consistency, and run CAP3 per sample with duplicate-handling policies.
@@ -88,7 +88,7 @@ Paired mode now writes two BLAST-oriented artifacts:
 * `asm/blast_inputs.fasta` – the sequences submitted to BLAST, with rewritten IDs.
 * `asm/blast_inputs.tsv` – a per-sample manifest showing what payload was selected and why.
 
-### Contig → singlet fallback order
+### Contig -> singlet fallback order
 
 For each paired sample, MicroSeq chooses the first available payload in the order:
 
@@ -122,10 +122,10 @@ payload_ids: sampleA|contig|cap3_c1=Contig1;sampleA|contig|cap3_c2=Contig2
 
 ### `blast_payload` and `reason` taxonomy
 
-* `contig` → `contigs_present` (contigs found, used for BLAST)
-* `singlet` → `singlets_only` (no contigs, but singlets found)
-* `no_payload` → `cap3_no_output` (no contigs or singlets produced)
-* `pair_missing` → `pair_missing` (no valid forward/reverse pair)
+* `contig` -> `contigs_present` (contigs found, used for BLAST)
+* `singlet` -> `singlets_only` (no contigs, but singlets found)
+* `no_payload` -> `cap3_no_output` (no contigs or singlets produced)
+* `pair_missing` -> `pair_missing` (no valid forward/reverse pair)
 
 ### How `pair_missing` is determined
 

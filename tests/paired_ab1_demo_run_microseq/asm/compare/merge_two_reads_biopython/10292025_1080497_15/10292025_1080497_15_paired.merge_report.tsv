@@ -1,0 +1,2 @@
+sample_id	overlap_engine	orientation	overlap_len	identity	mismatches	contig_len	merge_status	qualities	merge_warning	high_conflict_mismatches
+10292025_1080497_15	biopython	revcomp	529	0.9722	4	1407	ambiguous_topk	present	ambiguous_overlap;policy=topk;alternatives=3	0

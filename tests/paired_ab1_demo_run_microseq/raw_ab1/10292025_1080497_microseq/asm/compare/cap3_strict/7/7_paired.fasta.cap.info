@@ -1,0 +1,10 @@
+No file of constraints (.con) is found.
+Number of overlaps saved: 1
+ComputeOverlap done
+IdentifyChimeras done
+Overlap 7__1492R+ and 7__27F-  P  qualscore    26  score   7673  identity 0.92
+Number of overlaps removed: 1
+RemovePoorOverlaps done
+ASSEM done
+ComputDistForContigs done
+PresentLayout done
