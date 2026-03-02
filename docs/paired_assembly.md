@@ -6,6 +6,7 @@ permalink: /paired-assembly/
 
 
 > See also: [Workflow Resolution Funnel](workflow_resolution.md) for how ambiguous hypotheses are collapsed into sample-level resolution states.
+> Ambiguous overlap decision rules (feasibility gates, tie conditions, and policy behaviors such as `topk`/`best_guess`) are documented in the Workflow Resolution Funnel section “Assemble → Validate handoff: how `ambiguous_overlap` is decided.”
 
 MicroSeq now ships a forward/reverse pairing workflow that works in both the CLI and GUI.
 It can auto-detect primer tokens in filenames, enforce plate well consistency, and run CAP3 per sample with duplicate-handling policies.

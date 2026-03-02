@@ -271,7 +271,7 @@ Key files to highlight in the GUI doc:
 ## Troublehshooting what the different Status sign means in Assembly Summary Tab
 So in the dropdown menu in Assembler selection for `CAP3 default (legacy paired pipeline)` it will run it on 2 assemblers first and ungapped merged algorithm and if it fails to produce a good quality contig then it will fallback to cap3 based on what profiles you chose on the left side of the gui for `CAP3 Profile` (strict, relaxed, diagnostic). 
 
-If you get the status `ambiguous_overlap` this means that the overlap selector found multiple top feasable candidates that are effectively tied, so it refuses to pick a unique merge. It is a merge/overlap ambiguity signal here essentially. Why do I have it labeled as "ambiguous"? Because in the tie logic I have set it its explicit in checking if a) same overlap length, same mismatch count, and very close in quality/identity with configured epsilons. When all this happens, then the selector will return the status "ambiguous_overlap" instead of "assembled" which represents the single best overlap. 
+If you get `ambiguous_overlap`, MicroSeq found near-tied top feasible overlap candidates and intentionally refused to force a unique merge. For canonical decision rules (including the **“Candidate generation in 3 stages”** walkthrough, feasibility gates, top-1 vs top-2 tie checks, and policy outcomes like `topk`/`best_guess`), see **Workflow Resolution Funnel → “Assemble → Validate handoff: how `ambiguous_overlap` is decided”** in [`docs/workflow_resolution.md`](workflow_resolution.md). 
 
 ## Explaning what each of the columns means in the Tabs Assembly Summary, Blast Inputs, Diagnostics, Compare Assemblers 
 

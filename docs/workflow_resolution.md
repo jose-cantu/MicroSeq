@@ -22,6 +22,221 @@ Mixture escalation is config-driven:
 MicroSeq generates multiple hypotheses **only when there is a structural tie** (for example, ambiguous overlap outcomes).
 If there is only one structural path, the sample is structurally unambiguous.
 
+
+## Assemble → Validate handoff: how `ambiguous_overlap` is decided
+
+### Candidate generation in 3 stages
+
+#### Stage 1 — Generate candidate overlaps (the “sliding placements” step)
+
+Stage 1 — Generate candidates: MicroSeq tries multiple orientations (`R` as-is vs `revcomp(R)`) and multiple relative placements (sliding the reverse read along the forward read). Each placement defines an overlap region. For that overlap, MicroSeq computes overlap length, mismatches, identity, and (when QUAL is available) an overlap-quality score. Candidates that do not connect the reads at their ends are rejected by the end-anchoring rule (`anchor_tolerance_bases` allows small end drift due to trimming).
+
+Definition: a **candidate** is one proposed end-anchored overlap between `F` and (`R` or `revcomp(R)`), characterized by relative placement (and, for gapped backends, an alignment path), from which `overlap_len`, `mismatches`, `identity`, and `overlap_quality` are computed.
+
+- It evaluates both orientations for the reverse read (`forward` and `revcomp`).
+- Ungapped intuition: slide one read across the other (`... left, center, right ...`), where each
+  placement implies a different overlap slice.
+- Gapped backends may represent differences with an indel path, then anchoring is checked using
+  end-anchored placement rules.
+
+> Important: this is not “use only a 30 bp overlap.”
+> `anchor_tolerance_bases` is a forgiveness margin for **end placement** (how close overlap must be
+> to read ends after trimming), not the overlap length itself. Overlaps can still be much longer
+> (for example 100+ bp).
+
+#### Stage 2 — Feasibility filtering (hard gates)
+
+From all generated candidates, MicroSeq keeps only feasible candidates:
+
+- `overlap_len >= min_overlap`
+- `identity >= min_identity`
+- quality gate only when `quality_mode=blocking`:
+  - `overlap_quality` must exist and be `>= min_quality`
+- end-anchored requirement (`end_anchored=True`)
+
+Under current repo defaults (`min_overlap=100`, `min_identity=0.8`, `min_quality=20.0`,
+`quality_mode=warning`), quality is advisory by default, while overlap length/identity and
+end-anchoring remain hard feasibility checks.
+
+#### Stage 3 — Final decision (unique best vs `ambiguous_overlap`)
+
+Feasible candidates are ranked deterministically (longer overlap first, then fewer mismatches, then
+overlap quality, then identity), and ambiguity is evaluated only on the top-2 candidates.
+
+Tie rule for `ambiguous_overlap`:
+
+1. top-1 and top-2 have the same `overlap_len`
+2. top-1 and top-2 have the same `mismatches`
+3. and either:
+   - both have quality and `|q1 - q2| <= ambiguity_quality_epsilon`, or
+   - quality is unavailable and `|id1 - id2| <= ambiguity_identity_delta`
+
+If all hold, selector returns `status=ambiguous_overlap`; otherwise top-1 is the unique winner.
+
+### Working examples: ungapped sliding vs gapped alignment backends
+
+Legend: `|` = match, `x` = mismatch, `-` = gap (indel introduced by aligner).
+These diagrams illustrate candidate *types*; exact mismatch/score values can vary by backend and scoring settings.
+
+#### A) Ungapped, end-anchored sliding candidates (placement-driven)
+
+For ungapped candidates, the generator effectively slides one sequence relative to the other and
+scores each valid end-anchored placement. For a given orientation and placement, you get one ungapped
+candidate.
+
+Toy example (repetitive tail so nearby placements can look similarly good):
+
+- `F   = ATATATATATGGGG`
+- `Rrc = ATATATATCCCCCC`
+
+Candidate A (placement 1: `Rrc` starts aligned at the beginning of `F`):
+
+- `F_overlap = ATATATATAT`
+- `R_overlap = ATATATATCC`
+
+```text
+F:    ATATATATATGGGG
+Rrc:  ATATATATCCCCCC
+      ||||||||xx
+```
+
+Candidate B (placement 2: `Rrc` starts one base later in `F`):
+
+- `F_overlap = TATATATATG`
+- `R_overlap = ATATATATCC`
+
+```text
+F_overlap:  TATATATATG
+R_overlap:  ATATATATCC
+            x|||||||xx
+```
+
+In repetitive sequence, A and B can be near-tied in identity/mismatches/quality, which is exactly
+how ambiguous overlap candidates arise in Stage 1 before tie-resolution in Stage 3.
+
+#### B) Gapped backend candidates (Biopython/edlib): indels are allowed
+
+Gapped backends can explain insertion/deletion differences with gaps, instead of forcing a mismatch
+cascade.
+
+Example:
+
+- `F   = ATGCCCTTAG`
+- `Rrc = ATGCCTTAG` (one base shorter around `C` run)
+
+Ungapped intuition (no indels allowed):
+
+In ungapped mode, length differences manifest as forced mismatches/edge penalties (the trailing `-`
+below is only to keep the visualization aligned):
+
+```text
+F:    ATGCCCTTAG
+Rrc:  ATGCCTTAG-
+      ||||x||||-
+```
+
+Gapped alignment can model this as one indel event:
+
+```text
+F:    ATGCCCTTAG
+Rrc:  ATG-CCTTAG
+      ||| ||||||
+```
+
+This can produce a stronger candidate than any ungapped placement for the same read pair.
+
+#### C) Repeats/homopolymers can create near-equivalent gapped interpretations
+
+In low-complexity sequence, an indel can often be represented in nearby positions with similar
+scores. Conceptually:
+
+```text
+Path 1: A AAAAGGGTT
+        - AAAAGGGTT
+
+Path 2: AAAA AGGGTT
+        AAA- AGGGTT
+```
+
+Both describe the same underlying deletion in a homopolymer context.
+
+Implementation note: in practice MicroSeq typically emits one best alignment per backend per orientation
+(and sometimes a small bounded set), rather than enumerating a combinatorial set of all optimal
+paths. So many practical near-ties come from relative-placement/orientation near-ties, while gapped
+backends still explain why mismatch/indel trade-offs can differ from ungapped sliding.
+
+#### D) Why end-anchoring still matters
+
+End-anchoring constrains relative placement (overlap must reach the expected stitching ends within tolerance so reads can connect into one contiguous sequence). Within that
+constraint:
+
+- ungapped mode explores placement shifts,
+- gapped mode can change mismatch/indel trade-offs and effective overlap metrics.
+
+So candidate sets can differ by backend even for the same sample and orientation.
+
+
+Plain-language end-anchoring rule:
+
+- **Accept** when overlap reaches the expected stitching ends (within `anchor_tolerance_bases`) so the reads connect into one contiguous sequence.
+- **Reject** when a high-identity block is internal-only and does not connect those stitching ends.
+
+```text
+ACCEPT (end-anchored):
+F:      AAAAACCCCCGGGGG
+                 |||||||
+Rrc:          CCCCCGGTTTTT
+             overlap reaches the expected stitching end (or is within tolerance)
+
+REJECT (internal-only match):
+F:      AAAAACCCCCGGGGGTTTTT
+                 |||||||
+Rrc:      XXYYCCCCCGGZZWW
+         good local match, but does not connect stitching ends
+```
+
+### Worked example (ambiguous)
+
+Use the same feasible-candidate context as above (passes Stage 2 gates):
+
+- Candidate A: `overlap_len=120`, `mismatches=2`, `overlap_quality=34.20`, `identity=0.9833`
+- Candidate B: `overlap_len=120`, `mismatches=2`, `overlap_quality=34.16`, `identity=0.9833`
+
+Configured ambiguity thresholds:
+
+- `ambiguity_quality_epsilon = 0.10`
+- `ambiguity_identity_delta = 0.0025`
+
+Checks:
+
+- same length? yes (`120 == 120`)
+- same mismatches? yes (`2 == 2`)
+- quality near-tie? yes (`|34.20 - 34.16| = 0.04 <= 0.10`)
+
+Result: `ambiguous_overlap`.
+
+### Counterexample (not ambiguous)
+
+- A: `overlap_len=120`, `mismatches=2`
+- B: `overlap_len=119`, `mismatches=2`
+
+Different overlap length breaks the ambiguity rule immediately, so A is selected as the unique best
+candidate.
+
+### What ambiguous policies do (`merge_two_reads`)
+
+After `ambiguous_overlap`, policy controls output behavior:
+
+- `strict`: keep ambiguous outcome; no forced merge payload.
+- `singlets`: emit singlets (`ambiguous_overlap_singlets`).
+- `best_guess`: force top-1 candidate and emit one consensus (`merged_best_guess`).
+- `topk`: emit `alt1..altK` consensus sequences (`ambiguous_topk`), where `K=ambiguous_top_k`
+  (bounded by available feasible candidates).
+
+When `topk` is used, each emitted alternative is tracked as a structural branch through
+`hypothesis_map` (`qseqid -> structural_hypothesis_id`). Those branches are then independently
+validated by BLAST/taxonomy and collapsed into sample-level resolution state.
+
 ## 3) Validate (BLAST + taxonomy)
 
 MicroSeq runs BLAST/taxonomy against payloads and ranks best hit per hypothesis deterministically:
