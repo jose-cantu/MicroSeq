@@ -32,15 +32,33 @@ _DEFAULT_CATALOG: dict[str, object] = {
         "16S V4 (515F/806R)": {"forward": ["515F"], "reverse": ["806R"]},
         "Custom": {"forward": [], "reverse": []},
     },
+    # Example synthetic flank templates (non-authoritative defaults).
+    # Replace with validated production sequences in config/primer_catalog.yaml.
     "trim_presets": {
-        "16S_27F_1492R": {
-            "forward_primers": ["AGAGTTTGATCMTGGCTCAG"],
-            "reverse_primers": ["TACGGYTACCTTGTTACGACTT"],
+        "VECTOR_PREFIX_EXAMPLE": {
+            "forward_primers": ["ACCGGTACCGGTAACTG"],
+            "reverse_primers": ["CAGTTACCGGTACCGGT"],
+            "max_mismatch": 1,
+            "max_search": 120,
+            "max_primer_offset": 20,
+            "iupac_mode": False,
+        },
+        "ADAPTER_OVERHANG_EXAMPLE": {
+            "forward_primers": ["TCGTCGGCAGCGTCAGATGTGTATAAGAGACAG"],
+            "reverse_primers": ["GTCTCGTGGGCTCGGAGATGTGTATAAGAGACAG"],
             "max_mismatch": 2,
+            "max_search": 120,
+            "max_primer_offset": 25,
+            "iupac_mode": False,
+        },
+        "SHORT_AMPLICON_OPPOSITE_END_EXAMPLE": {
+            "forward_primers": ["GATCGGAAGAGCACACGTCT"],
+            "reverse_primers": ["AGATCGGAAGAGCGTCGTGT"],
+            "max_mismatch": 1,
             "max_search": 80,
-            "max_primer_offset": 10,
-            "iupac_mode": True,
-        }
+            "max_primer_offset": 15,
+            "iupac_mode": False,
+        },
     },
 }
 

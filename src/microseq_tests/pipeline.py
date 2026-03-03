@@ -212,14 +212,26 @@ def _normalize_primer_trim_cfg(cfg: dict) -> dict[str, object]:
         )
 
     preset_configured = str(primer_cfg.get("preset", "")).strip()
+
+    custom_fwd = list(primer_cfg.get("forward_primers", []) or [])
+    custom_rev = list(primer_cfg.get("reverse_primers", []) or [])
+
+    if preset_configured == "16S_27F_1492R":
+        has_any_custom = bool(custom_fwd or custom_rev)
+        if not has_any_custom:
+            mode = "off"
+        L.warning(
+            "primer_trim.preset='16S_27F_1492R' was removed. "
+            "Migrating to preset='' and %s. Configure custom synthetic flank sequences for Detect/Clip.",
+            f"mode='{mode}'",
+        )
+        preset_configured = ""
+
     preset_cfg = _PRIMER_PRESETS.get(preset_configured) if preset_configured else None
     if preset_configured and preset_cfg is None:
         raise ValueError(
             f"Unknown primer_trim.preset '{preset_configured}'. Known presets: {', '.join(sorted(_PRIMER_PRESETS))}."
         )
-
-    custom_fwd = list(primer_cfg.get("forward_primers", []) or [])
-    custom_rev = list(primer_cfg.get("reverse_primers", []) or [])
     has_custom_fwd = bool(custom_fwd)
     has_custom_rev = bool(custom_rev)
 

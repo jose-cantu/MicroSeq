@@ -85,11 +85,12 @@ Examples:
 * Use **Detect** to monitor potential primer-like hits without changing sequences; use **Clip** only when a known synthetic flanking sequence is expected to appear among the base-called bases (for example, vector backbone, PCR 5' overhangs/adapters/barcodes, or the opposite primer site in short amplicons), or when troubleshooting confirms clipping is beneficial.
 * You can now paste **custom forward/reverse primer sequences** directly in the GUI (one per line). This is independent from pairing token presets and overrides config-based primer lists for the run.
 
-* **Primer preview** now uses the same GUI primer stage/preset/custom-sequence settings as pipeline execution, but forces detect-only mode so you can validate hits before clipping.
+* **Primer preview** now uses the same GUI primer stage/**Known synthetic flank preset**/custom-sequence settings as pipeline execution, but forces detect-only mode so you can validate hits before clipping.
 * **Assembler selection** (paired mode) supports: **CAP3 default (legacy paired pipeline)**, **All assemblers (compare + pick best contig)**, or any single registered assembler from the dropdown.
 * Compare assemblers produces `asm/compare_assemblers.tsv`, now shown in the GUI **Compare Assemblers** output tab for side-by-side engine review. When running full pipeline with **All assemblers**, MicroSeq reuses this comparison and ranks candidates by status (**assembled** > **merged** > others), then length, then deterministic tiebreak for downstream BLAST payloads.
 * In compare-driven **Selected/All assemblers** full-pipeline mode, MicroSeq now writes `qc/pairing_report.tsv`; when a compared backend is CAP3, the **Use per-base quality scores** toggle is also applied to CAP3 input generation.
 * Primer policy in paired mode is explicit in reports: mode (`off|detect|clip`), stage (`pre_quality|post_quality`), and source (`off|preset|custom|mixed`).
+* In trim controls, **Known synthetic flank preset** applies only to Detect/Clip sequence scanning; pairing-token presets such as **27F/1492R** remain separate and only affect forward/reverse pairing.
 * **Duplicate policy** lets you decide whether duplicate orientations error, keep first/last, merge, or keep separate (runs CAP3 per duplicate). The last selection is persisted between sessions.
 * **Enforce well codes** requires A1-H12 plate tokens in filenames; files with missing or mismatched wells are skipped but reported.
 
@@ -236,6 +237,14 @@ Legacy config used `primer_trim.enabled: true|false`. MicroSeq now normalises th
 * `enabled: true` -> `mode: clip`
 
 Supported values are `mode: off|detect|clip` and `stage: pre_quality|post_quality`.
+
+If an older config references `primer_trim.preset: 16S_27F_1492R`, MicroSeq now migrates safely at runtime: the removed preset is cleared, and users should provide custom synthetic flank sequences (or choose one of the example synthetic-flank presets) for Detect/Clip.
+
+### Primer trim usage examples
+
+* **Example A (standard 16S amplicon):** set primer trim mode to **Off**. Pairing tokens like `27F/1492R` still work for paired assembly matching.
+* **Example B (known synthetic construct):** set mode to **Detect** with either custom synthetic flank sequences or a **Known synthetic flank preset**.
+* **Example C (validated synthetic flank clipping):** set mode to **Clip** and provide validated custom/synthetic flank sequences before production use.
 
 ### Why this policy exists
 

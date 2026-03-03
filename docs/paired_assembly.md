@@ -19,8 +19,12 @@ It can auto-detect primer tokens in filenames, enforce plate well consistency, a
 * **Duplicate policies.** Choose whether duplicate forward/reverse files error, keep-first, keep-last, merge, or **keep-separate** (runs CAP3 per duplicate and preserves separate outputs).
 * **Generalised inputs.** Mixed FASTA, FASTQ, or AB1 inputs are normalised to per-read FASTA before pairing so you can point at a folder or a merged FASTA file.
 * **Contig traceability.**  Blast inputs are rewritten with sample aware IDs and tracked in `asm/blast_inputs.tsv` so CAP3 contigs/singlets can be traced back to the original IDs. 
-**GUI support.** The GUI now stages multi-file selections, exposes single vs paired assembly, primer presets, advanced regex toggles, duplicate policy selector, well enforcement, and a pairing preview dialog.
+**GUI support.** The GUI now stages multi-file selections, exposes single vs paired assembly, known synthetic flank presets (trim context), advanced regex toggles, duplicate policy selector, well enforcement, and a pairing preview dialog. Pairing-token presets such as 27F/1492R remain available for forward/reverse matching and are separate from trim presets.
 * **BLAST input manifest.** Paired assemblies now emit `asm/blast_inputs.fasta` and `asm/blast_inputs.tsv` so you can trace BLAST inputs back to CAP3 contigs/singlets and see which samples were missing mates.
+
+## Migration note
+
+If you still have historical settings using `primer_trim.preset: 16S_27F_1492R`, update to custom synthetic flank sequences (Detect/Clip) or run trim mode Off for standard 16S pipelines. 27F/1492R pairing tokens remain unchanged for paired matching.
 
 ## CLI tutorial: guaranteed forward/reverse pairing
 

@@ -21,10 +21,11 @@ from pathlib import Path
 from typing import Optional
 import collections
 
-from microseq_tests.primer_catalog import pairing_label_sets, build_primer_cfg_override
+from microseq_tests.primer_catalog import pairing_label_sets, build_primer_cfg_override, trim_presets
 from microseq_tests.assembly.registry import list_assemblers
 
 PRIMER_SETS: dict[str, tuple[list[str], list[str]]] = pairing_label_sets()
+TRIM_PRESETS: list[str] = sorted(trim_presets())
 
 
 def _normalize_legacy_compare_diag_detail(detail: str, selected_engine: str) -> str:
@@ -707,7 +708,8 @@ class MainWindow(QMainWindow):
 
         self.primer_trim_preset_combo = QComboBox()
         self.primer_trim_preset_combo.addItem("Custom from config", userData="")
-        self.primer_trim_preset_combo.addItem("16S_27F_1492R", userData="16S_27F_1492R")
+        for preset_name in TRIM_PRESETS:
+            self.primer_trim_preset_combo.addItem(preset_name, userData=preset_name)
         pst = self.settings.value("primer_trim_preset", "")
         self.primer_trim_preset_combo.setCurrentIndex(max(0, self.primer_trim_preset_combo.findData(pst)))
         self.primer_trim_preset_combo.currentIndexChanged.connect(
@@ -715,7 +717,7 @@ class MainWindow(QMainWindow):
         )
 
         self.primer_fwd_edit = QPlainTextEdit()
-        self.primer_fwd_edit.setPlaceholderText("Forward primer sequences (one per line)")
+        self.primer_fwd_edit.setPlaceholderText("Forward synthetic flank sequences (one per line)")
         self.primer_fwd_edit.setFixedHeight(54)
         self.primer_fwd_edit.setPlainText(self.settings.value("primer_trim_fwd", ""))
         self.primer_fwd_edit.textChanged.connect(
@@ -723,15 +725,15 @@ class MainWindow(QMainWindow):
         )
 
         self.primer_rev_edit = QPlainTextEdit()
-        self.primer_rev_edit.setPlaceholderText("Reverse primer sequences (one per line)")
+        self.primer_rev_edit.setPlaceholderText("Reverse synthetic flank sequences (one per line)")
         self.primer_rev_edit.setFixedHeight(54)
         self.primer_rev_edit.setPlainText(self.settings.value("primer_trim_rev", ""))
         self.primer_rev_edit.textChanged.connect(
             lambda: self.settings.setValue("primer_trim_rev", self.primer_rev_edit.toPlainText())
         )
 
-        self.primer_save_btn = QPushButton("Save custom preset")
-        self.primer_save_btn.setToolTip("Use current forward/reverse custom sequences for this session.")
+        self.primer_save_btn = QPushButton("Use custom flanks for this run")
+        self.primer_save_btn.setToolTip("Use current forward/reverse synthetic flank sequences for this session.")
         self.primer_save_btn.clicked.connect(lambda: self.primer_trim_preset_combo.setCurrentIndex(0))
 
         self.collapse_reps_chk = QCheckBox("Collapse replicates")
@@ -1287,7 +1289,7 @@ class MainWindow(QMainWindow):
         cap3_opts.addWidget(self.primer_trim_mode_combo)
         cap3_opts.addWidget(QLabel("Primer stage"))
         cap3_opts.addWidget(self.primer_trim_stage_combo)
-        cap3_opts.addWidget(QLabel("Primer preset"))
+        cap3_opts.addWidget(QLabel("Known synthetic flank preset"))
         cap3_opts.addWidget(self.primer_trim_preset_combo)
         cap3_opts.addWidget(self.primer_save_btn)
         cap3_opts.addStretch()

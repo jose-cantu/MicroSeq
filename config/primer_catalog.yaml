@@ -12,11 +12,27 @@ pairing_sets:
     forward: []
     reverse: []
 
+# Example synthetic flank templates for Detect/Clip configuration.
+# Non-authoritative values: replace with validated production sequences for lab workflows.
 trim_presets:
-  "16S_27F_1492R":
-    forward_primers: ["AGAGTTTGATCMTGGCTCAG"]
-    reverse_primers: ["TACGGYTACCTTGTTACGACTT"]
+  "VECTOR_PREFIX_EXAMPLE":
+    forward_primers: ["ACCGGTACCGGTAACTG"]
+    reverse_primers: ["CAGTTACCGGTACCGGT"]
+    max_mismatch: 1
+    max_search: 120
+    max_primer_offset: 20
+    iupac_mode: false
+  "ADAPTER_OVERHANG_EXAMPLE":
+    forward_primers: ["TCGTCGGCAGCGTCAGATGTGTATAAGAGACAG"]
+    reverse_primers: ["GTCTCGTGGGCTCGGAGATGTGTATAAGAGACAG"]
     max_mismatch: 2
+    max_search: 120
+    max_primer_offset: 25
+    iupac_mode: false
+  "SHORT_AMPLICON_OPPOSITE_END_EXAMPLE":
+    forward_primers: ["GATCGGAAGAGCACACGTCT"]
+    reverse_primers: ["AGATCGGAAGAGCGTCGTGT"]
+    max_mismatch: 1
     max_search: 80
-    max_primer_offset: 10
-    iupac_mode: true
+    max_primer_offset: 15
+    iupac_mode: false
