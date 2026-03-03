@@ -81,7 +81,10 @@ Examples:
 * Primer token detection is available via the primer-set dropdown. Toggle **Advanced regex** when you want to enter explicit forward/reverse regex patterns instead of presets.
 * Primer **pairing labels** and primer **sequence trimming** are separate controls. Pairing labels (27F/1492R tokens) only determine forward/reverse matching; they do not edit read bases.
 * Primer trimming now supports three modes: **Off**, **Detect** (report hits, no clipping), and **Clip** (trim matched primer sequence). Stage can be set to **Pre-quality** or **Post-quality**.
+* Recommended default for standard 16S colony-PCR + Sanger workflows (PCR with 27F/1492R and sequencing with the same primers): keep primer trim mode **Off** and rely on **quality trimming** as the primary cleanup step.
+* Use **Detect** to monitor potential primer-like hits without changing sequences; use **Clip** only when a known synthetic flanking sequence is expected to appear among the base-called bases (for example, vector backbone, PCR 5' overhangs/adapters/barcodes, or the opposite primer site in short amplicons), or when troubleshooting confirms clipping is beneficial.
 * You can now paste **custom forward/reverse primer sequences** directly in the GUI (one per line). This is independent from pairing token presets and overrides config-based primer lists for the run.
+
 * **Primer preview** now uses the same GUI primer stage/preset/custom-sequence settings as pipeline execution, but forces detect-only mode so you can validate hits before clipping.
 * **Assembler selection** (paired mode) supports: **CAP3 default (legacy paired pipeline)**, **All assemblers (compare + pick best contig)**, or any single registered assembler from the dropdown.
 * Compare assemblers produces `asm/compare_assemblers.tsv`, now shown in the GUI **Compare Assemblers** output tab for side-by-side engine review. When running full pipeline with **All assemblers**, MicroSeq reuses this comparison and ranks candidates by status (**assembled** > **merged** > others), then length, then deterministic tiebreak for downstream BLAST payloads.
@@ -89,6 +92,25 @@ Examples:
 * Primer policy in paired mode is explicit in reports: mode (`off|detect|clip`), stage (`pre_quality|post_quality`), and source (`off|preset|custom|mixed`).
 * **Duplicate policy** lets you decide whether duplicate orientations error, keep first/last, merge, or keep separate (runs CAP3 per duplicate). The last selection is persisted between sessions.
 * **Enforce well codes** requires A1-H12 plate tokens in filenames; files with missing or mismatched wells are skipped but reported.
+
+### Primer trimming: what it means for AB1/Sanger reads
+In dye-terminator Sanger, the sequencing primer itself is not represented as base-called sequence; called bases begin downstream of the primer binding site. In most Sanger runs, cleanup is therefore primarily **quality trimming** (low-Q leading/trailing bases), not clipping a sequencing primer sequence.
+
+MicroSeq primer trimming is intended for cases where a known synthetic flanking sequence is actually present in called bases (for example, vector backbone before an insert, PCR 5' overhangs/adapters/barcodes, or the opposite primer site when reads span short amplicons).
+
+Decision guide:
+* **Off**: Default for standard 16S colony-PCR + Sanger using 27F/1492R as sequencing primers.
+* **Detect**: Diagnostic mode to report primer/vector-like hits without modifying reads.
+* **Clip**: Use only when a specific synthetic flank is expected in called bases and removal is confirmed to improve downstream results.
+
+Stage guide:
+* Prefer **Post-quality** to reduce false matches from noisy leading bases.
+* Use **Pre-quality** only when you expect a high-confidence synthetic prefix that should be removed before quality heuristics.
+
+Examples:
+* **Example A (standard full-length 16S isolate)**: PCR with 27F/1492R, sequence with 27F for forward and 1492R for reverse. Use primer trim **Off** and keep quality trim enabled.
+* **Example B (short amplicon reaches opposite end)**: A ~250-600 bp amplicon where reads can extend into opposite-end primer/overhang sequence. Use primer trim **Clip** with custom sequences, usually at **Post-quality**.
+* **Example C (plasmid/clone sequencing)**: Sequencing with a vector primer where called bases begin in vector backbone before entering insert. Use **Detect** first, then **Clip** for the confirmed vector flank.
 
 ## Execution What do the buttons do??
 
@@ -547,6 +569,5 @@ Cock PJA et al. Biopython: freely available Python tools for computational molec
 Ewing B, Hillier L, Wendl MC, Green P. Base-calling of automated sequencer traces using phred. I. Accuracy assessment. Genome Research (1998).
 
 Ewing B, Green P. Base-calling of automated sequencer traces using phred. II. Error probabilities. Genome Research (1998)
-
 
 
