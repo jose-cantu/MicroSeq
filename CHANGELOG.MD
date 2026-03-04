@@ -75,6 +75,9 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 - Resolved GUI dry run toggle glitches and missing message text in dialog box. 
 - Perserved original `qseqid` while adding `sample_id` during taxonomy join so downstream merges do not drop identifiers. 
 - Made logging bootstrap idempotent so repeated `setup_logging()` calls no longer duplicate `MICROSEQ_SESSION_ID` auto-generation warnings, and auto-generated session IDs are persisted for reuse in-process.
+- Advanced regex fields now store stripped strings or `None` (not bound methods).
+- BLAST-only completion no longer reports `.` as an output path.
+- GUI cancellation now interrupts background pipeline stages.
 
 
 ---

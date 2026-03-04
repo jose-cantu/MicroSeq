@@ -39,3 +39,19 @@ def test_full_button_progress(qtbot, monkeypatch, tmp_path):
     # progress bar is reset to 0 in _done(); wait for that 
     qtbot.waitUntil(lambda: win.progress.value() == 0, timeout=1000)
     assert win.progress.value() == 0          # ← expect 0, not 100 
+
+
+def test_advanced_regex_patterns_strip(qtbot):
+    win = MainWindow()
+    qtbot.addWidget(win)
+
+    paired_idx = win.mode_combo.findData("paired")
+    win.mode_combo.setCurrentIndex(paired_idx)
+    win.advanced_regex_chk.setChecked(True)
+
+    win.fwd_regex_edit.setText("  FWD  ")
+    win.rev_regex_edit.setText("   ")
+
+    fwd, rev = win._current_patterns()
+    assert fwd == "FWD"
+    assert rev is None

@@ -9,7 +9,7 @@ from pathlib import Path
 from contextlib import nullcontext
 from collections import Counter, defaultdict
 import re 
-from typing import Union, Sequence
+from typing import Callable, Union, Sequence
 from dataclasses import dataclass
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
@@ -87,6 +87,14 @@ __all__ = [
 
 PathLike = Union[str, Path]
 L = logging.getLogger(__name__)
+
+
+def _check_cancel(stop_cb: Callable[[], bool] | None = None) -> None:
+    if stop_cb and stop_cb():
+        raise RuntimeError("Cancelled")
+    thr = QThread.currentThread()
+    if thr and thr.isInterruptionRequested():
+        raise RuntimeError("Cancelled")
 
 
 # Contract: qseqid is structural payload id (e.g., S1|contig|cap3_c1)
@@ -544,14 +552,13 @@ def run_blast_stage(
     max_target_seqs: int = 5,
     threads: int = 1,
     on_progress=None,
-    blast_task: str = "megablast", 
+    blast_task: str = "megablast",
+    stop_cb: Callable[[], bool] | None = None,
 ) -> int:
     from microseq_tests.blast.run_blast import BlastOptions # local import keeps AB1 safe 
      
 
-    thr = QThread.currentThread()
-    if thr and thr.isInterruptionRequested():
-        raise RuntimeError("Cancelled")
+    _check_cancel(stop_cb)
 
 
     # ------ first pass ---------------------------
@@ -608,8 +615,7 @@ def run_blast_stage(
                 ) 
 
 
-    if thr and thr.isInterruptionRequested():
-        raise RuntimeError("Cancelled")
+    _check_cancel(stop_cb)
     return 0
 
 
@@ -631,8 +637,10 @@ def run_postblast(
     taxonomy_col: str = "auto",
     taxonomy_format: str = "auto",
     duplicate_policy: str = "error",
+    stop_cb: Callable[[], bool] | None = None,
     **kwargs,
 ) -> int:
+    _check_cancel(stop_cb)
     postblast_run(
         blast_hits,
         metadata,
@@ -646,6 +654,7 @@ def run_postblast(
         duplicate_policy=duplicate_policy,
         **kwargs,
     )
+    _check_cancel(stop_cb)
     return 0
 
 
@@ -2874,6 +2883,7 @@ def run_full_pipeline(
     primer_cfg_override: dict | None = None,
     on_stage=None,
     on_progress=None,
+    stop_cb: Callable[[], bool] | None = None,
 ) -> dict[str, Path | None]:
     """
     Run trim -> FASTA merge -> BLAST -> taxonomy (+ optional post‑BLAST).
@@ -2889,9 +2899,7 @@ def run_full_pipeline(
 
     on_stage = on_stage or (lambda *_: None)
     on_progress = on_progress or (lambda *_: None)
-    thr = QThread.currentThread()
-    if thr and thr.isInterruptionRequested():
-        raise RuntimeError("Cancelled")
+    _check_cancel(stop_cb)
 
     if out_dir is None:
         stem = infile.with_suffix("").name
@@ -3035,8 +3043,7 @@ def run_full_pipeline(
         if not is_fasta:
             on_stage("Trim")
             run_trim(infile, out_dir, sanger=True, summary_tsv=summary_tsv, primer_cfg_override=primer_cfg_override)
-            if thr and thr.isInterruptionRequested():
-                raise RuntimeError("Cancelled")
+            _check_cancel(stop_cb)
             pct += step
             on_progress(pct)
 
@@ -3047,8 +3054,7 @@ def run_full_pipeline(
             if not any(fastq_dir.glob("*.fastq")):
                 fastq_dir = out_dir / "qc"
             run_fastq_to_fasta(fastq_dir, paths["trimmed_fasta"])
-            if thr and thr.isInterruptionRequested():
-                raise RuntimeError("Cancelled")
+            _check_cancel(stop_cb)
             pct += step
             on_progress(pct)
 
@@ -3285,8 +3291,7 @@ def run_full_pipeline(
             else:
                 fastq_dir = out_dir / "qc"
         run_fastq_to_fasta(fastq_dir, paths["fasta"])
-        if thr and thr.isInterruptionRequested():
-            raise RuntimeError("Cancelled")
+        _check_cancel(stop_cb)
         pct += step
         on_progress(pct)
 
@@ -3435,9 +3440,9 @@ def run_full_pipeline(
         threads=threads,
         on_progress=subprog(pct),
         blast_task=blast_task, 
+        stop_cb=stop_cb,
     )
-    if thr and thr.isInterruptionRequested():
-        raise RuntimeError("Cancelled")
+    _check_cancel(stop_cb)
     pct += step
     on_progress(pct)
 
@@ -3446,8 +3451,7 @@ def run_full_pipeline(
     tax_fp = Path(expand_db_path(tax_template))
     on_stage("Taxonomy")
     run_add_tax(paths["hits"], tax_fp, paths["tax"])
-    if thr and thr.isInterruptionRequested():
-        raise RuntimeError("Cancelled")
+    _check_cancel(stop_cb)
     pct += step
     on_progress(pct)
 
@@ -3476,9 +3480,8 @@ def run_full_pipeline(
         if metadata is None:
             raise ValueError("metadata file required for postblast stage")
         on_stage("Post-BLAST")
-        run_postblast(paths["tax"], metadata, paths["biom"], weights_tsv=paths["replicate_weights"],)
-        if thr and thr.isInterruptionRequested():
-            raise RuntimeError("Cancelled")
+        run_postblast(paths["tax"], metadata, paths["biom"], weights_tsv=paths["replicate_weights"], stop_cb=stop_cb)
+        _check_cancel(stop_cb)
         pct += step
         on_progress(pct)
 

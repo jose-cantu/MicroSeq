@@ -596,6 +596,15 @@ class Worker(QObject):
             self._kwargs["on_stage"] = self.status.emit
         if "on_progress" in params:
             self._kwargs["on_progress"] = self.progress.emit
+        if "stop_cb" in params or "is_cancelled" in params:
+            def _is_cancelled() -> bool:
+                thr = QThread.currentThread()
+                return bool(thr and thr.isInterruptionRequested())
+
+            if "stop_cb" in params:
+                self._kwargs["stop_cb"] = _is_cancelled
+            if "is_cancelled" in params:
+                self._kwargs["is_cancelled"] = _is_cancelled
 
         try:
             logging.info("%s started", self._fn.__name__)
@@ -2232,7 +2241,7 @@ class MainWindow(QMainWindow):
         elif isinstance(result, Path):
             rc, out = 0, result
         else:                                          # int from BLAST‑only path
-            rc, out = int(result), Path()
+            rc, out = int(result), None
 
         # log + optional dialog -------------------------------------
         msg = "Cancelled" if rc is None else ("Success" if rc == 0 else f"Failed (exit {rc})") 
@@ -2241,7 +2250,7 @@ class MainWindow(QMainWindow):
             0, lambda m=msg: self.log_model.append(f"● {m}\n")
         )
 
-        if rc == 0 and out is not None and not (isinstance(result, dict) and ("primer_preview_text" in result or "primer_preview_notice" in result)):
+        if rc == 0 and out and not (isinstance(result, dict) and ("primer_preview_text" in result or "primer_preview_notice" in result)):
             QTimer.singleShot(
                 0,
                 lambda p=out: self._show_box(
