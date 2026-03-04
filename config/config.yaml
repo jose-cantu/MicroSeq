@@ -25,7 +25,7 @@ databases:
 metadata:
   sample_id_normaliser: strip_suffix_legacy
 trace_qc:
-  enable_flags: false
+  enable_flags: true 
   mixed_ratio_thresh: 0.25
   mixed_frac_fail: 0.10
   min_peak_height_for_mixed: 100.0

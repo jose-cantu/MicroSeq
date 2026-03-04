@@ -8,9 +8,11 @@ from __future__ import annotations
 from pathlib import Path
 from contextlib import nullcontext
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re 
 from typing import Callable, Union, Sequence
 from dataclasses import dataclass
+import tempfile
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 from Bio.Align import PairwiseAligner
@@ -1787,6 +1789,7 @@ def run_compare_assemblers(
     well_pattern: str | re.Pattern[str] | None = None,
     pairing_report: PathLike | None = None,
     use_qual: bool = True,
+    threads: int = 1,
     on_stage=None,
     on_progress=None,
 ) -> Path:
@@ -1853,241 +1856,297 @@ def run_compare_assemblers(
             asked = ", ".join(sorted(allowed)) 
             raise ValueError(f"No requested assemblers were found ({asked}). Known ids: {known}") 
     rows: list[dict[str, str]] = []
-    total = max(1, len(specs) * len(paired_samples))
+    sample_items = sorted(paired_samples.items())
+    total = max(1, len(specs) * len(sample_items))
     done = 0
+    heartbeat_interval = 5
 
-    for spec in specs:
-        on_stage(f"Compare {spec.display_name}")
+    max_workers = max(1, int(threads or 1))
+
+    spec_by_id = {spec.id: spec for spec in specs}
+
+    def _run_compare_job(spec_id: str, sample_id: str, entries: dict[str, list[Path]]) -> tuple[str, str, dict[str, str]]:
+        spec = spec_by_id[spec_id]
         spec_dir = out_root / spec.id.replace(":", "_")
         spec_dir.mkdir(parents=True, exist_ok=True)
+        sample_dir = spec_dir / sample_id
+        sample_dir.mkdir(parents=True, exist_ok=True)
+        status = "pair_missing"
+        selected_engine = ""
+        contig_len = ""
+        warning = ""
+        diag_code_for_machine = "pair_missing"
+        diag_detail_for_human = "Missing foward/reverse pair for sample"
+        payload_fasta = sample_dir / "payload.fasta"
+        payload_written = False
+        payload_kind = "none"
+        payload_n = "0"
+        payload_max_len = "0"
+        decision_source = "auto"
+        cap3_contigs_n = ""
+        cap3_singlets_n = ""
+        cap3_info_path = ""
+        cap3_stdout_path = ""
+        cap3_stderr_path = ""
+        tool_name = ""
+        tool_stdout_path = ""
+        tool_stderr_path = ""
 
-        for sample_id, entries in sorted(paired_samples.items()):
-            sample_dir = spec_dir / sample_id
-            sample_dir.mkdir(parents=True, exist_ok=True)
+        if sample_id in missing_samples or not entries["F"] or not entries["R"]:
             status = "pair_missing"
-            selected_engine = ""
-            contig_len = ""
-            warning = ""
-            diag_code_for_machine = "pair_missing"
-            diag_detail_for_human = "Missing foward/reverse pair for sample"
-            payload_fasta = sample_dir / "payload.fasta"
-            payload_written = False
+        else:
+            fwd_path = entries["F"][0]
+            rev_path = entries["R"][0]
+            try:
+                if spec.kind == "merge_two_reads":
+                    contig_path, report = merge_two_reads(
+                        sample_id=sample_id,
+                        fwd_path=fwd_path,
+                        rev_path=rev_path,
+                        output_dir=sample_dir,
+                        min_overlap=overlap_min_overlap,
+                        min_identity=overlap_min_identity,
+                        min_quality=overlap_min_quality,
+                        quality_mode=quality_mode,
+                        ambiguity_identity_delta=ambiguity_identity_delta,
+                        ambiguity_quality_epsilon=ambiguity_quality_epsilon,
+                        high_conflict_q_threshold=high_conflict_q_threshold,
+                        high_conflict_action=high_conflict_action,
+                        overlap_engine=spec.overlap_engine or "biopython",
+                        overlap_engine_strategy="single",
+                        overlap_engine_order=None,
+                        anchor_tolerance_bases=anchor_tolerance_bases,
+                        ambiguous_policy=ambiguous_policy,
+                        ambiguous_top_k=ambiguous_top_k,
+                    )
+                    status = str(getattr(report, "merge_status", "error") or "error")
+                    report_engine = str(getattr(report, "overlap_engine", "") or "")
+                    report_contig_len = getattr(report, "contig_len", 0)
+                    report_warning = str(getattr(report, "merge_warning", "") or "")
+                    report_overlap_len = getattr(report, "overlap_len", 0)
+                    report_identity = float(getattr(report, "identity", 0.0) or 0.0)
+                    report_orientation = str(getattr(report, "orientation", "") or "")
+
+                    selected_engine = report_engine
+                    contig_len = str(report_contig_len)
+                    warning = report_warning
+                    if status == "ambiguous_overlap" and not warning:
+                        warning = "Overlap candidates were tied; no unique contig selected"
+                    diag_code_for_machine = f"merge_{status}"
+                    diag_detail_for_human = (
+                        f"merge_status={status}; overlap_len={report_overlap_len};"
+                        f"identity={report_identity:.4f}; engine={report_engine}"
+                    )
+                    tool_name = spec.display_name
+                    merge_diag = [
+                        f"sample_id={sample_id}",
+                        f"assembler_id={spec.id}",
+                        f"merge_status={status}",
+                        f"overlap_engine={report_engine}",
+                        f"orientation={report_orientation}",
+                        f"overlap_len={report_overlap_len}",
+                        f"identity={report_identity:.6f}",
+                        f"warning={report_warning}",
+                    ]
+                    stdout_path, stderr_path = write_process_logs(
+                        sample_dir,
+                        sample_id,
+                        spec.id,
+                        ["merge_two_reads", f"--engine={spec.overlap_engine or 'biopython'}"],
+                        "\n".join(merge_diag) + "\n",
+                        "",
+                    )
+                    tool_stdout_path = str(stdout_path)
+                    tool_stderr_path = str(stderr_path)
+                    if contig_path and contig_path.exists():
+                        payload_records = list(SeqIO.parse(contig_path, "fasta"))
+                        if payload_records:
+                            SeqIO.write(payload_records, payload_fasta, "fasta")
+                            payload_written = True
+                            payload_n = str(len(payload_records))
+                            payload_kind = "contig_alt" if status == "ambiguous_topk" else "contig"
+                            contig_len = str(max(len(rec.seq) for rec in payload_records))
+                            payload_max_len = contig_len
+                    else:
+                        singlets_path = sample_dir / f"{sample_id}_paired.fasta.cap.singlets"
+                        singlet_records = list(SeqIO.parse(singlets_path, "fasta")) if singlets_path.exists() else []
+                        if singlet_records:
+                            SeqIO.write(singlet_records, payload_fasta, "fasta")
+                            payload_written = True
+                            payload_kind = "singlet"
+                            payload_n = str(len(singlet_records))
+                            payload_max_len = str(max(len(rec.seq) for rec in singlet_records))
+                else:
+                    cap3_args = _resolve_cap3_options(spec.cap3_profile or "strict", None, None)
+                    sample_fasta = sample_dir / f"{sample_id}_paired.fasta"
+                    _write_combined_fasta([fwd_path, rev_path], sample_fasta, use_qual=use_qual)
+                    import subprocess
+
+                    cmd = [cap3_exe, sample_fasta.name, *cap3_args]
+                    with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as stdout_tmp, tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as stderr_tmp:
+                        cap3_run = subprocess.run(
+                            cmd,
+                            cwd=sample_dir,
+                            stdout=stdout_tmp,
+                            stderr=stderr_tmp,
+                            text=True,
+                            check=False,
+                        )
+                        stdout_tmp.seek(0)
+                        stderr_tmp.seek(0)
+                        stdout_text = stdout_tmp.read()
+                        stderr_text = stderr_tmp.read()
+
+                    stdout_path, stderr_path = write_process_logs(
+                        sample_dir,
+                        sample_id,
+                        spec.id,
+                        cmd,
+                        stdout_text,
+                        stderr_text,
+                    )
+                    cap3_stdout_path = str(stdout_path)
+                    cap3_stderr_path = str(stderr_path)
+                    tool_name = spec.display_name
+                    tool_stdout_path = cap3_stdout_path
+                    tool_stderr_path = cap3_stderr_path
+
+                    cap_contigs = sample_dir / f"{sample_fasta.name}.cap.contigs"
+                    cap_singlets = sample_dir / f"{sample_fasta.name}.cap.singlets"
+                    cap_info = sample_dir / f"{sample_fasta.name}.cap.info"
+
+                    payload_records = list(SeqIO.parse(cap_contigs, "fasta")) if cap_contigs.exists() else []
+                    singlet_records = list(SeqIO.parse(cap_singlets, "fasta")) if cap_singlets.exists() else []
+                    cap3_contigs_n = str(len(payload_records))
+                    cap3_singlets_n = str(len(singlet_records))
+                    cap3_info_path = str(cap_info) if cap_info.exists() else ""
+                    selected_engine = "cap3"
+
+                    if cap3_run.returncode == 0 and payload_records:
+                        status = "assembled"
+                        diag_code_for_machine = "cap3_contigs_present"
+                    elif cap3_run.returncode == 0 and singlet_records:
+                        status = "singlets_only"
+                        diag_code_for_machine = "cap3_singlets_only"
+                    elif cap3_run.returncode == 0:
+                        status = "cap3_no_output"
+                        diag_code_for_machine = "cap3_no_contigs_no_singlets"
+                    elif payload_records:
+                        status = "assembled"
+                        diag_code_for_machine = "cap3_nonzero_exit_with_output"
+                    elif singlet_records:
+                        status = "singlets_only"
+                        diag_code_for_machine = "cap3_nonzero_exit_with_output"
+                    else:
+                        status = "error"
+                        diag_code_for_machine = "cap3_nonzero_exit_no_output"
+                        warning = warning or (stderr_text or stdout_text or f"CAP3 exited {cap3_run.returncode}")
+
+                    diag_detail_for_human = (
+                        f"returncode={cap3_run.returncode}; profile={spec.cap3_profile or 'strict'}; "
+                        f"input={sample_fasta.name}; contigs={len(payload_records)}; singlets={len(singlet_records)}"
+                    )
+
+                    payload_source = payload_records if payload_records else singlet_records
+                    if payload_source:
+                        SeqIO.write(payload_source, payload_fasta, "fasta")
+                        payload_written = True
+                        payload_n = str(len(payload_source))
+                        payload_kind = "contig" if payload_records else "singlet"
+                        payload_max_len = str(max(len(rec.seq) for rec in payload_source))
+                        if payload_records:
+                            contig_len = str(max(len(rec.seq) for rec in payload_records))
+                            payload_max_len = contig_len
+            except Exception as exc:
+                status = "error"
+                warning = str(exc)
+                diag_code_for_machine = "exception"
+                diag_detail_for_human = str(exc)
+
+        ambiguity_flag, safety_flag, review_reason = _infer_compare_row_flags(status, warning)
+        if not payload_written:
             payload_kind = "none"
             payload_n = "0"
             payload_max_len = "0"
-            decision_source = "auto"
-            cap3_contigs_n = ""
-            cap3_singlets_n = ""
-            cap3_info_path = ""
-            cap3_stdout_path = ""
-            cap3_stderr_path = ""
-            tool_name = ""
-            tool_stdout_path = ""
-            tool_stderr_path = "" 
+        row = {
+            "sample_id": sample_id,
+            "assembler_id": spec.id,
+            "assembler_name": spec.display_name,
+            "dup_policy": str(dup_policy.value if isinstance(dup_policy, DupPolicy) else dup_policy),
+            "status": status,
+            "selected_engine": selected_engine,
+            "contig_len": contig_len,
+            "warnings": warning,
+            "diag_code_for_machine": diag_code_for_machine,
+            "diag_detail_for_human": diag_detail_for_human,
+            "cap3_contigs_n": cap3_contigs_n,
+            "cap3_singlets_n": cap3_singlets_n,
+            "cap3_info_path": cap3_info_path,
+            "cap3_stdout_path": cap3_stdout_path,
+            "cap3_stderr_path": cap3_stderr_path,
+            "tool_name": tool_name,
+            "tool_stdout_path": tool_stdout_path,
+            "tool_stderr_path": tool_stderr_path,
+            "selection_trace_path": "",
+            "winner_reason": "",
+            "payload_fasta": str(payload_fasta) if payload_written else "",
+            "payload_kind": payload_kind,
+            "payload_n": payload_n,
+            "payload_max_len": payload_max_len,
+            "ambiguity_flag": ambiguity_flag,
+            "safety_flag": safety_flag,
+            "decision_source": decision_source,
+            "review_reason": review_reason,
+            "warning_flags": "",
+            "structural_hypothesis_n": "0",
+            "hypotheses_with_hits_n": "0",
+            "missing_hits_n": "0",
+            "hypothesis_map": "",
+            "source_id_map": "",
+        }
 
-            if sample_id in missing_samples or not entries["F"] or not entries["R"]:
-                status = "pair_missing"
-            else:
-                fwd_path = entries["F"][0]
-                rev_path = entries["R"][0]
-                try:
-                    if spec.kind == "merge_two_reads":
-                        contig_path, report = merge_two_reads(
-                            sample_id=sample_id,
-                            fwd_path=fwd_path,
-                            rev_path=rev_path,
-                            output_dir=sample_dir,
-                            min_overlap=overlap_min_overlap,
-                            min_identity=overlap_min_identity,
-                            min_quality=overlap_min_quality,
-                            quality_mode=quality_mode,
-                            ambiguity_identity_delta=ambiguity_identity_delta,
-                            ambiguity_quality_epsilon=ambiguity_quality_epsilon,
-                            high_conflict_q_threshold=high_conflict_q_threshold,
-                            high_conflict_action=high_conflict_action,
-                            overlap_engine=spec.overlap_engine or "biopython",
-                            overlap_engine_strategy="single",
-                            overlap_engine_order=None,
-                            anchor_tolerance_bases=anchor_tolerance_bases,
-                            ambiguous_policy=ambiguous_policy,
-                            ambiguous_top_k=ambiguous_top_k,
-                        )
-                        status = str(getattr(report, "merge_status", "error") or "error")
-                        report_engine = str(getattr(report, "overlap_engine", "") or "")
-                        report_contig_len = getattr(report, "contig_len", 0)
-                        report_warning = str(getattr(report, "merge_warning", "") or "")
-                        report_overlap_len = getattr(report, "overlap_len", 0)
-                        report_identity = float(getattr(report, "identity", 0.0) or 0.0)
-                        report_orientation = str(getattr(report, "orientation", "") or "")
+        return spec.id, sample_id, row
 
-                        selected_engine = report_engine
-                        contig_len = str(report_contig_len)
-                        warning = report_warning
-                        if status == "ambiguous_overlap" and not warning:
-                            warning = "Overlap candidates were tied; no unique contig selected"
-                        diag_code_for_machine = f"merge_{status}"
-                        diag_detail_for_human = (
-                            f"merge_status={status}; overlap_len={report_overlap_len};"
-                            f"identity={report_identity:.4f}; engine={report_engine}"
-                        )
-                        tool_name = spec.display_name
-                        merge_diag = [
-                            f"sample_id={sample_id}",
-                            f"assembler_id={spec.id}",
-                            f"merge_status={status}",
-                            f"overlap_engine={report_engine}",
-                            f"orientation={report_orientation}",
-                            f"overlap_len={report_overlap_len}",
-                            f"identity={report_identity:.6f}",
-                            f"warning={report_warning}",
-                        ]
-                        stdout_path, stderr_path = write_process_logs(
-                            sample_dir,
-                            sample_id,
-                            spec.id,
-                            ["merge_two_reads", f"--engine={spec.overlap_engine or 'biopython'}"],
-                            "\n".join(merge_diag) + "\n",
-                            "",
-                        )
-                        tool_stdout_path = str(stdout_path)
-                        tool_stderr_path = str(stderr_path)
-                        if contig_path and contig_path.exists():
-                            payload_records = list(SeqIO.parse(contig_path, "fasta"))
-                            if payload_records:
-                                SeqIO.write(payload_records, payload_fasta, "fasta")
-                                payload_written = True
-                                payload_n = str(len(payload_records))
-                                payload_kind = "contig_alt" if status == "ambiguous_topk" else "contig"
-                                contig_len = str(max(len(rec.seq) for rec in payload_records))
-                                payload_max_len = contig_len
-                        else:
-                            singlets_path = sample_dir / f"{sample_id}_paired.fasta.cap.singlets"
-                            singlet_records = list(SeqIO.parse(singlets_path, "fasta")) if singlets_path.exists() else []
-                            if singlet_records:
-                                SeqIO.write(singlet_records, payload_fasta, "fasta")
-                                payload_written = True
-                                payload_kind = "singlet"
-                                payload_n = str(len(singlet_records))
-                                payload_max_len = str(max(len(rec.seq) for rec in singlet_records))
-                    else:
-                        cap3_args = _resolve_cap3_options(spec.cap3_profile or "strict", None, None)
-                        sample_fasta = sample_dir / f"{sample_id}_paired.fasta"
-                        _write_combined_fasta([fwd_path, rev_path], sample_fasta, use_qual=use_qual)
-                        import subprocess
+    job_items: list[tuple[str, str, dict[str, list[Path]]]] = [
+        (spec.id, sample_id, entries)
+        for spec in specs
+        for sample_id, entries in sample_items
+    ]
 
-                        cmd = [cap3_exe, sample_fasta.name, *cap3_args]
-                        cap3_run = subprocess.run(cmd, cwd=sample_dir, capture_output=True, text=True, check=False)
+    completed_by_spec: dict[str, int] = defaultdict(int)
+    on_stage("Compare assemblers")
 
-                        stdout_path, stderr_path = write_process_logs(
-                            sample_dir,
-                            sample_id,
-                            spec.id,
-                            cmd,
-                            cap3_run.stdout or "",
-                            cap3_run.stderr or "",
-                        )
-                        cap3_stdout_path = str(stdout_path)
-                        cap3_stderr_path = str(stderr_path)
-                        tool_name = spec.display_name
-                        tool_stdout_path = cap3_stdout_path
-                        tool_stderr_path = cap3_stderr_path
-
-                        cap_contigs = sample_dir / f"{sample_fasta.name}.cap.contigs"
-                        cap_singlets = sample_dir / f"{sample_fasta.name}.cap.singlets"
-                        cap_info = sample_dir / f"{sample_fasta.name}.cap.info"
-
-                        payload_records = list(SeqIO.parse(cap_contigs, "fasta")) if cap_contigs.exists() else []
-                        singlet_records = list(SeqIO.parse(cap_singlets, "fasta")) if cap_singlets.exists() else []
-                        cap3_contigs_n = str(len(payload_records))
-                        cap3_singlets_n = str(len(singlet_records))
-                        cap3_info_path = str(cap_info) if cap_info.exists() else ""
-                        selected_engine = "cap3"
-
-                        if cap3_run.returncode == 0 and payload_records:
-                            status = "assembled"
-                            diag_code_for_machine = "cap3_contigs_present"
-                        elif cap3_run.returncode == 0 and singlet_records:
-                            status = "singlets_only"
-                            diag_code_for_machine = "cap3_singlets_only"
-                        elif cap3_run.returncode == 0:
-                            status = "cap3_no_output"
-                            diag_code_for_machine = "cap3_no_contigs_no_singlets"
-                        elif payload_records:
-                            status = "assembled"
-                            diag_code_for_machine = "cap3_nonzero_exit_with_output"
-                        elif singlet_records:
-                            status = "singlets_only"
-                            diag_code_for_machine = "cap3_nonzero_exit_with_output"
-                        else:
-                            status = "error"
-                            diag_code_for_machine = "cap3_nonzero_exit_no_output"
-                            warning = warning or (cap3_run.stderr or cap3_run.stdout or f"CAP3 exited {cap3_run.returncode}")
-
-                        diag_detail_for_human = (
-                            f"returncode={cap3_run.returncode}; profile={spec.cap3_profile or 'strict'}; "
-                            f"input={sample_fasta.name}; contigs={len(payload_records)}; singlets={len(singlet_records)}"
-                        )
-
-                        payload_source = payload_records if payload_records else singlet_records
-                        if payload_source:
-                            SeqIO.write(payload_source, payload_fasta, "fasta")
-                            payload_written = True
-                            payload_n = str(len(payload_source))
-                            payload_kind = "contig" if payload_records else "singlet"
-                            payload_max_len = str(max(len(rec.seq) for rec in payload_source))
-                            if payload_records:
-                                contig_len = str(max(len(rec.seq) for rec in payload_records))
-                                payload_max_len = contig_len
-                except Exception as exc:
-                    status = "error"
-                    warning = str(exc)
-                    diag_code_for_machine = "exception"
-                    diag_detail_for_human = str(exc)
-
-            ambiguity_flag, safety_flag, review_reason = _infer_compare_row_flags(status, warning)
-            if not payload_written:
-                payload_kind = "none"
-                payload_n = "0"
-                payload_max_len = "0"
-            rows.append({
-                "sample_id": sample_id,
-                "assembler_id": spec.id,
-                "assembler_name": spec.display_name,
-                "dup_policy": str(dup_policy.value if isinstance(dup_policy, DupPolicy) else dup_policy),
-                "status": status,
-                "selected_engine": selected_engine,
-                "contig_len": contig_len,
-                "warnings": warning,
-                "diag_code_for_machine": diag_code_for_machine,
-                "diag_detail_for_human": diag_detail_for_human,
-                "cap3_contigs_n": cap3_contigs_n,
-                "cap3_singlets_n": cap3_singlets_n,
-                "cap3_info_path": cap3_info_path,
-                "cap3_stdout_path": cap3_stdout_path,
-                "cap3_stderr_path": cap3_stderr_path,
-                "tool_name": tool_name,
-                "tool_stdout_path": tool_stdout_path,
-                "tool_stderr_path": tool_stderr_path,
-                "selection_trace_path": "",
-                "winner_reason": "",
-                "payload_fasta": str(payload_fasta) if payload_written else "",
-                "payload_kind": payload_kind,
-                "payload_n": payload_n,
-                "payload_max_len": payload_max_len,
-                "ambiguity_flag": ambiguity_flag,
-                "safety_flag": safety_flag,
-                "decision_source": decision_source,
-                "review_reason": review_reason,
-                "warning_flags": "",
-                "structural_hypothesis_n": "0",
-                "hypotheses_with_hits_n": "0",
-                "missing_hits_n": "0",
-                "hypothesis_map": "",
-                "source_id_map": "",
-            })
-
+    if max_workers == 1 or len(job_items) <= 1:
+        for spec_id, sample_id, entries in job_items:
+            done_spec_id, _sample_id, row = _run_compare_job(spec_id, sample_id, entries)
+            rows.append(row)
             done += 1
+            completed_by_spec[done_spec_id] += 1
+            if completed_by_spec[done_spec_id] % heartbeat_interval == 0 or completed_by_spec[done_spec_id] == len(sample_items):
+                spec_name = spec_by_id[done_spec_id].display_name
+                on_stage(f"Compare {spec_name}: {completed_by_spec[done_spec_id]}/{len(sample_items)} complete")
             on_progress(int(done * 100 / total))
+    else:
+        future_map = {}
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(job_items))) as ex:
+            for spec_id, sample_id, entries in job_items:
+                future = ex.submit(_run_compare_job, spec_id, sample_id, entries)
+                future_map[future] = (spec_id, sample_id)
+            collected: dict[tuple[int, int], dict[str, str]] = {}
+            spec_order = {spec.id: idx for idx, spec in enumerate(specs)}
+            sample_order = {sample_id: idx for idx, (sample_id, _entries) in enumerate(sample_items)}
+            for future in as_completed(future_map):
+                spec_id, sample_id = future_map[future]
+                done_spec_id, done_sample_id, row = future.result()
+                collected[(spec_order[spec_id], sample_order[sample_id])] = row
+                done += 1
+                completed_by_spec[done_spec_id] += 1
+                if completed_by_spec[done_spec_id] % heartbeat_interval == 0 or completed_by_spec[done_spec_id] == len(sample_items):
+                    spec_name = spec_by_id[done_spec_id].display_name
+                    on_stage(f"Compare {spec_name}: {completed_by_spec[done_spec_id]}/{len(sample_items)} complete")
+                on_progress(int(done * 100 / total))
+        for key in sorted(collected):
+            rows.append(collected[key])
 
     out_tsv = Path(out_dir) / "asm" / "compare_assemblers.tsv"
     out_tsv.parent.mkdir(parents=True, exist_ok=True)
@@ -2153,7 +2212,7 @@ def _select_best_compare_rows(
 ) -> dict[str, dict[str, str]]:
     if not compare_tsv.exists():
         return {}
-    df = pd.read_csv(compare_tsv, sep="\t")
+    df = pd.read_csv(compare_tsv, sep="\t", dtype=str).fillna("")
     if df.empty:
         return {}
 
@@ -3134,6 +3193,7 @@ def run_full_pipeline(
                 well_pattern=well_pattern,
                 pairing_report=pairing_report,
                 use_qual=cap3_use_qual,
+                threads=threads,
             )
         if resolved_assembler_mode == "cap3_default" and pairing_report.exists():
             report_ids = set(

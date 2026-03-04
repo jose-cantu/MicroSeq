@@ -2010,6 +2010,7 @@ class MainWindow(QMainWindow):
             fwd_pattern=self._current_patterns()[0],
             rev_pattern=self._current_patterns()[1],
             enforce_same_well=self.enforce_well_chk.isChecked(),
+            threads=self.threads_spin.value(),
         )
 
 
