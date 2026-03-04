@@ -156,6 +156,27 @@ The paired pipeline now produces the following key files under the run folder:
 * `asm/blast_inputs.tsv` : payload manifest with `blast_payload`, `reason`, and `payload_ids`.
   It now also includes `payload_entity_n`, `hypothesis_map` (`qseqid -> structural_hypothesis`), and `source_id_map` (`qseqid -> original source id`) so users can distinguish structural decision branches from raw payload provenance.
 
+
+### GUI Color Legend
+
+Use this legend when reading GUI output tables:
+
+* **status**
+  * `assembled` -> green
+  * `singlets_only` -> yellow
+  * `cap3_no_output` -> orange
+  * `pair_missing` -> red
+  * `overlap_*` -> light blue
+* **trace_qc**
+  * `PASS` -> green
+  * `WARN` -> yellow
+  * `FAIL` -> red
+  * `NA` -> gray
+
+The GUI also exposes this legend in header tooltips on the **status** and **trace_qc** columns for in-table reference.
+
+For a quick-reference version, see [GUI Color Legend](gui_color_legend.md).
+
 ## Diagnosing singlets and overlap failures
 
 Use the CAP3 logs, `assembly_summary.tsv`, and `overlap_audit.tsv` to identify

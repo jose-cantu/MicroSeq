@@ -27,6 +27,23 @@ from microseq_tests.assembly.registry import list_assemblers
 PRIMER_SETS: dict[str, tuple[list[str], list[str]]] = pairing_label_sets()
 TRIM_PRESETS: list[str] = sorted(trim_presets())
 
+STATUS_COLOR_LEGEND = (
+    "Status color legend:\n"
+    "• assembled = green\n"
+    "• singlets_only = yellow\n"
+    "• cap3_no_output = orange\n"
+    "• pair_missing = red\n"
+    "• overlap_* = light blue"
+)
+
+TRACE_QC_COLOR_LEGEND = (
+    "Trace QC color legend:\n"
+    "• PASS = green\n"
+    "• WARN = yellow\n"
+    "• FAIL = red\n"
+    "• NA = gray"
+)
+
 
 def _normalize_legacy_compare_diag_detail(detail: str, selected_engine: str) -> str:
     """Normalize legacy compare diagnostics where engine was printed as overlap_len."""
@@ -107,6 +124,18 @@ class LogBridge(QObject, logging.Handler):
 
     def emit(self, record):
         self.sig.emit(self.format(record))
+
+
+def _set_header_tooltips(table: QTableWidget, tooltip_by_header: dict[str, str]) -> None:
+    """Attach tooltips to table header labels by exact header text."""
+    for col in range(table.columnCount()):
+        item = table.horizontalHeaderItem(col)
+        if not item:
+            continue
+        text = item.text().strip()
+        tooltip = tooltip_by_header.get(text)
+        if tooltip:
+            item.setToolTip(tooltip)
 
 
 # Logging class
@@ -1021,6 +1050,7 @@ class MainWindow(QMainWindow):
                 "trace_qc",
             ]
         )
+        _set_header_tooltips(self.summary_table, {"status": STATUS_COLOR_LEGEND})
         self.summary_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.summary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.summary_table.itemSelectionChanged.connect(self._update_detail_panel)
@@ -1077,6 +1107,14 @@ class MainWindow(QMainWindow):
                 "fallback_used",
                 "overlap_engine",
             ]
+        )
+        _set_header_tooltips(
+            self.diagnostics_table,
+            {
+                "status": STATUS_COLOR_LEGEND,
+                "trace_qc": TRACE_QC_COLOR_LEGEND,
+                "trace_qc_status": TRACE_QC_COLOR_LEGEND,
+            },
         )
         self.diagnostics_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.diagnostics_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -2645,6 +2683,14 @@ class MainWindow(QMainWindow):
             if table.columnCount() > 3:
                 header.setSectionResizeMode(3, QHeaderView.Interactive)
                 table.setColumnWidth(3, 260)
+        _set_header_tooltips(
+            table,
+            {
+                "status": STATUS_COLOR_LEGEND,
+                "trace_qc": TRACE_QC_COLOR_LEGEND,
+                "trace_qc_status": TRACE_QC_COLOR_LEGEND,
+            },
+        )
         header.setStretchLastSection(True)
         if table.rowCount() <= 200:
             table.resizeRowsToContents()
