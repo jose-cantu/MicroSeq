@@ -6,6 +6,7 @@ Return an int exit-code (0 = success) & raise on fatal errors.
 
 from __future__ import annotations
 from pathlib import Path
+import os
 from contextlib import nullcontext
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -89,6 +90,34 @@ __all__ = [
 
 PathLike = Union[str, Path]
 L = logging.getLogger(__name__)
+
+
+_INPUT_SEQ_SUFFIXES = {".ab1", ".fastq", ".fq", ".fasta", ".fa", ".fna", ".fas"}
+
+
+def _default_run_output_dir(infile: Path) -> Path:
+    """Return a sensible default ``*_microseq`` output path for the given input.
+
+    For directory inputs, prefer anchoring output beside the deepest common
+    directory containing discovered sequence files. This avoids creating the
+    run folder one level above the actual data when users select a container
+    folder that only nests a single sample directory.
+    """
+
+    if infile.is_file():
+        return infile.parent / f"{infile.with_suffix('').name}_microseq"
+
+    seq_files = [
+        p for p in sorted(infile.rglob("*"))
+        if p.is_file()
+        and p.suffix.lower() in _INPUT_SEQ_SUFFIXES
+        and not any(part.endswith("_microseq") for part in p.relative_to(infile).parts[:-1])
+    ]
+    if not seq_files:
+        return infile.parent / f"{infile.name}_microseq"
+
+    common = Path(os.path.commonpath([str(p.parent) for p in seq_files]))
+    return common.parent / f"{common.name}_microseq"
 
 
 def _check_cancel(stop_cb: Callable[[], bool] | None = None) -> None:
@@ -2965,8 +2994,7 @@ def run_full_pipeline(
     _check_cancel(stop_cb)
 
     if out_dir is None:
-        stem = infile.with_suffix("").name
-        out_dir = infile.parent / f"{stem}_microseq"
+        out_dir = _default_run_output_dir(infile)
     out_dir.mkdir(parents=True, exist_ok=True)
     on_progress(0)
 
