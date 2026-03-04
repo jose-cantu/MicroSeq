@@ -4,6 +4,8 @@ This document explains why MicroSeq uses a staged assembly strategy for paired S
 
 ## Current strategy (implemented)
 
+For the canonical trigger-to-status matrix and artifact-level routing fields, see **Workflow Resolution Funnel -> “Assemble/validate status routing matrix”** in [`docs/workflow_resolution.md`](workflow_resolution.md).
+
 1. **Fast overlap merge first** (`merge_two_reads`):
    - End-anchored, ungapped overlap search across forward/revcomp orientations.
    - Candidate ranking by overlap length, mismatch count, overlap-quality tie-breakers.

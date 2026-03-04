@@ -333,6 +333,16 @@ Sample-level trace status is computed from F/R statuses using:
 
 This keeps output Geneious-like for routine samples while preserving full provenance.
 
+## Assemble/validate status routing matrix
+
+| Trigger condition | Status label emitted (`merged`, `ambiguous_overlap`, `high_conflict`, `quality_low`, `cap3_unverified`) | IUPAC involvement (`yes/no`, only after a single structural path is selected) | Routing/next action | Primary artifact field(s) to inspect (`merge_status`, `status`, `hypothesis_map`, `review_reason`, `warning_flags`) |
+| --- | --- | --- | --- | --- |
+| One unique top feasible overlap candidate (passes overlap + anchoring gates) | `merged` | no (only after a single structural path is selected) | Emit merged sequence payload; continue to validate/rank hits on that single path | `merge_status`; sample `status` |
+| Top-1 and top-2 feasible candidates are tie-equivalent under ambiguity thresholds | `ambiguous_overlap` | no (only after a single structural path is selected) | Branch hypotheses (`best_guess`/`topk`) or hold as strict ambiguity for review routing | `merge_status`; `hypothesis_map`; `review_reason` |
+| Overlap exists but disagreement burden exceeds configured high-confidence conflict guardrail | `high_conflict` | no (only after a single structural path is selected) | Route by configured conflict action (typically CAP3 fallback or explicit review escalation) | `merge_status`; sample `status`; `warning_flags`; `review_reason` |
+| Candidate is structurally feasible but blocked by quality policy (`quality_mode=blocking`) | `quality_low` | no (only after a single structural path is selected) | Do not accept fast merge; route to CAP3 fallback or review path per policy | `merge_status`; sample `status`; `warning_flags` |
+| CAP3 fallback output fails verification contract (for example, missing source-read representation) | `cap3_unverified` | no (only after a single structural path is selected) | Keep singlet/no-payload fallback and escalate to review if required | sample `status`; `review_reason`; `warning_flags` |
+
 ## Why this method instead of manual IUPAC consensus curation
 
 Older Sanger workflows often resolve ambiguous overlap or mixed-base positions by creating a single IUPAC consensus, then manually curating traces in a GUI tool.

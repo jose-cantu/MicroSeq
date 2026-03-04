@@ -304,6 +304,8 @@ So in the dropdown menu in Assembler selection for `CAP3 default (legacy paired 
 
 If you get `ambiguous_overlap`, MicroSeq found near-tied top feasible overlap candidates and intentionally refused to force a unique merge. For canonical decision rules (including the **“Candidate generation in 3 stages”** walkthrough, feasibility gates, top-1 vs top-2 tie checks, and policy outcomes like `topk`/`best_guess`), see **Workflow Resolution Funnel -> “Assemble -> Validate handoff: how `ambiguous_overlap` is decided”** in [`docs/workflow_resolution.md`](workflow_resolution.md). 
 
+Status glossary cross-link: for the full trigger-to-status routing matrix (`merged`, `ambiguous_overlap`, `high_conflict`, `quality_low`, `cap3_unverified`) and the exact artifact fields to audit, see **Workflow Resolution Funnel -> “Assemble/validate status routing matrix”** in [`docs/workflow_resolution.md`](workflow_resolution.md).
+
 ## Explaning what each of the columns means in the Tabs Assembly Summary, Blast Inputs, Diagnostics, Compare Assemblers 
 
 ### Assembly Summary Tab 
