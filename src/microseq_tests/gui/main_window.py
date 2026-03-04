@@ -94,7 +94,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
     QHBoxLayout, QPushButton, QLabel, QListView, QSpinBox, QMessageBox,
     QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, QAbstractItemView, QLineEdit,
-    QTabWidget, QTableWidget, QTableWidgetItem, QSplitter, QDialog, QPlainTextEdit, QHeaderView 
+    QTabWidget, QTableWidget, QTableWidgetItem, QSplitter, QDialog, QPlainTextEdit, QHeaderView, QSizePolicy 
 )
 from PySide6 import QtCore
 from PySide6.QtGui import QColor, QBrush, QDesktopServices 
@@ -1221,6 +1221,15 @@ class MainWindow(QMainWindow):
         self.detail_trace_reason_lbl.setToolTip(
             "Trace QC flags are chromatogram-signal indicators; contamination is not directly inferred from trace alone."
         )
+        for detail_lbl in (
+            self.detail_reason_lbl,
+            self.detail_payload_ids_lbl,
+            self.detail_overlap_lbl,
+            self.detail_trace_reason_lbl,
+        ):
+            detail_lbl.setWordWrap(True)
+            detail_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            detail_lbl.setMinimumWidth(0)
 
         self.detail_contigs_btn = QPushButton("Open contigs")
         self.detail_singlets_btn = QPushButton("Open singlets")
@@ -2764,6 +2773,12 @@ class MainWindow(QMainWindow):
     def _normalize_compare_diag_detail(self, detail: str, selected_engine: str) -> str:
         return _normalize_legacy_compare_diag_detail(detail, selected_engine)
 
+    def _set_detail_label(self, label: QLabel, prefix: str, summary: str, full: str | None = None) -> None:
+        compact = (summary or "—").strip() or "—"
+        label.setText(f"{prefix}: {compact}")
+        tooltip = (full if full is not None else compact) or ""
+        label.setToolTip(tooltip)
+
     def _update_detail_panel(self) -> None:
         table = None
         tab_index = self.output_tabs.currentIndex()
@@ -2924,32 +2939,37 @@ class MainWindow(QMainWindow):
         audit_values = [self._audit_rows.get(sid, {}) for sid in sample_ids]
         if len(sample_ids) == 1 and audit_values and audit_values[0]:
             audit = audit_values[0]
-            self.detail_overlap_lbl.setText(
-                "overlap: "
+            overlap_summary = (
                 f"{audit.get('status', '—')} (len {audit.get('overlap_len', '—')}, "
                 f"id {audit.get('overlap_identity', '—')}, "
                 f"q {audit.get('overlap_quality', '—')}, "
                 f"orient {audit.get('orientation', '—')}, "
-                f"best-id {audit.get('best_identity', '—')} @ {audit.get('best_identity_orientation', '—')}, "
-                f"fwd-best-id {audit.get('fwd_best_identity', '—')} (any {audit.get('fwd_best_identity_any', '—')}), rev-best-id {audit.get('revcomp_best_identity', '—')} (any {audit.get('revcomp_best_identity_any', '—')}), "
-                f"delta(rev-fwd) {audit.get('identity_delta_revcomp_minus_fwd', '—')}, "
-                f"selected-vs-best-delta {audit.get('selected_vs_best_identity_delta', '—')}, "
-                f"fwd-anchor-feasible {audit.get('fwd_anchor_feasible', '—')}, rev-anchor-feasible {audit.get('revcomp_anchor_feasible', '—')}, "
-                f"top-cands {audit.get('top_candidate_count', '—')}, top2-id-delta {audit.get('top2_identity_delta', '—')}, "
-                f"top2-len-delta {audit.get('top2_overlap_len_delta', '—')}, top2-q-delta {audit.get('top2_quality_delta', '—')}, "
-                f"tie-reason {audit.get('tie_reason_code', '—')} (id_eps {audit.get('ambiguity_identity_delta_used', '—')}, q_eps {audit.get('ambiguity_quality_epsilon_used', '—')}), "
-                f"pretrim {audit.get('pretrim_status', '—')} id {audit.get('pretrim_best_identity', '—')} len {audit.get('pretrim_best_overlap_len', '—')}, "
-                f"posttrim {audit.get('posttrim_status', '—')} id {audit.get('posttrim_best_identity', '—')} len-selected {audit.get('posttrim_selected_overlap_len', '—')}, "
-                f"primer-trim-bases F {audit.get('primer_trim_bases_fwd', '—')} R {audit.get('primer_trim_bases_rev', '—')}, "
-                f"anchored-feasible {audit.get('anchoring_feasible', '—')}, "
-                f"end-anchored-possible {audit.get('end_anchored_possible', '—')}, "
-                f"selected-engine {audit.get('selected_engine', '—')}, "
-                f"fallback {audit.get('fallback_used', '—')}, "
-                f"configured-engine {audit.get('overlap_engine', '—')})"
+                f"engine {audit.get('selected_engine', '—')}, "
+                f"fallback {audit.get('fallback_used', '—')})"
             )
+            overlap_full = (
+                f"{overlap_summary}; best-id {audit.get('best_identity', '—')} @ {audit.get('best_identity_orientation', '—')}; "
+                f"fwd-best-id {audit.get('fwd_best_identity', '—')} (any {audit.get('fwd_best_identity_any', '—')}), "
+                f"rev-best-id {audit.get('revcomp_best_identity', '—')} (any {audit.get('revcomp_best_identity_any', '—')}); "
+                f"delta(rev-fwd) {audit.get('identity_delta_revcomp_minus_fwd', '—')}; "
+                f"selected-vs-best-delta {audit.get('selected_vs_best_identity_delta', '—')}; "
+                f"fwd-anchor-feasible {audit.get('fwd_anchor_feasible', '—')}, rev-anchor-feasible {audit.get('revcomp_anchor_feasible', '—')}; "
+                f"top-cands {audit.get('top_candidate_count', '—')}, top2-id-delta {audit.get('top2_identity_delta', '—')}, "
+                f"top2-len-delta {audit.get('top2_overlap_len_delta', '—')}, top2-q-delta {audit.get('top2_quality_delta', '—')}; "
+                f"tie-reason {audit.get('tie_reason_code', '—')} (id_eps {audit.get('ambiguity_identity_delta_used', '—')}, "
+                f"q_eps {audit.get('ambiguity_quality_epsilon_used', '—')}); "
+                f"pretrim {audit.get('pretrim_status', '—')} id {audit.get('pretrim_best_identity', '—')} len {audit.get('pretrim_best_overlap_len', '—')}; "
+                f"posttrim {audit.get('posttrim_status', '—')} id {audit.get('posttrim_best_identity', '—')} "
+                f"len-selected {audit.get('posttrim_selected_overlap_len', '—')}; "
+                f"primer-trim-bases F {audit.get('primer_trim_bases_fwd', '—')} R {audit.get('primer_trim_bases_rev', '—')}; "
+                f"anchored-feasible {audit.get('anchoring_feasible', '—')}; "
+                f"end-anchored-possible {audit.get('end_anchored_possible', '—')}; "
+                f"configured-engine {audit.get('overlap_engine', '—')}"
+            )
+            self._set_detail_label(self.detail_overlap_lbl, "overlap", overlap_summary, overlap_full)
         else:
             statuses = [audit.get("status", "—") for audit in audit_values if audit]
-            self.detail_overlap_lbl.setText(f"overlap: {self._join_values(statuses)}")
+            self._set_detail_label(self.detail_overlap_lbl, "overlap", self._join_values(statuses))
 
         for key in self._detail_paths:
             self._detail_paths[key] = []
