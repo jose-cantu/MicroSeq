@@ -130,6 +130,37 @@ def chimera_check_ref(
     return fasta_out, report_tsv
 
 
+def orient_reads(
+    fasta_in: Path,
+    fasta_out: Path,
+    *,
+    reference: Path,
+    notmatched_out: Path | None = None,
+    tabbed_out: Path | None = None,
+    threads: int | None = None,
+) -> tuple[Path, Path, Path | None]:
+    fasta_out.parent.mkdir(parents=True, exist_ok=True)
+    notmatched_out = notmatched_out or fasta_out.with_suffix(".notmatched.fasta")
+    cmd = [
+        "--orient",
+        str(fasta_in),
+        "--db",
+        str(reference),
+        "--fastaout",
+        str(fasta_out),
+        "--notmatched",
+        str(notmatched_out),
+        "--fasta_width",
+        "0",
+    ]
+    if tabbed_out:
+        cmd.extend(["--tabbedout", str(tabbed_out)])
+    if threads:
+        cmd.extend(["--threads", str(threads)])
+    run_vsearch(cmd)
+    return fasta_out, notmatched_out, tabbed_out
+
+
 def collapse_replicates_grouped(
     fasta_in: Path,
     fasta_out: Path,
@@ -226,4 +257,3 @@ def collapse_replicates_grouped(
                 weight_fh.write(f"{clean_id}\t{size}\n")
 
     return fasta_out
-

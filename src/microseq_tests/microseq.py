@@ -25,6 +25,7 @@ from microseq_tests.assembly.cap3_profiles import resolve_cap3_profile, CAP3_PRO
 from microseq_tests.vsearch_tools import (
     collapse_replicates_grouped,
     chimera_check_ref,
+    orient_reads as vsearch_orient_reads,
 )
 from microseq_tests import __version__
 
@@ -137,6 +138,16 @@ def main() -> None:
         action="store_true",
         help="Forward --sizein to vsearch (use when FASTA has ;size= annotations)",
     )
+
+    # vsearch orient
+    p_vs_orient = sp.add_parser("vsearch-orient", help="Orient reads against a reference with vsearch")
+    p_vs_orient.add_argument("-i", "--input", required=True, help="FASTA input")
+    p_vs_orient.add_argument("-o", "--output", required=True, help="Oriented FASTA output")
+    p_vs_orient.add_argument("-d", "--db", choices=db_choices, help="Database key for default orient reference")
+    p_vs_orient.add_argument("--orient-db", help="Reference FASTA for orientation")
+    p_vs_orient.add_argument("--notmatched", help="FASTA output for reads with undetermined orientation")
+    p_vs_orient.add_argument("--report", help="Optional orient tabbed report output path")
+    p_vs_orient.add_argument("--threads", type=int, default=4, help="CPU threads to pass to vsearch")
 
     # sweeper used to predict PASS cutoff point to hit desired TARGET PASS count 
     p_sweep = sp.add_parser("suggest-cutoffs", help="Suggest identity/qcov pairs to hit TARGET PASS count of number of samples after per-sample collapse", description=("Given a BLAST sweeper table (*.tsv) from a relaxed search, "
@@ -404,6 +415,40 @@ def main() -> None:
         )
         print("Non-chimera FASTA:", fasta_out)
         print("Chimera report:", report_path)
+
+    elif args.cmd == "vsearch-orient":
+        fasta_in = pathlib.Path(args.input).expanduser().resolve()
+        fasta_out = pathlib.Path(args.output).expanduser().resolve()
+        notmatched = (
+            pathlib.Path(args.notmatched).expanduser().resolve()
+            if args.notmatched
+            else None
+        )
+        report = pathlib.Path(args.report).expanduser().resolve() if args.report else None
+        orient_db = args.orient_db
+        if orient_db:
+            orient_path = pathlib.Path(orient_db).expanduser().resolve()
+        else:
+            if not args.db:
+                ap.error("--db or --orient-db is required for vsearch-orient")
+            orient_ref = cfg["databases"].get(args.db, {}).get("orient_ref")
+            if not orient_ref:
+                orient_ref = cfg["databases"].get(args.db, {}).get("chimera_ref")
+            if not orient_ref:
+                ap.error(f"databases.{args.db}.orient_ref is not configured")
+            orient_path = pathlib.Path(expand_db_path(orient_ref))
+        _, notmatched_path, report_path = vsearch_orient_reads(
+            fasta_in,
+            fasta_out,
+            reference=orient_path,
+            notmatched_out=notmatched,
+            tabbed_out=report,
+            threads=args.threads,
+        )
+        print("Oriented FASTA:", fasta_out)
+        print("Notmatched FASTA:", notmatched_path)
+        if report_path:
+            print("Orient report:", report_path)
 
     elif args.cmd == "merge-hits":
         # resolve globs after argparse to keep it cross-platform functional 

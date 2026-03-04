@@ -13,10 +13,12 @@ databases:
     blastdb: ${MICROSEQ_DB_HOME}/gg2/greengenes2_db
     taxonomy: ${MICROSEQ_DB_HOME}/gg2/taxonomy.tsv
     chimera_ref: ${MICROSEQ_DB_HOME}/gg2/dna-sequences.fasta
+    orient_ref: ${MICROSEQ_DB_HOME}/gg2/dna-sequences.fasta
   silva:
     blastdb: ${MICROSEQ_DB_HOME}/silva/silva_db
     taxonomy: ${MICROSEQ_DB_HOME}/silva/taxonomy.tsv
     chimera_ref: ${MICROSEQ_DB_HOME}/silva/SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta
+    orient_ref: ${MICROSEQ_DB_HOME}/silva/SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta
   ncbi:
     blastdb: ${MICROSEQ_DB_HOME}/ncbi/16S_ribosomal_RNA
     taxonomy: ${MICROSEQ_DB_HOME}/ncbi/taxonomy.tsv

@@ -64,6 +64,7 @@ from microseq_tests.primer_catalog import trim_presets
 from microseq_tests.vsearch_tools import ( 
     collapse_replicates_grouped, 
     chimera_check_ref, 
+    orient_reads as vsearch_orient_reads,
 )
 from microseq_tests.utility.id_normaliser import NORMALISERS, qseqid_to_sample_id 
 from microseq_tests.utility.io_utils import write_fasta_and_qual_from_fastq
@@ -2715,6 +2716,8 @@ def run_full_pipeline(
     collapse_replicates: bool = False,
     replicate_id_th: float | None = None,
     min_replicate_size: int | None = None,
+    orient_reads: bool = False,
+    orient_db: PathLike | None = None,
     chimera_mode: str = "off",
     chimera_db: PathLike | None = None,
     overlap_audit: bool = False, 
@@ -2764,6 +2767,21 @@ def run_full_pipeline(
     if isinstance(raw_engine_order, str):
         raw_engine_order = [tok.strip() for tok in raw_engine_order.split(",") if tok.strip()]
     overlap_engine_order_str = ",".join(str(tok) for tok in raw_engine_order)
+    orient_db_path: Path | None = None
+    if orient_reads:
+        if orient_db:
+            orient_db_path = Path(orient_db).expanduser().resolve()
+        else:
+            orient_ref = cfg["databases"].get(db_key, {}).get("orient_ref")
+            if not orient_ref:
+                orient_ref = cfg["databases"].get(db_key, {}).get("chimera_ref")
+            if orient_ref:
+                orient_db_path = Path(expand_db_path(orient_ref))
+        if orient_db_path is None:
+            raise ValueError(
+                f"No orient reference configured for '{db_key}'. "
+                "Provide --orient-db or add databases.<key>.orient_ref."
+            )
     chimera_db_path: Path | None = None
     if chimera_mode != "off":
         if chimera_db:
@@ -2816,9 +2834,14 @@ def run_full_pipeline(
         "assembly_summary": out_dir / "asm" / "assembly_summary.tsv" if using_paired else None,
         "overlap_audit": out_dir / "qc" / "overlap_audit.tsv" if (using_paired and overlap_audit) else None,
         "review_queue": out_dir / "qc" / "review_queue.tsv" if using_paired else None,
+        "orient_fasta": None,
+        "orient_notmatched": None,
+        "orient_report": None,
     }
 
-    extra_stages = int(collapse_replicates) + int(chimera_mode != "off")
+    extra_stages = (
+        int(collapse_replicates) + int(chimera_mode != "off") + int(orient_reads)
+    )
 
     if using_paired:
         # Assembly + BLAST + taxonomy + postblast (optional here if using) 
@@ -3154,6 +3177,37 @@ def run_full_pipeline(
                 else:
                     weight_fh.write(f"{clean_id}\t1\n")
 
+    def _concat_fastas(source_a: Path, source_b: Path, dest: Path) -> None:
+        from Bio import SeqIO
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with dest.open("w", encoding="utf-8") as out_fh:
+            for fp in (source_a, source_b):
+                if not fp.exists():
+                    continue
+                for rec in SeqIO.parse(fp, "fasta"):
+                    SeqIO.write(rec, out_fh, "fasta")
+
+    if orient_reads:
+        on_stage("Orient reads")
+        oriented = out_dir / "qc" / "oriented.fasta"
+        notmatched = out_dir / "qc" / "orient_notmatched.fasta"
+        orient_report = out_dir / "qc" / "orient_report.tsv"
+        oriented, notmatched, orient_report = vsearch_orient_reads(
+            current_fasta,
+            oriented,
+            reference=orient_db_path,
+            notmatched_out=notmatched,
+            tabbed_out=orient_report,
+            threads=threads,
+        )
+        paths["orient_fasta"] = oriented
+        paths["orient_notmatched"] = notmatched
+        paths["orient_report"] = orient_report
+        current_fasta = oriented
+        pct += step
+        on_progress(pct)
+
     if collapse_replicates:
         on_stage("Collapse replicates")
         collapsed = out_dir / "qc" / "replicates_collapsed.fasta"
@@ -3197,6 +3251,11 @@ def run_full_pipeline(
         current_fasta = nonchimera
         pct += step
         on_progress(pct)
+
+    if orient_reads and paths["orient_notmatched"]:
+        merged = out_dir / "qc" / "oriented_combined.fasta"
+        _concat_fastas(current_fasta, paths["orient_notmatched"], merged)
+        current_fasta = merged
 
     if collapse_replicates:
         cleaned = out_dir / "qc" / "replicates_clean.fasta"

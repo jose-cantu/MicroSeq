@@ -6,6 +6,7 @@ MicroSeq can call vsearch to do the following currently.
 
 Collapse technical replicates (so dereplication / clustering ) per sample. 
 Run chimera based reference checks (UCHIME-ref) is what is used. 
+Orient reads against a reference (vsearch --orient) to fix reverse-complemented Sanger reads. 
 
 If used these stages are run after trimming and assembly and before BLAST, so they reduce redundant sequences and filter chimeras early without changing the core MicroSeq workflow utilizing single/paired files and CAP3 for assembly. 
 
@@ -13,8 +14,11 @@ If used these stages are run after trimming and assembly and before BLAST, so th
 
 * **Collapse replicates** should be used when you have technical repeats of the same isolate or when you want to reduce duplicate BLAST work. 
 * **Chimera check** is when you want an extra QC pass to remove obvious PCR chimeras before classification. 
+* **Orient reads** is when your input FASTA can contain reverse-complemented reads (common in Sanger when primers differ). It normalizes orientation before collapse/chimera so technical replicates match on the same strand.
 
-Both are off by default and do not affect the standard pipeline I have setup. Replicate sizes are recorded in `qc/replicate_weights.tsv` and used to weight BIOM counts. 
+All are off by default and do not affect the standard pipeline I have setup. Replicate sizes are recorded in `qc/replicate_weights.tsv` and used to weight BIOM counts. 
+
+In the GUI this is exposed as an explicit **Orient reads** toggle (default off) so users can keep runs reproducible and transparent. I recommend turning it on for mixed-orientation Sanger datasets (forward + reverse primer runs).
 
 ## CLI Usage
 
@@ -30,6 +34,7 @@ More commands that can be used.
 *`--replicate-id-th`: if set < 1.0, run a high‑identity clustering pass after dereplication.
 * `--min-replicate-size`: minimum unique size for dereplication.
 * `--chimera-db`: override the default chimera reference FASTA.
+* `--orient-db`: override the default orient reference FASTA.
 
 ## Chimera reference selection
 
@@ -43,6 +48,15 @@ The reference is only as good as the size of the database and the curation of th
 > **Note:** `--replicate-id-th = 1.0` performs strict exact‑match collapse after assembly. Values `< 1.0` shift the behavior to within a sample that is in essence centroiding and may merge true variants; keep `1.0` unless you explicitly accept reduced variant resolution. I'll leave that up to you as the user which you perfer given the nature of your project. 
 
 > **Also Note:** When `--chimera-mode reference` is enabled, MicroSeq forwards `--sizein` to vsearch replicate sizes are present. This perserves abundance anntotations without asserting how `uchime_ref` scores them. This keeps the `;size=` annotations intact as vsearch reads the input FASTA, so downstream stages (like replicate weighting in post‑BLAST) can still rely on those abundance tags. MicroSeq does **not** assume that `uchime_ref` uses abundance in its scoring; if you need abundance‑driven chimera scoring, I would consider instead using a de novo chimera step instead which I plan to implement in MicroSeq in a future update soon. 
+
+## Orient reference selection
+
+When orientation is enabled, MicroSeq uses the configured orientation reference:
+
+* `--db gg2` -> uses `databases.gg2.orient_ref` (falls back to `databases.gg2.chimera_ref`)
+* `--db silva` -> uses `databases.silva.orient_ref` (falls back to `databases.silva.chimera_ref`)
+
+The oriented reads are written to `qc/oriented.fasta`, the reads with undetermined orientation are written to `qc/orient_notmatched.fasta`, and a vsearch tabular report is written to `qc/orient_report.tsv`. The pipeline runs collapse/chimera on the oriented reads and then merges the notmatched reads back before BLAST so they are still classified (but skipped for chimera filtering). This is recommended for reverse‑primer Sanger datasets where strand flips are common. 
 
 ## Workflow Scripts
 
@@ -58,17 +72,17 @@ Both `tests/paired_ab1_demo_run/...` and `tests/reverse_orientation_only_ab1_dem
 
 ## Configuration
 
-`config.yaml` includes a `chimera_ref` key per database:
+`config.yaml` includes a `chimera_ref` key per database and optional `orient_ref`:
 
 ```yaml
 databases:
   gg2:
     chimera_ref: ${MICROSEQ_DB_HOME}/gg2/dna-sequences.fasta
+    orient_ref: ${MICROSEQ_DB_HOME}/gg2/dna-sequences.fasta
   silva:
     chimera_ref: ${MICROSEQ_DB_HOME}/silva/SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta
+    orient_ref: ${MICROSEQ_DB_HOME}/silva/SILVA_138.1_SSURef_NR99_tax_silva_trunc.fasta
 ```
-
-
 
 
 

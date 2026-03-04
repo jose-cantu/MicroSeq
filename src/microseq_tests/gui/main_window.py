@@ -794,6 +794,12 @@ class MainWindow(QMainWindow):
         self.collapse_reps_chk = QCheckBox("Collapse replicates")
         self.collapse_reps_chk.setToolTip("Collapse technical replicates with vsearch (requires vsearch).")
 
+        self.orient_reads_chk = QCheckBox("Orient reads")
+        self.orient_reads_chk.setToolTip(
+            "Orient reads against the selected DB reference before collapse/chimera. "
+            "Recommended for mixed-orientation Sanger (forward+reverse primer runs)."
+        )
+
         self.chimera_mode_combo = QComboBox()
         self.chimera_mode_combo.addItem("Off", userData="off")
         self.chimera_mode_combo.addItem("Reference (vsearch)", userData="reference")
@@ -870,6 +876,9 @@ class MainWindow(QMainWindow):
         self.collapse_reps_chk.setChecked(
             self.settings.value("collapse_replicates", False, type=bool)
         )
+        self.orient_reads_chk.setChecked(
+            self.settings.value("orient_reads", False, type=bool)
+        )
 
         saved_chimera_mode = self.settings.value("chimera_mode", "off")
         chimera_idx = max(0, self.chimera_mode_combo.findData(saved_chimera_mode))
@@ -914,6 +923,9 @@ class MainWindow(QMainWindow):
 
         self.collapse_reps_chk.toggled.connect(
             lambda checked: self.settings.setValue("collapse_replicates", checked)
+        )
+        self.orient_reads_chk.toggled.connect(
+            lambda checked: self.settings.setValue("orient_reads", checked)
         )
 
         self.chimera_mode_combo.currentIndexChanged.connect(
@@ -1348,6 +1360,7 @@ class MainWindow(QMainWindow):
         pipeline_opts = QHBoxLayout()
         pipeline_opts.addWidget(QLabel("Pipeline options"))
         pipeline_opts.addWidget(self.collapse_reps_chk)
+        pipeline_opts.addWidget(self.orient_reads_chk)
         pipeline_opts.addWidget(QLabel("Chimera"))
         pipeline_opts.addWidget(self.chimera_mode_combo)
         pipeline_opts.addStretch()
@@ -1502,6 +1515,7 @@ class MainWindow(QMainWindow):
     def _pipeline_kwargs(self) -> dict:
         return {
             "collapse_replicates": self.collapse_reps_chk.isChecked(),
+            "orient_reads": self.orient_reads_chk.isChecked(),
             "chimera_mode": self.chimera_mode_combo.currentData(),
             "overlap_audit": self.overlap_audit_chk.isChecked(),
         }
@@ -1558,7 +1572,11 @@ class MainWindow(QMainWindow):
 
 
     def _ensure_vsearch_available(self) -> bool:
-        if not (self.collapse_reps_chk.isChecked() or self.chimera_mode_combo.currentData() != "off"):
+        if not (
+            self.collapse_reps_chk.isChecked()
+            or self.orient_reads_chk.isChecked()
+            or self.chimera_mode_combo.currentData() != "off"
+        ):
             return True
         try:
             resolve_vsearch()
