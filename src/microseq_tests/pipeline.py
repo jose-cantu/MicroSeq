@@ -37,7 +37,7 @@ from microseq_tests.trimming.fastq_to_fasta import (
 from microseq_tests.trimming.primer_trim import trim_primer_fastqs, update_trim_summary
 
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
-from microseq_tests.assembly.paired_assembly import assemble_pairs, _build_keep_separate_pairs, _write_combined_fasta, write_cap3_process_logs, 
+from microseq_tests.assembly.paired_assembly import assemble_pairs, _build_keep_separate_pairs, _write_combined_fasta, write_cap3_process_logs 
 from microseq_tests.assembly.overlap_utils import (
     AlignedOverlapCandidate,
     iter_end_anchored_overlaps,
