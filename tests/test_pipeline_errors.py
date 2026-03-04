@@ -128,7 +128,7 @@ def test_selected_mode_preserves_pair_missing_when_compare_pairing_report_lists_
         return 0
 
     def fake_add_tax(_hits, _tax, out_tsv):
-        Path(out_tsv).write_text("qseqid\ttaxonomy\n", encoding="utf-8")
+        Path(out_tsv).write_text("qseqid\ttaxonomy\nS1|contig|cap3_c1\tk__Bacteria\n", encoding="utf-8")
         return 0
 
     monkeypatch.setattr(pipeline, "run_trim", fake_run_trim)
@@ -150,6 +150,10 @@ def test_selected_mode_preserves_pair_missing_when_compare_pairing_report_lists_
 
     blast_inputs = (out_dir / "asm" / "blast_inputs.tsv").read_text(encoding="utf-8")
     assert "S2\tpair_missing" in blast_inputs
+
+    hits_tax = (out_dir / "hits_tax.tsv").read_text(encoding="utf-8")
+    assert "sample_id" in hits_tax.splitlines()[0]
+    assert "S1\tk__Bacteria" in hits_tax
 
 
 def test_selected_summary_includes_cap3_compatible_telemetry_columns(tmp_path: Path):

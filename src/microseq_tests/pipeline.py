@@ -37,7 +37,7 @@ from microseq_tests.trimming.fastq_to_fasta import (
 from microseq_tests.trimming.primer_trim import trim_primer_fastqs, update_trim_summary
 
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
-from microseq_tests.assembly.paired_assembly import assemble_pairs, _build_keep_separate_pairs, _write_combined_fasta 
+from microseq_tests.assembly.paired_assembly import assemble_pairs, _build_keep_separate_pairs, _write_combined_fasta, write_cap3_process_logs, 
 from microseq_tests.assembly.overlap_utils import (
     AlignedOverlapCandidate,
     iter_end_anchored_overlaps,
@@ -1436,7 +1436,7 @@ def _build_blast_inputs(
             source_group = ("contig", "cap3_c", contigs) 
 
         elif singlets:
-            source_group = ("singlet", cap3_s", singlet)
+            source_group = ("singlet", "cap3_s", singlets)
 
         payload_ids: list[str] = []
         hypothesis_map: list[str] = []
@@ -1934,10 +1934,15 @@ def run_compare_assemblers(
 
                         cmd = [cap3_exe, sample_fasta.name, *cap3_args]
                         cap3_run = subprocess.run(cmd, cwd=sample_dir, capture_output=True, text=True, check=False)
-                        cap3_stdout_file = sample_dir / "cap3.stdout.txt"
-                        cap3_stderr_file = sample_dir / "cap3.stderr.txt"
-                        cap3_stdout_file.write_text(cap3_run.stdout or "", encoding="utf-8")
-                        cap3_stderr_file.write_text(cap3_run.stderr or "", encoding="utf-8")
+                        logs_root = Path(out_dir) / "logs" / "cap3"
+                        cap3_stdout_file, cap3_stderr_file = write_cap3_process_logs(
+                            logs_root,
+                            sample_id=sample_id,
+                            command=cmd,
+                            assembler_label=spec.id,
+                            stdout_text=cap3_run.stdout or "",
+                            stderr_text=cap3_run.stderr or "",
+                        )
                         cap3_stdout_path = str(cap3_stdout_file)
                         cap3_stderr_path = str(cap3_stderr_file)
 
@@ -3243,8 +3248,8 @@ def run_full_pipeline(
             if "qseqid" in tax_df.columns:
                 normalized_sample_ids = tax_df["qseqid"].map(qseqid_to_sample_id)
                 if "sample_id" not in tax_df.columns or not tax_df["sample_id"].astype(str).equals(normalized_sample_ids.astype(str)):
-                    tax_df["sample_id"] = normalized_sample_ids 
-                    tax_df.to_csv(paths["tax"], sep="\t", index=False)
+                    tax_df["sample_id"] = normalized_sample_ids
+                    tax_df.to_csv(paths["tax"], sep="\t", index=False) 
         except Exception as exc:
             L.warning("Failed to add paired sample_id column to taxonomy table: %s", exc)
 

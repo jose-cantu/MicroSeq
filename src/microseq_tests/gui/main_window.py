@@ -44,6 +44,32 @@ def _normalize_legacy_compare_diag_detail(detail: str, selected_engine: str) -> 
         return text
     return text[: match.start(2)] + engine_label
 
+def _trace_flags_to_labels(flags: str, status: str, mixed_frac: str, review_reason: str = "") -> list[str]:
+    labels: list[str] = []
+    flag_set = {f.strip().upper() for f in str(flags or "").split(";") if f.strip()}
+    status_norm = str(status or "NA").strip().upper()
+
+    if "LOW_SNR" in flag_set:
+        labels.append("Low signal / high background (fail)")
+    elif "LOW_SNR_WARN" in flag_set:
+        labels.append("Low signal warning")
+
+    if "MIXED_PEAKS" in flag_set:
+        labels.append("Mixed peaks detected")
+
+    if flag_set.intersection({"TRACE_DATA_MISSING", "SNR_UNDEFINED", "MIXED_UNDEFINED", "TRACE_PARSE_ERROR"}):
+        labels.append("Trace QC unavailable/NA")
+
+    if str(review_reason or "").strip().lower() == "mixture_suspected":
+        labels.append("Mixture suspected")
+
+    if mixed_frac:
+        labels.append(f"Max mixed-peak fraction: {mixed_frac}")
+
+    if not labels:
+        labels.append(f"Trace QC {status_norm}")
+    return labels
+
 from PySide6.QtCore import (
     QLine, Qt, QObject, QThread, Signal, Slot, QSettings, QTimer, QModelIndex, QProcess, QUrl
 )
@@ -975,7 +1001,7 @@ class MainWindow(QMainWindow):
         self.summary_filter = QComboBox()
         self.summary_filter.addItem("All statuses", userData=None)
 
-        self.summary_table = QTableWidget(0, 14)
+        self.summary_table = QTableWidget(0, 15)
         self.summary_table.setHorizontalHeaderLabels(
             [
                 "sample_id",
@@ -992,15 +1018,16 @@ class MainWindow(QMainWindow):
                 "overlaps_removed",
                 "primer_mode",
                 "primer_stage",
+                "trace_qc",
             ]
         )
         self.summary_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.summary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.summary_table.itemSelectionChanged.connect(self._update_detail_panel)
 
-        self.blast_table = QTableWidget(0, 4)
+        self.blast_table = QTableWidget(0, 5)
         self.blast_table.setHorizontalHeaderLabels(
-            ["sample_id", "blast_payload", "reason", "payload_ids"]
+            ["sample_id", "blast_payload", "reason", "payload_ids", "trace_qc"]
         )
         self.blast_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.blast_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -1136,6 +1163,14 @@ class MainWindow(QMainWindow):
         self.detail_payload_ids_lbl = QLabel("payload_ids: ")
         self.detail_overlap_lbl = QLabel("overlap: ")
         self.detail_assembly_engine_lbl = QLabel("assembly path: ")
+        self.detail_trace_qc_lbl = QLabel("trace_qc: ")
+        self.detail_trace_reason_lbl = QLabel("trace_qc_detail: ")
+        self.detail_trace_qc_lbl.setToolTip(
+            "Trace QC flags are chromatogram-signal indicators; contamination is not directly inferred from trace alone."
+        )
+        self.detail_trace_reason_lbl.setToolTip(
+            "Trace QC flags are chromatogram-signal indicators; contamination is not directly inferred from trace alone."
+        )
 
         self.detail_contigs_btn = QPushButton("Open contigs")
         self.detail_singlets_btn = QPushButton("Open singlets")
@@ -1180,6 +1215,8 @@ class MainWindow(QMainWindow):
         detail_layout.addWidget(self.detail_payload_ids_lbl)
         detail_layout.addWidget(self.detail_overlap_lbl)
         detail_layout.addWidget(self.detail_assembly_engine_lbl)
+        detail_layout.addWidget(self.detail_trace_qc_lbl)
+        detail_layout.addWidget(self.detail_trace_reason_lbl)
         detail_layout.addWidget(self.detail_contigs_btn)
         detail_layout.addWidget(self.detail_singlets_btn)
         detail_layout.addWidget(self.detail_info_btn)
@@ -2326,6 +2363,13 @@ class MainWindow(QMainWindow):
             "pair_missing": QColor("#FFCDD2"),
         }
 
+        trace_colors = {
+            "FAIL": QColor("#FFCDD2"),
+            "WARN": QColor("#FFE0B2"),
+            "PASS": QColor("#C8E6C9"),
+            "NA": QColor("#E0E0E0"),
+        }
+
         for row_idx, row in df.iterrows():
             self.summary_table.insertRow(row_idx)
             row_values = [
@@ -2343,6 +2387,7 @@ class MainWindow(QMainWindow):
                 self._fmt_table_value(row.get("overlaps_removed", "")),
                 self._fmt_table_value(row.get("primer_mode", "")),
                 self._fmt_table_value(row.get("primer_stage", "")),
+                self._fmt_table_value(row.get("trace_status", "NA")),
             ]
             for col, value in enumerate(row_values):
                 item = QTableWidgetItem(value)
@@ -2352,6 +2397,9 @@ class MainWindow(QMainWindow):
                     color = status_colors.get(status, QColor("#E1F5FE") if status.startswith("overlap_") else None)
                     if color:
                         item.setBackground(QBrush(color))
+                elif col == 14:
+                    color = trace_colors.get(value.strip().upper(), QColor("#E0E0E0"))
+                    item.setBackground(QBrush(color))
                 self.summary_table.setItem(row_idx, col, item)
             self._summary_rows[row_values[0]] = {
                 "status": row_values[1],
@@ -2367,6 +2415,10 @@ class MainWindow(QMainWindow):
                 "overlaps_removed": row_values[11],
                 "primer_mode": row_values[12],
                 "primer_stage": row_values[13],
+                "trace_status": row_values[14],
+                "trace_flags": self._fmt_table_value(row.get("trace_flags", "")),
+                "trace_mixed_peak_frac_max": self._fmt_table_value(row.get("trace_mixed_peak_frac_max", "")),
+                "review_reason": self._fmt_table_value(row.get("review_reason", "")),
             }
         for status in sorted(df["status"].dropna().unique()):
             self.summary_filter.addItem(status, userData=status)
@@ -2378,6 +2430,12 @@ class MainWindow(QMainWindow):
         df = pd.read_csv(blast_tsv, sep="\t")
         self.blast_table.setRowCount(0)
         self._blast_rows.clear()
+        trace_colors = {
+            "FAIL": QColor("#FFCDD2"),
+            "WARN": QColor("#FFE0B2"),
+            "PASS": QColor("#C8E6C9"),
+            "NA": QColor("#E0E0E0"),
+        }
         for row_idx, row in df.iterrows():
             self.blast_table.insertRow(row_idx)
             row_values = [
@@ -2385,15 +2443,23 @@ class MainWindow(QMainWindow):
                 self._fmt_table_value(row.get("blast_payload", "")),
                 self._fmt_table_value(row.get("reason", "")),
                 self._fmt_table_value(row.get("payload_ids", "")),
+                self._fmt_table_value(row.get("trace_status", "NA")),
             ]
             for col, value in enumerate(row_values):
                 item = QTableWidgetItem(value)
                 item.setToolTip(value)
+                if col == 4:
+                    color = trace_colors.get(value.strip().upper(), QColor("#E0E0E0"))
+                    item.setBackground(QBrush(color))
                 self.blast_table.setItem(row_idx, col, item)
             self._blast_rows[row_values[0]] = {
                 "blast_payload": row_values[1],
                 "reason": row_values[2],
                 "payload_ids": row_values[3],
+                "trace_status": row_values[4],
+                "trace_flags": self._fmt_table_value(row.get("trace_flags", "")),
+                "trace_mixed_peak_frac_max": self._fmt_table_value(row.get("trace_mixed_peak_frac_max", "")),
+                "review_reason": self._fmt_table_value(row.get("review_reason", "")),
             }
         self._configure_table_view(self.blast_table)
 
@@ -2690,6 +2756,21 @@ class MainWindow(QMainWindow):
                 f"assembly path: {self._join_values([r.get('assembler_name', '') for r in rows])}"
             )
 
+            trace_status_vals = [str(r.get("trace_status", "NA") or "NA").upper() for r in rows]
+            trace_labels = [
+                "; ".join(
+                    _trace_flags_to_labels(
+                        r.get("trace_flags", ""),
+                        r.get("trace_status", "NA"),
+                        r.get("trace_mixed_peak_frac_max", ""),
+                        r.get("review_reason", ""),
+                    )
+                )
+                for r in rows
+            ]
+            self.detail_trace_qc_lbl.setText(f"trace_qc: {self._join_values(trace_status_vals)}")
+            self.detail_trace_reason_lbl.setText(f"trace_qc_detail: {self._join_values(trace_labels)}")
+
             audit_values = [self._audit_rows.get(r.get("sample_id", ""), {}) for r in rows]
             statuses = [audit.get("status", "-") for audit in audit_values if audit]
             self.detail_overlap_lbl.setText(f"overlap: {self._join_values(statuses)}")
@@ -2748,6 +2829,33 @@ class MainWindow(QMainWindow):
             else:
                 engine_vals.append("paired flow (see merge_status + status)")
         self.detail_assembly_engine_lbl.setText(f"assembly path: {self._join_values(engine_vals)}")
+        
+        trace_status_vals = [
+            str(
+                self._summary_rows.get(sid, {}).get("trace_status")
+                or self._blast_rows.get(sid, {}).get("trace_status")
+                or "NA"
+            ).upper()
+            for sid in sample_ids
+        ]
+        trace_labels = []
+        for sid in sample_ids:
+            src = self._summary_rows.get(sid, {})
+            if not src:
+                src = self._blast_rows.get(sid, {})
+            trace_labels.append(
+                "; ".join(
+                    _trace_flags_to_labels(
+                        src.get("trace_flags", ""),
+                        src.get("trace_status", "NA"),
+                        src.get("trace_mixed_peak_frac_max", ""),
+                        src.get("review_reason", ""),
+                    )
+                )
+            )
+
+        self.detail_trace_qc_lbl.setText(f"trace_qc: {self._join_values(trace_status_vals)}")
+        self.detail_trace_reason_lbl.setText(f"trace_qc_detail: {self._join_values(trace_labels)}")
 
         audit_values = [self._audit_rows.get(sid, {}) for sid in sample_ids]
         if len(sample_ids) == 1 and audit_values and audit_values[0]:

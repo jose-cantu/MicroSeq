@@ -16,7 +16,8 @@ import logging
 import re 
 from pathlib import Path 
 import pandas as pd
-from microseq_tests.utility.io_utils import normalise_tsv 
+from microseq_tests.utility.io_utils import normalise_tsv
+from microseq_tests.utility.id_normaliser import qseqid_to_sample_id
 
 # -------- helpers -----------------------------------------------------------
 
@@ -40,9 +41,9 @@ def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path, fill_speci
             dtype=str, 
             )
 
-    # Keep both qseqid (for downstream merges) and sample_id for postblast
+    # Keep both qseqid (for downstream merges + structural payload id) and sample_id for postblast + biological sample id 
     if "qseqid" in hits.columns and "sample_id" not in hits.columns:
-        hits.insert(hits.columns.get_loc("qseqid") + 1, "sample_id", hits["qseqid"])
+        hits.insert(hits.columns.get_loc("qseqid") + 1, "sample_id", hits["qseqid"].map(qseqid_to_sample_id)) 
     elif "sample_id" in hits.columns and "qseqid" not in hits.columns:
         hits.insert(0, "qseqid", hits["sample_id"])
    # canonicalize the subject ID so it can match the taxonomy table for each of the databases 

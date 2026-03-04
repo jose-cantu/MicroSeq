@@ -7,7 +7,8 @@ from __future__ import annotations # Postpones evaluation of type annotations (P
 import logging # print warning messages  
 from os import PathLike
 import subprocess 
-from pathlib import Path 
+from pathlib import Path
+from datetime import datetime, timezone 
 from typing import Iterable, Sequence, Literal
 import re
 
@@ -20,6 +21,37 @@ from .two_read_merge import merge_two_reads, MergeInputError
 from .overlap_backends import resolve_overlap_engine
 
 L = logging.getLogger(__name__) 
+
+def _safe_log_token(value: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "").strip()) # normalize unsafe chars 
+    return token.strip("_") or "cap3" # never empty so fallback to prevent blank stem 
+
+def write_cap3_process_logs(
+    logs_root: Path, # directory root for CAP3 logs 
+    *, 
+    sample_id: str, # full sample key 
+    command: Sequence[str], # argv list used to run CAP3 
+    assembler_label: str, # label used in filename and header (cap3_default) 
+    stdout_text: str, # capturing stdout 
+    stderr_text: str, # capturing stderr  
+    ) -> tuple[Path, Path]: # returns (stdout_path, stderr_path) 
+    """Persist CAP3 process stdout/stderr with context headers."""
+    logs_root.mkdir(parents=True, exist_ok=True) 
+    sample_token = _safe_log_token(sample_id) # safe token for filenames 
+    assembler_token = _safe_log_token(assembler_label) # safe toekn for filenames 
+    stem = f"{sample_token}__{assembler_token}" # deterministic naming scheme 
+    stdout_path = logs_root / f"{stem}.stdout.log" # stable stdout filename 
+    stderr_path = logs_root / f"{stem}.stderr.log" # stable stderr filename 
+    ts = datetime.now(timezone.utc).isoformat() # timestamp uses UTC 
+    header = ( # header captures minimum debugging context for me 
+        f"# timestamp_utc: {ts}\n"
+        f"# sample_id: {sample_id}\n"
+        f"# assembler: {assembler_label}\n"
+        f"# command: {' '.join(str(part) for part in command)}\n\n"
+    )
+    stdout_path.write_text(header + (stdout_text or ""), encoding="utf-8")  # side effect: writes stdout artifact
+    stderr_path.write_text(header + (stderr_text or ""), encoding="utf-8")  # side effect: writes stderr artifact
+    return stdout_path, stderr_path  # invariant: paths are concrete filesystem locations
 
 def _iter_paths(value: Path | list[Path]) -> Iterable[Path]:
     """Normalize a stored path entry such as a list into an iterator."""
@@ -338,10 +370,12 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
             if cap3_version != "unknown":
                 break
 
+    cap3_logs_dir = out_dir / "logs" / "cap3" 
+
     metadata_lines = [
         f"cap3_executable\t{cap3_exe}",
         f"cap3_version\t{cap3_version}",
-        "sample_id\tcap3_command",
+        "sample_id\tcap3_command\tcap3_stdout_log\tcap3_stderr_log",
     ]
 
     if pairing_report is not None:
@@ -468,7 +502,7 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
             L.info("Run CAP3 (apired) %s: %s", sample_key, " ".join(cmd))
 
             metadata_lines.append(
-                f"{sample_key}\t{' '.join(cmd)}"
+                f"{sample_key}\t{' '.join(cmd)}\t\t"
             )
 
             try:
@@ -483,7 +517,25 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
                     L.info("CAP3 stdout for %s:\n%s", sample_key, result.stdout)
                 if result.stderr:
                     L.warning("CAP3 stderr for %s:\n%s", sample_key, result.stderr)
+                stdout_path, stderr_path = write_cap3_process_logs(
+                    cap3_logs_dir,
+                    sample_id=sample_key,
+                    command=cmd,
+                    assembler_label="cap3_default",
+                    stdout_text=result.stdout or "",
+                    stderr_text=result.stderr or "",
+                )
+                metadata_lines[-1] = f"{sample_key}\t{' '.join(cmd)}\t{stdout_path}\t{stderr_path}"
             except subprocess.CalledProcessError as exc:
+                stdout_path, stderr_path = write_cap3_process_logs(
+                    cap3_logs_dir,
+                    sample_id=sample_key,
+                    command=cmd,
+                    assembler_label="cap3_default",
+                    stdout_text=exc.stdout or "",
+                    stderr_text=exc.stderr or "",
+                )
+                metadata_lines[-1] = f"{sample_key}\t{' '.join(cmd)}\t{stdout_path}\t{stderr_path}"
                 L.error("CAP3 failed for sample %s (exit %s):\n%s", sample_key, exc.returncode, exc.stderr
                 )
                 if exc.stdout:

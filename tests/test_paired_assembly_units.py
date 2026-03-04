@@ -49,7 +49,7 @@ from microseq_tests.assembly.overlap_utils import (
     iter_end_anchored_overlaps,
     select_best_overlap,
 )
-from microseq_tests.assembly.paired_assembly import _write_combined_fasta
+from microseq_tests.assembly.paired_assembly import _write_combined_fasta, assemble_pairs
 from microseq_tests.assembly.two_read_merge import merge_two_reads
 from microseq_tests.assembly.overlap_backends import compute_overlap_candidates, resolve_overlap_engine
 from microseq_tests.pipeline import (
@@ -144,43 +144,52 @@ def test_write_combined_fasta_with_missing_qual(tmp_path: Path, caplog: pytest.L
 
 
 def test_build_blast_inputs_manifest(tmp_path: Path) -> None:
-    """Validate BLAST input FASTA/TSV manifest labeling for contigs, singlets, and missing pairs."""
+    """Validate BLAST input FASTA/TSV manifest labeling for contig preferred fallback, singlets, and missing pairs."""
     asm_dir = tmp_path / "asm"
     output_fasta = tmp_path / "blast_inputs.fasta"
     output_tsv = tmp_path / "blast_inputs.tsv"
 
     sample1_dir = asm_dir / "sample1"
     sample2_dir = asm_dir / "sample2"
+    sample4_dir = asm_dir / "sample4" 
     sample1_dir.mkdir(parents=True)
     sample2_dir.mkdir(parents=True)
+    sample4_dir.mkdir(parents=True) 
 
     contig = SeqRecord(Seq("ACGT"), id="contigA", description="")
     singlet = SeqRecord(Seq("TTTT"), id="singletA", description="")
     _write_fasta(sample1_dir / "sample1_paired.fasta.cap.contigs", [contig])
+    _write_fasta(sample1_dir / "sample1_paired.fasta.cap.singlets", [singlet])
     _write_fasta(sample2_dir / "sample2_paired.fasta.cap.singlets", [singlet])
+    _write_fasta(sample4_dir / "sample4_paired.fasta.cap.contigs", [contig])
 
     paired_samples = {
         "sample1": {"F": [Path("f1")], "R": [Path("r1")]},
         "sample2": {"F": [Path("f2")], "R": [Path("r2")]},
+        "sample4": {"F": [Path("f4")], "R": [Path("r4")]},
     }
     missing_samples = {"sample3"}
 
     _build_blast_inputs(asm_dir, paired_samples, missing_samples, output_fasta, output_tsv)
 
     rows = {
-        line.split("\t", 1)[0]: line.split("\t")
+        line.split(" ", 1)[0]: line.split(" ")
         for line in output_tsv.read_text(encoding="utf-8").splitlines()[1:]
     }
     assert rows["sample1"][1] == "contig"
     assert rows["sample2"][1] == "singlet"
+    assert rows["sample4"][1] == "contig"
     assert rows["sample3"][1] == "pair_missing"
 
-    payload_ids = rows["sample1"][2].split(";")[0]
-    assert payload_ids.startswith("sample1|contig|cap3_c1=")
+    sample1_payload_ids = rows["sample1"][2]
+    assert "sample1|contig|cap3_c1=" in sample1_payload_ids
+    assert "sample1|singlet|cap3_s1=" not in sample1_payload_ids
 
     fasta_ids = [rec.id for rec in SeqIO.parse(output_fasta, "fasta")]
     assert "sample1|contig|cap3_c1" in fasta_ids
+    assert "sample1|singlet|cap3_s1" not in fasta_ids
     assert "sample2|singlet|cap3_s1" in fasta_ids
+    assert "sample4|contig|cap3_c1" in fasta_ids
 
 
 def test_collect_pairing_catalog_missing_samples(tmp_path: Path) -> None:
@@ -494,7 +503,40 @@ def test_run_compare_assemblers_merge_specs_use_single_engine(tmp_path: Path, mo
     assert (compare_root / "merge_two_reads_ungapped" / "S1").exists()
     assert (compare_root / "merge_two_reads_edlib" / "S1").exists()
 
+def test_run_compare_assemblers_selected_ids_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Selected assembler compare mode should emit rows only for requested assembler IDs."""
+    in_dir = tmp_path / "paired_fasta"
+    in_dir.mkdir(parents=True)
 
+    (in_dir / "S1_27F.fasta").write_text(">S1_27F\nACGT\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">S1_1492R\nACGT\n", encoding="utf-8")
+
+    class _DummyReport:
+        status = "assembled"
+        warning = ""
+        selected_engine = "biopython"
+        diag_detail_for_human = "ok"
+        all_hypotheses = []
+
+    def fake_merge_two_reads(*, sample_id, output_dir, overlap_engine, **_kwargs):
+        contig = output_dir / f"{sample_id}.{overlap_engine}.fasta"
+        contig.write_text(f">{sample_id}_{overlap_engine}\nACGT\n", encoding="utf-8")
+        return contig, _DummyReport()
+
+    monkeypatch.setattr("microseq_tests.pipeline.merge_two_reads", fake_merge_two_reads)
+
+    out_tsv = run_compare_assemblers(
+        in_dir,
+        tmp_path,
+        assembler_ids=["merge_two_reads:biopython"],
+        fwd_pattern="27F",
+        rev_pattern="1492R",
+    )
+
+    rows = out_tsv.read_text(encoding="utf-8").splitlines()
+    assert len(rows) == 2
+    assert "merge_two_reads:biopython" in rows[1]
+    assert "merge_two_reads:edlib" not in "\n".join(rows)
 
 def test_run_compare_assemblers_ambiguous_overlap_reports_zero_contig_len(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     in_dir = tmp_path / "paired_fasta"
@@ -565,8 +607,121 @@ def test_run_compare_assemblers_cap3_nonzero_exit_still_records_artifacts(
     assert "cap3_nonzero_exit_with_output" in text
     assert "returncode=1; profile=strict" in text
     assert "	assembled	cap3	120	" in text
-    assert "cap3.stdout.txt" in text
-    assert "cap3.stderr.txt" in text
+    assert "logs/cap3/S1__cap3_strict.stdout.log" in text
+    assert "logs/cap3/S1__cap3_strict.stderr.log" in text 
+
+def test_assemble_pairs_writes_cap3_process_logs_on_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    in_dir = tmp_path / "paired_fasta"
+    out_dir = tmp_path / "asm"
+    in_dir.mkdir()
+    (in_dir / "S1_27F.fasta").write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">r\n" + "A" * 120 + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "microseq_tests.assembly.paired_assembly.load_config",
+        lambda: {
+            "tools": {"cap3": "cap3"},
+            "overlap_eval": {},
+            "merge_two_reads": {"high_conflict_action": "route_cap3"},
+        },
+    )
+
+    class FakeMergeReport:
+        merge_status = "identity_low"
+        overlap_engine = "biopython"
+        orientation = "revcomp"
+        overlap_len = 20
+        identity = 0.5
+        merge_warning = "identity_low"
+
+    monkeypatch.setattr(
+        "microseq_tests.assembly.paired_assembly.merge_two_reads",
+        lambda **_kwargs: (None, FakeMergeReport()),
+    )
+
+    class FakeCompleted:
+        def __init__(self, *, stdout: str = "", stderr: str = "", returncode: int = 0) -> None:
+            self.stdout = stdout
+            self.stderr = stderr
+            self.returncode = returncode
+
+    def fake_run(cmd, check=None, capture_output=None, text=None, cwd=None):
+        if "--version" in cmd:
+            return FakeCompleted(stdout="CAP3 1.0")
+        sample_fasta = Path(cwd) / cmd[1]
+        contigs = sample_fasta.with_suffix(sample_fasta.suffix + ".cap.contigs")
+        contigs.write_text(">c1\n" + "A" * 120 + "\n", encoding="utf-8")
+        return FakeCompleted(stdout="DETAILED DISPLAY OF CONTIGS", stderr="cap3 warning")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    contigs = assemble_pairs(in_dir, out_dir, fwd_pattern="27F", rev_pattern="1492R", use_qual=False)
+    assert contigs
+
+    stdout_log = out_dir / "logs" / "cap3" / "S1__cap3_default.stdout.log"
+    stderr_log = out_dir / "logs" / "cap3" / "S1__cap3_default.stderr.log"
+    assert stdout_log.exists()
+    assert stderr_log.exists()
+    assert "# sample_id: S1" in stdout_log.read_text(encoding="utf-8")
+    assert "DETAILED DISPLAY OF CONTIGS" in stdout_log.read_text(encoding="utf-8")
+
+
+def test_assemble_pairs_writes_cap3_process_logs_on_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    in_dir = tmp_path / "paired_fasta"
+    out_dir = tmp_path / "asm"
+    in_dir.mkdir()
+    (in_dir / "S1_27F.fasta").write_text(">f\n" + "A" * 120 + "\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">r\n" + "A" * 120 + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "microseq_tests.assembly.paired_assembly.load_config",
+        lambda: {
+            "tools": {"cap3": "cap3"},
+            "overlap_eval": {},
+            "merge_two_reads": {"high_conflict_action": "route_cap3"},
+        },
+    )
+
+    class FakeMergeReport:
+        merge_status = "identity_low"
+        overlap_engine = "biopython"
+        orientation = "revcomp"
+        overlap_len = 20
+        identity = 0.5
+        merge_warning = "identity_low"
+
+    monkeypatch.setattr(
+        "microseq_tests.assembly.paired_assembly.merge_two_reads",
+        lambda **_kwargs: (None, FakeMergeReport()),
+    )
+
+    class FakeCompleted:
+        def __init__(self, *, stdout: str = "", stderr: str = "", returncode: int = 0) -> None:
+            self.stdout = stdout
+            self.stderr = stderr
+            self.returncode = returncode
+
+    def fake_run(cmd, check=None, capture_output=None, text=None, cwd=None):
+        if "--version" in cmd:
+            return FakeCompleted(stdout="CAP3 1.0")
+        raise subprocess.CalledProcessError(returncode=2, cmd=cmd, output="CAP3 FAIL OUT", stderr="CAP3 FAIL ERR")
+
+    import subprocess
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        assemble_pairs(in_dir, out_dir, fwd_pattern="27F", rev_pattern="1492R", use_qual=False)
+
+    stdout_log = out_dir / "logs" / "cap3" / "S1__cap3_default.stdout.log"
+    stderr_log = out_dir / "logs" / "cap3" / "S1__cap3_default.stderr.log"
+    assert stdout_log.exists()
+    assert stderr_log.exists()
+    assert "CAP3 FAIL OUT" in stdout_log.read_text(encoding="utf-8")
+    assert "CAP3 FAIL ERR" in stderr_log.read_text(encoding="utf-8")
+
+
+
 
 
 def test_overlap_helper_prefers_end_overlap_over_internal_match() -> None:
