@@ -2862,6 +2862,74 @@ class MainWindow(QMainWindow):
             return row_map.get("winner_reason", "")
         return ""
 
+    def _append_unique_detail_path(self, kind: str, path: Path) -> None:
+        if path.exists() and path not in self._detail_paths[kind]:
+            self._detail_paths[kind].append(path)
+
+    def _append_sample_cap3_paths(self, sample_ids: list[str]) -> None:
+        """Append default CAP3 artifacts from the sample folder when available."""
+        if not self._asm_dir:
+            return
+        for sample_id in sample_ids:
+            sample_dir = self._asm_dir / sample_id
+            contig_path = sample_dir / f"{sample_id}_paired.fasta.cap.contigs"
+            singlet_path = sample_dir / f"{sample_id}_paired.fasta.cap.singlets"
+            info_path = sample_dir / f"{sample_id}_paired.fasta.cap.info"
+            self._append_unique_detail_path("contigs", contig_path)
+            self._append_unique_detail_path("singlets", singlet_path)
+            self._append_unique_detail_path("info", info_path)
+
+    def _append_compare_fallback_paths(self, rows: list[dict[str, str]]) -> None:
+        """Append fallback compare artifacts from deterministic asm outputs."""
+        if not self._asm_dir:
+            return
+        trace_dir = self._asm_dir / "selection_trace"
+        process_log_dir = self._asm_dir / "process_logs"
+
+        for row in rows:
+            sample_id = row.get("sample_id", "").strip()
+            assembler_id = row.get("assembler_id", "").strip()
+            if not sample_id:
+                continue
+
+            safe_sample = re.sub(r"[^A-Za-z0-9._-]", "_", sample_id or "sample")
+            safe_assembler = re.sub(r"[^A-Za-z0-9._-]", "_", assembler_id or "tool")
+
+            trace_path = trace_dir / f"{safe_sample}.selection_trace.tsv"
+            self._append_unique_detail_path("selection_trace", trace_path)
+
+            for root in (self._asm_dir / sample_id, process_log_dir):
+                if not root.exists() or not root.is_dir():
+                    continue
+                stdout_glob = sorted(root.glob(f"{safe_sample}__{safe_assembler}__process*.stdout.txt"))
+                stderr_glob = sorted(root.glob(f"{safe_sample}__{safe_assembler}__process*.stderr.txt"))
+                for stdout_path in stdout_glob:
+                    self._append_unique_detail_path("tool_stdout", stdout_path)
+                for stderr_path in stderr_glob:
+                    self._append_unique_detail_path("tool_stderr", stderr_path)
+
+    def _append_sample_trace_and_logs(self, sample_ids: list[str]) -> None:
+        """Append per-sample selection trace and process logs when available."""
+        if not self._asm_dir:
+            return
+        trace_dir = self._asm_dir / "selection_trace"
+        process_log_dir = self._asm_dir / "process_logs"
+
+        for sample_id in sample_ids:
+            safe_sample = re.sub(r"[^A-Za-z0-9._-]", "_", (sample_id or "").strip() or "sample")
+            trace_path = trace_dir / f"{safe_sample}.selection_trace.tsv"
+            self._append_unique_detail_path("selection_trace", trace_path)
+
+            for root in (self._asm_dir / sample_id, process_log_dir):
+                if not root.exists() or not root.is_dir():
+                    continue
+                stdout_glob = sorted(root.glob(f"{safe_sample}__*__process*.stdout.txt"))
+                stderr_glob = sorted(root.glob(f"{safe_sample}__*__process*.stderr.txt"))
+                for stdout_path in stdout_glob:
+                    self._append_unique_detail_path("tool_stdout", stdout_path)
+                for stderr_path in stderr_glob:
+                    self._append_unique_detail_path("tool_stderr", stderr_path)
+
     def _update_detail_panel(self) -> None:
         table = None
         tab_index = self.output_tabs.currentIndex()
@@ -2973,6 +3041,12 @@ class MainWindow(QMainWindow):
                     if trace_path.exists():
                         self._detail_paths["selection_trace"].append(trace_path)
 
+            # Compare TSV artifacts are preferred, but older runs (or partial exports)
+            # may only have deterministic artifacts under the assembly directory.
+            selected_sample_ids = [r.get("sample_id", "") for r in rows if r.get("sample_id", "")]
+            self._append_sample_cap3_paths(selected_sample_ids)
+            self._append_compare_fallback_paths(rows)
+
             self.detail_contigs_btn.setEnabled(bool(self._detail_paths["contigs"]))
             self.detail_singlets_btn.setEnabled(bool(self._detail_paths["singlets"]))
             self.detail_info_btn.setEnabled(bool(self._detail_paths["info"]))
@@ -3082,18 +3156,8 @@ class MainWindow(QMainWindow):
         for key in self._detail_paths:
             self._detail_paths[key] = []
 
-        if self._asm_dir:
-            for sample_id in sample_ids:
-                sample_dir = self._asm_dir / sample_id
-                contig_path = sample_dir / f"{sample_id}_paired.fasta.cap.contigs"
-                singlet_path = sample_dir / f"{sample_id}_paired.fasta.cap.singlets"
-                info_path = sample_dir / f"{sample_id}_paired.fasta.cap.info"
-                if contig_path.exists():
-                    self._detail_paths["contigs"].append(contig_path)
-                if singlet_path.exists():
-                    self._detail_paths["singlets"].append(singlet_path)
-                if info_path.exists():
-                    self._detail_paths["info"].append(info_path)
+        self._append_sample_cap3_paths(sample_ids)
+        self._append_sample_trace_and_logs(sample_ids)
 
         self.detail_contigs_btn.setEnabled(bool(self._detail_paths["contigs"]))
         self.detail_singlets_btn.setEnabled(bool(self._detail_paths["singlets"]))

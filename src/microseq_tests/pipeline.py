@@ -540,8 +540,8 @@ def run_assembly(fasta_in: PathLike, out_dir: PathLike, *, threads: int | None =
     de_novo_assembly(Path(fasta_in), Path(out_dir), **options)
     return 0
 
-def run_paired_assembly(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options=None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None, use_qual: bool = True) -> list[Path]:
-    return assemble_pairs(Path(input_dir), Path(output_dir), dup_policy=dup_policy, cap3_options=cap3_options, fwd_pattern=fwd_pattern, rev_pattern=rev_pattern, pairing_report=pairing_report, enforce_same_well=enforce_same_well, well_pattern=well_pattern, use_qual=use_qual )
+def run_paired_assembly(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options=None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None, use_qual: bool = True, on_stage=None, on_progress=None) -> list[Path]:
+    return assemble_pairs(Path(input_dir), Path(output_dir), dup_policy=dup_policy, cap3_options=cap3_options, fwd_pattern=fwd_pattern, rev_pattern=rev_pattern, pairing_report=pairing_report, enforce_same_well=enforce_same_well, well_pattern=well_pattern, use_qual=use_qual, on_stage=on_stage, on_progress=on_progress )
 
 # ───────────────────────────────────────────────────────── BLAST
 
@@ -2124,7 +2124,9 @@ def run_compare_assemblers(
             completed_by_spec[done_spec_id] += 1
             if completed_by_spec[done_spec_id] % heartbeat_interval == 0 or completed_by_spec[done_spec_id] == len(sample_items):
                 spec_name = spec_by_id[done_spec_id].display_name
-                on_stage(f"Compare {spec_name}: {completed_by_spec[done_spec_id]}/{len(sample_items)} complete")
+                heartbeat = f"Compare {spec_name}: {completed_by_spec[done_spec_id]}/{len(sample_items)} complete"
+                L.info(heartbeat)
+                on_stage(heartbeat)
             on_progress(int(done * 100 / total))
     else:
         future_map = {}
@@ -2143,7 +2145,9 @@ def run_compare_assemblers(
                 completed_by_spec[done_spec_id] += 1
                 if completed_by_spec[done_spec_id] % heartbeat_interval == 0 or completed_by_spec[done_spec_id] == len(sample_items):
                     spec_name = spec_by_id[done_spec_id].display_name
-                    on_stage(f"Compare {spec_name}: {completed_by_spec[done_spec_id]}/{len(sample_items)} complete")
+                    heartbeat = f"Compare {spec_name}: {completed_by_spec[done_spec_id]}/{len(sample_items)} complete"
+                    L.info(heartbeat)
+                    on_stage(heartbeat)
                 on_progress(int(done * 100 / total))
         for key in sorted(collected):
             rows.append(collected[key])
@@ -3166,6 +3170,7 @@ def run_full_pipeline(
         contig_paths: list[Path] = []
         if resolved_assembler_mode == "cap3_default":
             cap3_args = _resolve_cap3_options(cap3_profile, cap3_options, cap3_extra_args)
+            assembly_progress = subprog(pct) 
             contig_paths = assemble_pairs(
                 assembly_input,
                 out_dir / "asm",
@@ -3177,10 +3182,13 @@ def run_full_pipeline(
                 enforce_same_well=enforce_same_well,
                 well_pattern=well_pattern,
                 use_qual=cap3_use_qual,
+                on_stage=on_stage,
+                on_progress=assembly_progress,
             )
         else:
             if resolved_assembler_mode == "selected":
                 get_assembler_spec(resolved_assembler_id or "")
+            compare_progress = subprog(pct) 
             compare_assembler_ids = [resolved_assembler_id] if resolved_assembler_mode == "selected" and resolved_assembler_id else None 
             run_compare_assemblers(
                 assembly_input,
@@ -3194,6 +3202,8 @@ def run_full_pipeline(
                 pairing_report=pairing_report,
                 use_qual=cap3_use_qual,
                 threads=threads,
+                on_stage=on_stage,
+                on_progress=on_progress,
             )
         if resolved_assembler_mode == "cap3_default" and pairing_report.exists():
             report_ids = set(

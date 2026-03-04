@@ -294,7 +294,7 @@ def write_process_logs(
     return stdout_path, stderr_path
 
 def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options: Sequence[str] | None = None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None, 
-                   use_qual: bool = True 
+                   use_qual: bool = True, on_stage=None, on_progress=None, 
                    ) -> list[Path]:
     """
     Run CAP3 assemblies for each forward and reverse pair discovered in ``input_dir``. 
@@ -323,6 +323,8 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
         list[Pathlib.Path]
 
     """
+    on_stage = on_stage or (lambda *_: None)
+    on_progress = on_progress or (lambda *_: None) 
     cfg = load_config() 
     overlap_cfg = cfg.get("overlap_eval", {})
     merge_cfg = cfg.get("merge_two_reads", {})
@@ -434,7 +436,19 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
     if not pairs:
         L.info("No paired reads detected in input path: %s", in_dir)
         # Exit out since nothing here to do 
-        return [] 
+        return []
+
+    total_tasks = 0 
+    for _sid, _entries in sorted(pairs.items()):
+        if dup_policy == DupPolicy.KEEP_SEPARATE:
+            total_tasks += len(_build_keep_separate_pairs(_as_path_list(_entries["F"]), _as_path_list(_entries["R"])))
+        else:
+            total_tasks += 1 
+    total_tasks = max(1, total_tasks)
+    done_tasks = 0 
+    heartbeat_interval = 5 
+    on_stage("Paired assembly")
+    on_progress(0) 
     
     # goign to collect the samples started with an empty list 
     contig_paths: list[Path] = [] 
@@ -509,6 +523,12 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
                             report.merge_status,
                         )
                         contig_paths.append(contig_path)
+                        done_tasks += 1 
+                        if done_tasks % heartbeat_interval == 0 or done_tasks == total_tasks:
+                            heartbeat = f"Paired assembly: {done_tasks}/{total_tasks} complete"
+                            L.info(heartbeat)
+                            on_stage(heartbeat)
+                        on_progress(int(done_tasks * 100 / total_tasks))
                         continue
                     L.info(
                         "Paired assembler path for %s: merge_two_reads=%s; fallback to CAP3",
@@ -520,6 +540,12 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
                             "Paired assembler path for %s: quality_mode=blocking keeps singlets, CAP3 skipped",
                             sample_key,
                         )
+                        done_tasks += 1 
+                        if done_tasks % heartbeat_interval == 0 or done_tasks == total_tasks:
+                            heartbeat = f"Paired assembly: {done_tasks}/{total_tasks} complete"
+                            L.info(heartbeat)
+                            on_stage(heartbeat)
+                        on_progress(int(done_tasks * 100 / total_tasks)) 
                         continue
 
             if not (fwd_path and rev_path and len(sources) == 2):
@@ -595,6 +621,12 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
                         contig_path.unlink()
                     except FileNotFoundError:
                         pass
+                    done_tasks += 1 
+                    if done_tasks % heartbeat_interval == 0 or done_tasks == total_tasks:
+                        heartbeat = f"Paired assembly: {done_tasks}/{total_tasks} complete"
+                        L.info(heartbeat)
+                        on_stage(heartbeat)
+                    on_progress(int(done_tasks * 100 / total_tasks))
                     continue
                 if validation == "unknown":
                     L.warning(
@@ -604,6 +636,13 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
 
             contig_paths.append(contig_path)
             L.info("Cap3 paired assembly finished for %s and for contigs: %s", sample_key, contig_path) 
+
+            done_tasks += 1 
+            if done_tasks % heartbeat_interval == 0 or done_tasks == total_tasks:
+                heartbeat = f"Paired assembly: {done_tasks}/{total_tasks} complete"
+                L.info(heartbeat)
+                on_stage(heartbeat)
+            on_progress(int(done_tasks * 100 / total_tasks)) 
     
     metadata_path.write_text("\n".join(metadata_lines) + "\n", encoding="utf-8")
 

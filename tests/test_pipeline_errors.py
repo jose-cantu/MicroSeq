@@ -156,6 +156,58 @@ def test_selected_mode_preserves_pair_missing_when_compare_pairing_report_lists_
     assert "S1\tk__Bacteria" in hits_tax
 
 
+def test_full_pipeline_forwards_compare_callbacks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    infile = tmp_path / "input"
+    infile.mkdir()
+    out_dir = tmp_path / "out"
+
+    def fake_run_trim(*_args, **_kwargs):
+        fastq_dir = out_dir / "passed_qc_fastq"
+        fastq_dir.mkdir(parents=True, exist_ok=True)
+        (fastq_dir / "S1_27F.fastq").write_text("@r1\nA\n+\n!\n", encoding="utf-8")
+        (fastq_dir / "S1_1492R.fastq").write_text("@r2\nA\n+\n!\n", encoding="utf-8")
+        return 0
+
+    def fake_run_fastq_to_fasta(*_args, **_kwargs):
+        return None
+
+    def fake_fastq_to_paired_fastas(_fastq_dir: Path, fasta_dir: Path, *, use_qual: bool = True):
+        fasta_dir.mkdir(parents=True, exist_ok=True)
+        f1 = fasta_dir / "S1_27F.fasta"
+        r1 = fasta_dir / "S1_1492R.fasta"
+        f1.write_text(">S1_27F\nAC\n", encoding="utf-8")
+        r1.write_text(">S1_1492R\nAC\n", encoding="utf-8")
+        return [f1, r1]
+
+    def fake_compare(*_args, on_stage=None, on_progress=None, **_kwargs):
+        assert callable(on_stage)
+        assert callable(on_progress)
+        on_stage("Compare assemblers")
+        on_progress(50)
+        raise RuntimeError("stop-after-compare")
+
+    monkeypatch.setattr(pipeline, "run_trim", fake_run_trim)
+    monkeypatch.setattr(pipeline, "run_fastq_to_fasta", fake_run_fastq_to_fasta)
+    monkeypatch.setattr(pipeline, "_fastq_to_paired_fastas", fake_fastq_to_paired_fastas)
+    monkeypatch.setattr(pipeline, "run_compare_assemblers", fake_compare)
+
+    stage_events: list[str] = []
+    progress_events: list[int] = []
+
+    with pytest.raises(RuntimeError, match="stop-after-compare"):
+        pipeline.run_full_pipeline(
+            infile,
+            "nt",
+            out_dir,
+            mode="paired",
+            assembler_mode="all",
+            on_stage=stage_events.append,
+            on_progress=progress_events.append,
+        )
+
+    assert "Compare assemblers" in stage_events
+    assert 50 in progress_events
+
 def test_selected_summary_includes_cap3_compatible_telemetry_columns(tmp_path: Path):
     summary = tmp_path / "assembly_summary.tsv"
     pipeline._write_selected_assembly_summary(
