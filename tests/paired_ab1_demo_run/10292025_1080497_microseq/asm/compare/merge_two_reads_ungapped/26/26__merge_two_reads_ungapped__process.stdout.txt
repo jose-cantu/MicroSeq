@@ -1,0 +1,10 @@
+$ merge_two_reads --engine=ungapped
+
+sample_id=26
+assembler_id=merge_two_reads:ungapped
+merge_status=merged
+overlap_engine=ungapped
+orientation=revcomp
+overlap_len=589
+identity=0.838710
+warning=high_conflict

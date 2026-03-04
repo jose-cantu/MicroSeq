@@ -1,0 +1,2 @@
+$ cap3 6_paired.fasta -o 100 -p 95 -s 900 -k 0 -y 100
+

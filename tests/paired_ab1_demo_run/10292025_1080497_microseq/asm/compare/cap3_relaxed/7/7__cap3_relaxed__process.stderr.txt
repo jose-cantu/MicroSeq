@@ -1,0 +1,2 @@
+$ cap3 7_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+

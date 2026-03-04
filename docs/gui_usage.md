@@ -89,6 +89,15 @@ Examples:
 * **Assembler selection** (paired mode) supports: **CAP3 default (legacy paired pipeline)**, **All assemblers (compare + pick best contig)**, or any single registered assembler from the dropdown.
 * Compare assemblers produces `asm/compare_assemblers.tsv`, now shown in the GUI **Compare Assemblers** output tab for side-by-side engine review. When running full pipeline with **All assemblers**, MicroSeq reuses this comparison and ranks candidates by status (**assembled** > **merged** > others), then length, then deterministic tiebreak for downstream BLAST payloads.
 * In compare-driven **Selected/All assemblers** full-pipeline mode, MicroSeq now writes `qc/pairing_report.tsv`; when a compared backend is CAP3, the **Use per-base quality scores** toggle is also applied to CAP3 input generation.
+* **Mode semantics (authoritative):**
+  * **CAP3 default (legacy paired pipeline):** runs `merge_two_reads` first (configured overlap engine/strategy), then falls back to CAP3 when merge is not accepted (subject to quality-policy exceptions).
+  * **Single selected assembler:** runs compare flow constrained to the selected `assembler_id` only; no automatic global CAP3 rescue is injected just because that backend produced no payload.
+  * **All assemblers:** runs every registered backend, writes `asm/compare_assemblers.tsv`, and selects a per-sample winner deterministically for BLAST payload generation.
+* **`merge_two_reads` overlap engines (what they are):**
+  * `merge_two_reads:ungapped` = placement-driven, end-anchored **ungapped sliding** overlap (fast; does not introduce indels in the overlap candidate itself).
+  * `merge_two_reads:biopython` = Biopython pairwise-alignment backend that can model **gapped** overlaps (indel-aware).
+  * `merge_two_reads:edlib` = edlib edit-distance/path backend that can model **gapped** overlaps (indel-aware).
+  These are separate engines under the same `merge_two_reads` method (not aliases of each other). See also: `docs/workflow_resolution.md` section **“Working examples: ungapped sliding vs gapped alignment backends.”**
 * Primer policy in paired mode is explicit in reports: mode (`off|detect|clip`), stage (`pre_quality|post_quality`), and source (`off|preset|custom|mixed`).
 * In trim controls, **Known synthetic flank preset** applies only to Detect/Clip sequence scanning; pairing-token presets such as **27F/1492R** remain separate and only affect forward/reverse pairing.
 * **Duplicate policy** lets you decide whether duplicate orientations error, keep first/last, merge, or keep separate (runs CAP3 per duplicate). The last selection is persisted between sessions.
@@ -132,7 +141,7 @@ Think of the paired-assembly widgets as a control panel that flips a handful of 
 | Switch | Where to set it | Behaviour |
 | --- | --- | --- |
 | Assembly mode | **Assembly** dropdown (**Single** vs **Paired**) | Paired mode reveals primer/pairing controls and enables the **Preview pairs** flow; single mode hides paired-only controls. |
-| Assembler mode | **Assembler selection** dropdown (paired mode) | Choose legacy CAP3 behavior, a single assembler backend, or all assemblers with automatic best-contig selection for BLAST inputs. |
+| Assembler mode | **Assembler selection** dropdown (paired mode) | Choose one of three routes: **CAP3 default** (merge_two_reads first, then CAP3 fallback when applicable), **Single selected assembler** (run only that backend; no automatic CAP3 rescue), or **All assemblers** (run all and deterministically select winner for BLAST inputs). |
 | Primer set preset | **Primer set** dropdown (e.g., `16S (27F/1492R)`,`Custom`) | Prefills forward/reverse token fields and persists the choice via QSettings. Changing tokens by hand flips the preset to **Custom**. |
 | Token vs regex override | **Advanced regex** checkbox | Unchecked uses token fields (`27F, 515F` -> `27F|515F`); checked exposes regex fields that bypass tokens entirely so you can enter expressions like `(?i)(27f|8f)` . |
 | Enforce same well | **Enforce well codes** checkbox | When enabled, pairing requires both directions to share the same plate position (A1-H12 by default). |
@@ -300,7 +309,7 @@ Key files to highlight in the GUI doc:
 * `asm/contig_map.tsv` links each contig back to the input reads used, which is helpful when auditing assemblies or troubleshooting mismatched pairs.
 
 ## Troublehshooting what the different Status sign means in Assembly Summary Tab
-So in the dropdown menu in Assembler selection for `CAP3 default (legacy paired pipeline)` it will run it on 2 assemblers first and ungapped merged algorithm and if it fails to produce a good quality contig then it will fallback to cap3 based on what profiles you chose on the left side of the gui for `CAP3 Profile` (strict, relaxed, diagnostic). 
+For `CAP3 default (legacy paired pipeline)`, MicroSeq runs `merge_two_reads` first using the configured overlap engine/strategy, and if that merge path is not accepted it falls back to CAP3 using the selected CAP3 profile (strict, relaxed, diagnostic), except where quality-policy routing keeps singlets/no-payload by design.
 
 If you get `ambiguous_overlap`, MicroSeq found near-tied top feasible overlap candidates and intentionally refused to force a unique merge. For canonical decision rules (including the **“Candidate generation in 3 stages”** walkthrough, feasibility gates, top-1 vs top-2 tie checks, and policy outcomes like `topk`/`best_guess`), see **Workflow Resolution Funnel -> “Assemble -> Validate handoff: how `ambiguous_overlap` is decided”** in [`docs/workflow_resolution.md`](workflow_resolution.md). 
 
@@ -600,7 +609,10 @@ Ewing B, Hillier L, Wendl MC, Green P. Base-calling of automated sequencer trace
 
 Ewing B, Green P. Base-calling of automated sequencer traces using phred. II. Error probabilities. Genome Research (1998)
 
+<<<<<<< ours
 
 
 - Process log contract: compare rows now write deterministic per-row process logs named with both sample + assembler labels (collision-safe suffixing if needed). In the GUI Details panel for Compare rows, use **Open tool stdout/stderr** to open backend process artifacts and **Open selection trace** to inspect winner-ranking decisions; for older runs the GUI falls back to `cap3_stdout_path` / `cap3_stderr_path`.
 
+=======
+>>>>>>> theirs
