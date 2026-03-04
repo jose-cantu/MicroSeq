@@ -114,7 +114,7 @@ def test_assemble_pairs_creates_contigs(tmp_path: Path, monkeypatch: pytest.Monk
     def fake_run(cmd, check, cwd=None, **kwargs):
         """Stub CAP3 invocation by writing the expected contig output."""
 
-        if "--version" in cmd:
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
             class Result:
                 returncode = 0
                 stdout = "CAP3 test"
@@ -166,7 +166,7 @@ def test_assemble_pairs_keep_separate(tmp_path: Path, monkeypatch: pytest.Monkey
     def fake_run(cmd, check, cwd=None, **kwargs):  # noqa: D401
         """Record CAP3 invocations and synthesize contig outputs."""
 
-        if "--version" in cmd:
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
             class Result:
                 returncode = 0
                 stdout = "CAP3 test"
@@ -229,7 +229,7 @@ def test_assemble_pairs_non_singleton_merge_fallback_logs_counts(tmp_path: Path,
     )
 
     def fake_run(cmd, check, cwd=None, **kwargs):
-        if "--version" in cmd:
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
             class Result:
                 returncode = 0
                 stdout = "CAP3 test"
@@ -339,7 +339,7 @@ def test_assemble_pairs_runs_cap3_fallback_on_nonmerged_fast_merge(tmp_path: Pat
 
     def fake_run(cmd, check, cwd=None, **kwargs):
         calls.append(tuple(cmd))
-        if "--version" in cmd:
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
             class Result:
                 returncode = 0
                 stdout = "CAP3 test"
@@ -390,7 +390,7 @@ def test_assemble_pairs_blocking_quality_low_skips_cap3_fallback(tmp_path: Path,
 
     def fake_run(cmd, check, cwd=None, **kwargs):
         calls.append(tuple(cmd))
-        if "--version" in cmd:
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
             class Result:
                 returncode = 0
                 stdout = "CAP3 test"
@@ -404,7 +404,7 @@ def test_assemble_pairs_blocking_quality_low_skips_cap3_fallback(tmp_path: Path,
 
     paths = paired_assembly.assemble_pairs(in_dir, out_dir)
     assert len(paths) == 0
-    assert all("--version" in cmd for cmd in calls)
+    assert all(len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3" for cmd in calls)
 
 
 def test_assemble_pairs_runs_cap3_fallback_on_ambiguous_overlap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -445,7 +445,7 @@ def test_assemble_pairs_runs_cap3_fallback_on_ambiguous_overlap(tmp_path: Path, 
 
     def fake_run(cmd, check, cwd=None, **kwargs):
         calls.append(tuple(cmd))
-        if "--version" in cmd:
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
             class Result:
                 returncode = 0
                 stdout = "CAP3 test"
@@ -513,7 +513,7 @@ def test_assemble_pairs_high_conflict_route_runs_cap3(tmp_path: Path, monkeypatc
 
     def fake_run(cmd, check, cwd=None, **kwargs):
         calls.append(tuple(cmd))
-        if "--version" in cmd:
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
             class Result:
                 returncode = 0
                 stdout = "CAP3 test"
@@ -562,7 +562,7 @@ def test_assemble_pairs_cap3_validation_missing_ace_marks_unknown(tmp_path: Path
     )
 
     def fake_run(cmd, check, cwd=None, **kwargs):
-        if "--version" in cmd:
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
             class Result:
                 returncode = 0
                 stdout = "CAP3 test"
@@ -616,7 +616,7 @@ def test_assemble_pairs_cap3_validation_verified(tmp_path: Path, monkeypatch: py
     )
 
     def fake_run(cmd, check, cwd=None, **kwargs):
-        if "--version" in cmd:
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
             class Result:
                 returncode = 0
                 stdout = "CAP3 test"
@@ -675,7 +675,7 @@ def test_assemble_pairs_cap3_validation_accepts_clipped_contig_when_ace_membersh
     )
 
     def fake_run(cmd, check, cwd=None, **kwargs):
-        if "--version" in cmd:
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
             class Result:
                 returncode = 0
                 stdout = "CAP3 test"
@@ -734,7 +734,7 @@ def test_assemble_pairs_cap3_validation_unknown_keeps_contig(tmp_path: Path, mon
     )
 
     def fake_run(cmd, check, cwd=None, **kwargs):
-        if "--version" in cmd:
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
             class Result:
                 returncode = 0
                 stdout = "CAP3 test"

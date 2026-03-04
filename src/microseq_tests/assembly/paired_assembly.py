@@ -4,6 +4,7 @@
 Utilities for running CAP3 assembly on forward/reverse pairs.
 """ 
 from __future__ import annotations # Postpones evaluation of type annotations (PEP 563) so they are no longer evaluated at function definition time - treated as string instead first 
+import json
 import logging # print warning messages  
 import shlex
 from os import PathLike
@@ -354,33 +355,44 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
     metadata_path = out_dir / "cap3_run_metadata.txt"
 
     # ==========================
-    # Capturing CAP3 version discovery stdout/stderr so the log file shows what was reported 
-    # by `cap3 --version` or the conda fallback.
+    # Discover CAP3 package version via environment package managers.
+    # CAP3 does not support a --version flag, so querying package metadata avoids
+    # accidental artifact generation (for example: --version.cap.contigs).
     # ========================== 
 
     cap3_version = "unknown"
-    try:
-        version_result = subprocess.run(
-            [cap3_exe, "--version"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+    for cmd in ("conda", "mamba", "micromamba"):
+        try:
+            version_result = subprocess.run(
+                [cmd, "list", "cap3", "--json"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            continue
+
         if version_result.stdout:
-            L.info("CAP3 --version stdout:\n%s", version_result.stdout.strip())
+            L.info("%s list cap3 --json stdout:\n%s", cmd, version_result.stdout.strip())
         if version_result.stderr:
-            L.warning("CAP3 --version stderr:\n%s", version_result.stderr.strip())
-        cap3_version = (version_result.stdout or version_result.stderr).strip() or "unknown"
-    except (OSError, subprocess.CalledProcessError) as exc:
-        L.warning("Failed to determine CAP3 version via --version: %s", exc)
+            L.warning("%s list cap3 --json stderr:\n%s", cmd, version_result.stderr.strip())
 
+        try:
+            records = json.loads(version_result.stdout or "[]")
+        except json.JSONDecodeError:
+            records = []
 
-    # =======================
-    # Fallback here: capture the conda list output in logs when `cap3 --version` doesn't resolve version string and use that.
-    # ======================= 
+        for record in records:
+            if str(record.get("name", "")).strip().lower() == "cap3":
+                version = str(record.get("version", "")).strip()
+                cap3_version = f"cap3 {version}" if version else "cap3"
+                break
+
+        if cap3_version != "unknown":
+            break
 
     if cap3_version == "unknown":
-        for cmd in ("conda", "mamba"):
+        for cmd in ("conda", "mamba", "micromamba"):
             try:
                 version_result = subprocess.run(
                     [cmd, "list", "cap3"],
@@ -393,7 +405,7 @@ def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: Dup
             if version_result.stdout:
                 L.info("%s list cap3 stdout:\n%s", cmd, version_result.stdout.strip())
             if version_result.stderr:
-                L.warning("%s list cap3 stderr:\n%s", cmd, version_result.stderr.strip()) 
+                L.warning("%s list cap3 stderr:\n%s", cmd, version_result.stderr.strip())
             for line in version_result.stdout.splitlines():
                 if line.startswith("cap3"):
                     parts = line.split()
