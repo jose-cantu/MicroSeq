@@ -1234,9 +1234,18 @@ class MainWindow(QMainWindow):
         self.detail_contigs_btn = QPushButton("Open contigs")
         self.detail_singlets_btn = QPushButton("Open singlets")
         self.detail_info_btn = QPushButton("Open cap.info")
+        self.detail_tool_stdout_btn = QPushButton("Open tool stdout")
+        self.detail_tool_stderr_btn = QPushButton("Open tool stderr")
+        self.detail_selection_trace_btn = QPushButton("Open selection trace")
         self.detail_contigs_system_btn = QPushButton("Open contigs (system)")
         self.detail_singlets_system_btn = QPushButton("Open singlets (system)")
         self.detail_info_system_btn = QPushButton("Open cap.info (system)")
+        self.detail_tool_stdout_system_btn = QPushButton("Open tool stdout (system)")
+        self.detail_tool_stderr_system_btn = QPushButton("Open tool stderr (system)")
+        self.detail_selection_trace_system_btn = QPushButton("Open selection trace (system)")
+        self.detail_tool_stdout_btn.setToolTip("Open backend stdout diagnostics for selected compare row(s)")
+        self.detail_tool_stderr_btn.setToolTip("Open backend stderr diagnostics for selected compare row(s)")
+        self.detail_selection_trace_btn.setToolTip("Open winner-ranking selection trace for selected sample(s)")
         for btn in (
             self.detail_contigs_btn,
             self.detail_singlets_btn,
@@ -1244,6 +1253,12 @@ class MainWindow(QMainWindow):
             self.detail_contigs_system_btn,
             self.detail_singlets_system_btn,
             self.detail_info_system_btn,
+            self.detail_tool_stdout_btn,
+            self.detail_tool_stderr_btn,
+            self.detail_selection_trace_btn,
+            self.detail_tool_stdout_system_btn,
+            self.detail_tool_stderr_system_btn,
+            self.detail_selection_trace_system_btn,
         ): 
             btn.setEnabled(False)
         self.detail_contigs_btn.clicked.connect(
@@ -1255,6 +1270,15 @@ class MainWindow(QMainWindow):
         self.detail_info_btn.clicked.connect(
             lambda: self._open_detail_paths("info", prefer_in_app=True)
         )
+        self.detail_tool_stdout_btn.clicked.connect(
+            lambda: self._open_detail_paths("tool_stdout", prefer_in_app=True)
+        )
+        self.detail_tool_stderr_btn.clicked.connect(
+            lambda: self._open_detail_paths("tool_stderr", prefer_in_app=True)
+        )
+        self.detail_selection_trace_btn.clicked.connect(
+            lambda: self._open_detail_paths("selection_trace", prefer_in_app=True)
+        )
         self.detail_contigs_system_btn.clicked.connect(
             lambda: self._open_detail_paths("contigs", system=True)
         )
@@ -1263,6 +1287,15 @@ class MainWindow(QMainWindow):
         )
         self.detail_info_system_btn.clicked.connect(
             lambda: self._open_detail_paths("info", system=True) 
+        )
+        self.detail_tool_stdout_system_btn.clicked.connect(
+            lambda: self._open_detail_paths("tool_stdout", system=True)
+        )
+        self.detail_tool_stderr_system_btn.clicked.connect(
+            lambda: self._open_detail_paths("tool_stderr", system=True)
+        )
+        self.detail_selection_trace_system_btn.clicked.connect(
+            lambda: self._open_detail_paths("selection_trace", system=True)
         )
 
         detail_box = QGroupBox("Details")
@@ -1279,9 +1312,15 @@ class MainWindow(QMainWindow):
         detail_layout.addWidget(self.detail_contigs_btn)
         detail_layout.addWidget(self.detail_singlets_btn)
         detail_layout.addWidget(self.detail_info_btn)
+        detail_layout.addWidget(self.detail_tool_stdout_btn)
+        detail_layout.addWidget(self.detail_tool_stderr_btn)
+        detail_layout.addWidget(self.detail_selection_trace_btn)
         detail_layout.addWidget(self.detail_contigs_system_btn)
         detail_layout.addWidget(self.detail_singlets_system_btn)
         detail_layout.addWidget(self.detail_info_system_btn)
+        detail_layout.addWidget(self.detail_tool_stdout_system_btn)
+        detail_layout.addWidget(self.detail_tool_stderr_system_btn)
+        detail_layout.addWidget(self.detail_selection_trace_system_btn)
         detail_layout.addStretch()
 
         self.output_splitter = QSplitter()
@@ -1308,7 +1347,7 @@ class MainWindow(QMainWindow):
 
         self._blast_inputs_fasta: Optional[Path] = None
         self._asm_dir: Optional[Path] = None
-        self._detail_paths: dict[str, list[Path]] = {"contigs": [], "singlets": [], "info": []} 
+        self._detail_paths: dict[str, list[Path]] = {"contigs": [], "singlets": [], "info": [], "tool_stdout": [], "tool_stderr": [], "selection_trace": []} 
         self._summary_rows: dict[str, dict[str, str]] = {}
         self._blast_rows: dict[str, dict[str, str]] = {}
         self._audit_rows: dict[str, dict[str, str]] = {}
@@ -2673,6 +2712,11 @@ class MainWindow(QMainWindow):
                 "cap3_info_path": self._fmt_table_value(row.get("cap3_info_path", "")),
                 "cap3_stdout_path": self._fmt_table_value(row.get("cap3_stdout_path", "")),
                 "cap3_stderr_path": self._fmt_table_value(row.get("cap3_stderr_path", "")),
+                "tool_name": self._fmt_table_value(row.get("tool_name", "")),
+                "tool_stdout_path": self._fmt_table_value(row.get("tool_stdout_path", "")),
+                "tool_stderr_path": self._fmt_table_value(row.get("tool_stderr_path", "")),
+                "selection_trace_path": self._fmt_table_value(row.get("selection_trace_path", "")),
+                "winner_reason": self._fmt_table_value(row.get("winner_reason", "")),
                 "payload_fasta": self._fmt_table_value(row.get("payload_fasta", "")),
                 "payload_kind": self._fmt_table_value(row.get("payload_kind", "none")),
                 "payload_n": self._fmt_table_value(row.get("payload_n", "0")),
@@ -2779,6 +2823,35 @@ class MainWindow(QMainWindow):
         tooltip = (full if full is not None else compact) or ""
         label.setToolTip(tooltip)
 
+    def _winner_reason_for_compare_row(self, row: dict[str, str]) -> str:
+        """Resolve winner reason only when current row is the winner row for its sample."""
+        reason = row.get("winner_reason", "")
+        if reason:
+            return reason
+        trace_txt = row.get("selection_trace_path", "")
+        if not trace_txt:
+            return ""
+        trace_path = Path(trace_txt)
+        if not trace_path.exists():
+            return ""
+        try:
+            lines = trace_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return ""
+        if len(lines) < 2:
+            return ""
+        header = lines[0].split("	")
+        current_assembler = row.get("assembler_id", "")
+        for raw in lines[1:]:
+            cols = raw.split("	")
+            row_map = dict(zip(header, cols))
+            if row_map.get("is_winner", "") != "1":
+                continue
+            if row_map.get("assembler_id", "") != current_assembler:
+                return ""
+            return row_map.get("winner_reason", "")
+        return ""
+
     def _update_detail_panel(self) -> None:
         table = None
         tab_index = self.output_tabs.currentIndex()
@@ -2808,6 +2881,10 @@ class MainWindow(QMainWindow):
             )
             reason_bits = [] 
             for r in rows:
+                winner_reason = self._winner_reason_for_compare_row(r)
+                if winner_reason:
+                    reason_bits.append(winner_reason)
+                    continue
                 parts = [
                     r.get("diag_code_for_machine", ""),
                     r.get("diag_detail_for_human", ""),
@@ -2870,13 +2947,34 @@ class MainWindow(QMainWindow):
                         singlet_path = info_path.with_suffix(".singlets")
                         if singlet_path.exists():
                             self._detail_paths["singlets"].append(singlet_path)
+                stdout_txt = r.get("tool_stdout_path", "") or r.get("cap3_stdout_path", "")
+                stderr_txt = r.get("tool_stderr_path", "") or r.get("cap3_stderr_path", "")
+                if stdout_txt:
+                    stdout_path = Path(stdout_txt)
+                    if stdout_path.exists():
+                        self._detail_paths["tool_stdout"].append(stdout_path)
+                if stderr_txt:
+                    stderr_path = Path(stderr_txt)
+                    if stderr_path.exists():
+                        self._detail_paths["tool_stderr"].append(stderr_path)
+                trace_txt = r.get("selection_trace_path", "")
+                if trace_txt:
+                    trace_path = Path(trace_txt)
+                    if trace_path.exists():
+                        self._detail_paths["selection_trace"].append(trace_path)
 
             self.detail_contigs_btn.setEnabled(bool(self._detail_paths["contigs"]))
             self.detail_singlets_btn.setEnabled(bool(self._detail_paths["singlets"]))
             self.detail_info_btn.setEnabled(bool(self._detail_paths["info"]))
+            self.detail_tool_stdout_btn.setEnabled(bool(self._detail_paths["tool_stdout"]))
+            self.detail_tool_stderr_btn.setEnabled(bool(self._detail_paths["tool_stderr"]))
+            self.detail_selection_trace_btn.setEnabled(bool(self._detail_paths["selection_trace"]))
             self.detail_contigs_system_btn.setEnabled(bool(self._detail_paths["contigs"]))
             self.detail_singlets_system_btn.setEnabled(bool(self._detail_paths["singlets"]))
             self.detail_info_system_btn.setEnabled(bool(self._detail_paths["info"]))
+            self.detail_tool_stdout_system_btn.setEnabled(bool(self._detail_paths["tool_stdout"]))
+            self.detail_tool_stderr_system_btn.setEnabled(bool(self._detail_paths["tool_stderr"]))
+            self.detail_selection_trace_system_btn.setEnabled(bool(self._detail_paths["selection_trace"]))
             return
 
         summary_vals = [self._summary_rows.get(sid, {}).get("status", "—") for sid in sample_ids]
@@ -2990,9 +3088,15 @@ class MainWindow(QMainWindow):
         self.detail_contigs_btn.setEnabled(bool(self._detail_paths["contigs"]))
         self.detail_singlets_btn.setEnabled(bool(self._detail_paths["singlets"]))
         self.detail_info_btn.setEnabled(bool(self._detail_paths["info"]))
+        self.detail_tool_stdout_btn.setEnabled(bool(self._detail_paths["tool_stdout"]))
+        self.detail_tool_stderr_btn.setEnabled(bool(self._detail_paths["tool_stderr"]))
+        self.detail_selection_trace_btn.setEnabled(bool(self._detail_paths["selection_trace"]))
         self.detail_contigs_system_btn.setEnabled(bool(self._detail_paths["contigs"]))
         self.detail_singlets_system_btn.setEnabled(bool(self._detail_paths["singlets"]))
         self.detail_info_system_btn.setEnabled(bool(self._detail_paths["info"]))
+        self.detail_tool_stdout_system_btn.setEnabled(bool(self._detail_paths["tool_stdout"]))
+        self.detail_tool_stderr_system_btn.setEnabled(bool(self._detail_paths["tool_stderr"]))
+        self.detail_selection_trace_system_btn.setEnabled(bool(self._detail_paths["selection_trace"]))
  
     # closeEvent ----------------------------
     def closeEvent(self, event):

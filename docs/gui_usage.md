@@ -362,8 +362,13 @@ Status glossary cross-link: for the full trigger-to-status routing matrix (`merg
 - sample_id, assembler_id, assembler_name, status, selected_engine, contig_len, warnings, diag_code_for_machine, diag_detail_for_human, cap3_contigs_n, cap3_singlets_n, warnings.
 - Additional compare TSV-only fields (not shown as table columns) and used by compare-row details/open actions:
   - cap3_info_path
-  - cap3_stdout_path
-  - cap3_stderr_path
+  - cap3_stdout_path (legacy/backward-compatible)
+  - cap3_stderr_path (legacy/backward-compatible)
+  - tool_name
+  - tool_stdout_path
+  - tool_stderr_path
+  - selection_trace_path
+  - winner_reason
   - payload_fasta
 - Underlying compare TSV also includes dup_policy and payload_fasta (not displayed in current GUI table).
 - Meanings
@@ -396,18 +401,32 @@ Status glossary cross-link: for the full trigger-to-status routing matrix (`merg
     - cap3_info_path
         - Path to CAP3 `.cap.info` artifact for that compare row (when present).
     - cap3_stdout_path
-        - Path to saved CAP3 stdout log for that compare row.
+        - Legacy CAP3-specific stdout path retained for compatibility with historical compare TSVs.
     - cap3_stderr_path
-        - Path to saved CAP3 stderr log for that compare row.
+        - Legacy CAP3-specific stderr path retained for compatibility with historical compare TSVs.
+    - tool_name
+        - Backend/tool label used to generate row-scoped process diagnostics for this compare row.
+    - tool_stdout_path
+        - Generic stdout/diagnostic artifact path for the backend selected by this row (CAP3 and non-CAP3 backends).
+    - tool_stderr_path
+        - Generic stderr artifact path for the backend selected by this row (empty/diagnostic placeholder for pure-Python backends).
+    - selection_trace_path
+        - Path to per-sample winner-selection trace artifact written under `asm/selection_trace/<sample_id>.selection_trace.tsv`.
+        - Contains every candidate row considered for that sample, derived ranking keys (`success_rank`, `payload_rank`, ambiguity penalty, normalized length, tie-break key), final sorted order, winner flag, and winner reason.
+    - winner_reason
+        - Concise human-readable explanation of why the winner row was selected (populated on the selected/winner row; blank for non-winner rows).
     - payload_fasta
         - Path to the backend payload FASTA produced by that row; populated when a payload exists and used by compare-row Details/open-file actions.
 
 - Compare tab Details panel is now row-scoped by `(sample_id, assembler_id)` instead of only `sample_id`, so selecting two rows for the same sample but different backends shows backend-specific reasons/artifacts instead of collapsing them together.
 
-- In all/selected modes, winners are chosen per sample by:
-    - status rank (assembled > merged > others),
-    - contig length,
-    - assembler id tie-break.
+- In all/selected modes, winners are chosen per sample with deterministic ranking keys (in order):
+    - success tier (`assembled` and `merged` are equivalent success outcomes and appear as green/success states in compare status semantics),
+    - payload rank (`contig` > `contig_alt` > `singlet` > `none`),
+    - ambiguity penalty (`0` before `1`),
+    - normalized length (descending),
+    - assembler id tie-break (ascending).
+- Example tie-break: if two rows for one sample both have payload_kind=`contig`, ambiguity_flag=`0`, and payload_max_len=`1200`, the row with lexicographically smaller `assembler_id` wins.
 - That winner selection affects what appears in Assembly Summary/BLAST Inputs for that sample.
 
 
@@ -581,4 +600,7 @@ Ewing B, Hillier L, Wendl MC, Green P. Base-calling of automated sequencer trace
 
 Ewing B, Green P. Base-calling of automated sequencer traces using phred. II. Error probabilities. Genome Research (1998)
 
+
+
+- Process log contract: compare rows now write deterministic per-row process logs named with both sample + assembler labels (collision-safe suffixing if needed). In the GUI Details panel for Compare rows, use **Open tool stdout/stderr** to open backend process artifacts and **Open selection trace** to inspect winner-ranking decisions; for older runs the GUI falls back to `cap3_stdout_path` / `cap3_stderr_path`.
 

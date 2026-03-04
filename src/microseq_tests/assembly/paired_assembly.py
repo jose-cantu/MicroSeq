@@ -5,6 +5,7 @@ Utilities for running CAP3 assembly on forward/reverse pairs.
 """ 
 from __future__ import annotations # Postpones evaluation of type annotations (PEP 563) so they are no longer evaluated at function definition time - treated as string instead first 
 import logging # print warning messages  
+import shlex
 from os import PathLike
 import subprocess 
 from pathlib import Path
@@ -261,6 +262,36 @@ def _write_pairing_report(pairs: dict, meta: dict, destination: Path) -> None:
                 )
                 + "\n"
             )
+
+
+def write_process_logs(
+    logs_root: PathLike,
+    sample_id: str,
+    assembler_label: str,
+    command: Sequence[str],
+    stdout_text: str,
+    stderr_text: str,
+) -> tuple[Path, Path]:
+    """Persist row-scoped process logs using deterministic, collision-safe filenames."""
+    root = Path(logs_root)
+    root.mkdir(parents=True, exist_ok=True)
+
+    safe_sample = re.sub(r"[^A-Za-z0-9._-]", "_", sample_id.strip() or "sample")
+    safe_assembler = re.sub(r"[^A-Za-z0-9._-]", "_", assembler_label.strip() or "tool")
+    base = f"{safe_sample}__{safe_assembler}__process"
+
+    stdout_path = root / f"{base}.stdout.txt"
+    stderr_path = root / f"{base}.stderr.txt"
+    suffix = 1
+    while stdout_path.exists() or stderr_path.exists():
+        stdout_path = root / f"{base}.{suffix:02d}.stdout.txt"
+        stderr_path = root / f"{base}.{suffix:02d}.stderr.txt"
+        suffix += 1
+
+    cmd_text = shlex.join([str(part) for part in command])
+    stdout_path.write_text(f"$ {cmd_text}\n\n{stdout_text or ''}", encoding="utf-8")
+    stderr_path.write_text(f"$ {cmd_text}\n\n{stderr_text or ''}", encoding="utf-8")
+    return stdout_path, stderr_path
 
 def assemble_pairs(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options: Sequence[str] | None = None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None, 
                    use_qual: bool = True 

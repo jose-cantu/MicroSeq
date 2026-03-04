@@ -37,7 +37,9 @@ from microseq_tests.trimming.fastq_to_fasta import (
 from microseq_tests.trimming.primer_trim import trim_primer_fastqs, update_trim_summary
 
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
-from microseq_tests.assembly.paired_assembly import assemble_pairs, _build_keep_separate_pairs, _write_combined_fasta, write_cap3_process_logs 
+
+from microseq_tests.assembly.paired_assembly import assemble_pairs, _build_keep_separate_pairs, _write_combined_fasta, write_process_logs 
+
 from microseq_tests.assembly.overlap_utils import (
     AlignedOverlapCandidate,
     iter_end_anchored_overlaps,
@@ -1869,7 +1871,10 @@ def run_compare_assemblers(
             cap3_singlets_n = ""
             cap3_info_path = ""
             cap3_stdout_path = ""
-            cap3_stderr_path = "" 
+            cap3_stderr_path = ""
+            tool_name = ""
+            tool_stdout_path = ""
+            tool_stderr_path = "" 
 
             if sample_id in missing_samples or not entries["F"] or not entries["R"]:
                 status = "pair_missing"
@@ -1898,17 +1903,45 @@ def run_compare_assemblers(
                             ambiguous_policy=ambiguous_policy,
                             ambiguous_top_k=ambiguous_top_k,
                         )
-                        status = report.merge_status
-                        selected_engine = report.overlap_engine
-                        contig_len = str(report.contig_len)
-                        warning = report.merge_warning or ""
+                        status = str(getattr(report, "merge_status", "error") or "error")
+                        report_engine = str(getattr(report, "overlap_engine", "") or "")
+                        report_contig_len = getattr(report, "contig_len", 0)
+                        report_warning = str(getattr(report, "merge_warning", "") or "")
+                        report_overlap_len = getattr(report, "overlap_len", 0)
+                        report_identity = float(getattr(report, "identity", 0.0) or 0.0)
+                        report_orientation = str(getattr(report, "orientation", "") or "")
+
+                        selected_engine = report_engine
+                        contig_len = str(report_contig_len)
+                        warning = report_warning
                         if status == "ambiguous_overlap" and not warning:
                             warning = "Overlap candidates were tied; no unique contig selected"
                         diag_code_for_machine = f"merge_{status}"
                         diag_detail_for_human = (
-                            f"merge_status={status}; overlap_len={report.overlap_len};"
-                            f"identity={report.identity:.4f}; engine={report.overlap_engine}"
+                            f"merge_status={status}; overlap_len={report_overlap_len};"
+                            f"identity={report_identity:.4f}; engine={report_engine}"
                         )
+                        tool_name = spec.display_name
+                        merge_diag = [
+                            f"sample_id={sample_id}",
+                            f"assembler_id={spec.id}",
+                            f"merge_status={status}",
+                            f"overlap_engine={report_engine}",
+                            f"orientation={report_orientation}",
+                            f"overlap_len={report_overlap_len}",
+                            f"identity={report_identity:.6f}",
+                            f"warning={report_warning}",
+                        ]
+                        stdout_path, stderr_path = write_process_logs(
+                            sample_dir,
+                            sample_id,
+                            spec.id,
+                            ["merge_two_reads", f"--engine={spec.overlap_engine or 'biopython'}"],
+                            "\n".join(merge_diag) + "\n",
+                            "",
+                        )
+                        tool_stdout_path = str(stdout_path)
+                        tool_stderr_path = str(stderr_path)
                         if contig_path and contig_path.exists():
                             payload_records = list(SeqIO.parse(contig_path, "fasta"))
                             if payload_records:
@@ -1935,17 +1968,20 @@ def run_compare_assemblers(
 
                         cmd = [cap3_exe, sample_fasta.name, *cap3_args]
                         cap3_run = subprocess.run(cmd, cwd=sample_dir, capture_output=True, text=True, check=False)
-                        logs_root = Path(out_dir) / "logs" / "cap3"
-                        cap3_stdout_file, cap3_stderr_file = write_cap3_process_logs(
-                            logs_root,
-                            sample_id=sample_id,
-                            command=cmd,
-                            assembler_label=spec.id,
-                            stdout_text=cap3_run.stdout or "",
-                            stderr_text=cap3_run.stderr or "",
+
+                        stdout_path, stderr_path = write_process_logs(
+                            sample_dir,
+                            sample_id,
+                            spec.id,
+                            cmd,
+                            cap3_run.stdout or "",
+                            cap3_run.stderr or "",
                         )
-                        cap3_stdout_path = str(cap3_stdout_file)
-                        cap3_stderr_path = str(cap3_stderr_file)
+                        cap3_stdout_path = str(stdout_path)
+                        cap3_stderr_path = str(stderr_path)
+                        tool_name = spec.display_name
+                        tool_stdout_path = cap3_stdout_path
+                        tool_stderr_path = cap3_stderr_path
 
                         cap_contigs = sample_dir / f"{sample_fasta.name}.cap.contigs"
                         cap_singlets = sample_dir / f"{sample_fasta.name}.cap.singlets"
@@ -2020,6 +2056,11 @@ def run_compare_assemblers(
                 "cap3_info_path": cap3_info_path,
                 "cap3_stdout_path": cap3_stdout_path,
                 "cap3_stderr_path": cap3_stderr_path,
+                "tool_name": tool_name,
+                "tool_stdout_path": tool_stdout_path,
+                "tool_stderr_path": tool_stderr_path,
+                "selection_trace_path": "",
+                "winner_reason": "",
                 "payload_fasta": str(payload_fasta) if payload_written else "",
                 "payload_kind": payload_kind,
                 "payload_n": payload_n,
@@ -2044,6 +2085,7 @@ def run_compare_assemblers(
     headers = [
         "sample_id", "assembler_id", "assembler_name", "dup_policy", "status", "selected_engine", "contig_len", "warnings",
         "diag_code_for_machine", "diag_detail_for_human", "cap3_contigs_n", "cap3_singlets_n", "cap3_info_path", "cap3_stdout_path", "cap3_stderr_path",
+        "tool_name", "tool_stdout_path", "tool_stderr_path", "selection_trace_path", "winner_reason",
         "payload_fasta", "payload_kind", "payload_n", "payload_max_len", "ambiguity_flag", "safety_flag", "decision_source", "review_reason", "warning_flags",
         "structural_hypothesis_n", "hypotheses_with_hits_n", "missing_hits_n", "hypothesis_map", "source_id_map",
         "resolution_state", "resolved_hypothesis", "resolution_reason", "trace_status", "trace_status_f", "trace_status_r", "trace_flags",
@@ -2053,6 +2095,46 @@ def run_compare_assemblers(
         for row in rows:
             fh.write("\t".join(row.get(h, "") for h in headers) + "\n")
     return out_tsv
+
+def _safe_trace_label(value: str) -> str:
+    """Return a filesystem-safe identifier for selection-trace artifact names."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", (value or "").strip() or "sample")
+
+
+def _write_selection_trace_tsv(
+    trace_dir: Path,
+    sample_id: str,
+    mode: str,
+    ranked_rows: list[dict[str, str]],
+    winner_reason: str,
+) -> Path:
+    """Persist deterministic winner-selection diagnostics for one sample."""
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    trace_path = trace_dir / f"{_safe_trace_label(sample_id)}.selection_trace.tsv"
+    headers = [
+        "sample_id",
+        "mode",
+        "rank_position",
+        "is_winner",
+        "winner_reason",
+        "assembler_id",
+        "assembler_name",
+        "status",
+        "success_rank",
+        "payload_kind",
+        "payload_rank",
+        "ambiguity_flag",
+        "amb_penalty",
+        "normalized_len",
+        "tie_break_key",
+        "payload_fasta",
+    ]
+    with trace_path.open("w", encoding="utf-8") as fh:
+        fh.write("\t".join(headers) + "\n")
+        for row in ranked_rows:
+            fh.write("\t".join(str(row.get(h, "")) for h in headers) + "\n")
+    return trace_path
+
 
 def _select_best_compare_rows(
     compare_tsv: Path,
@@ -2068,37 +2150,105 @@ def _select_best_compare_rows(
 
     winners: dict[str, dict[str, str]] = {}
     mode = (assembler_mode or "").strip().lower()
-
-    if mode == "selected":
-        if not assembler_id:
-            raise ValueError("selected assembler mode requires assembler_id")
-        chosen = df[df["assembler_id"] == assembler_id].copy()
-        for sample_id, group in chosen.groupby("sample_id"):
-            group["_len"] = pd.to_numeric(group.get("contig_len", ""), errors="coerce").fillna(-1)
-            group = group.sort_values(by=["_len", "assembler_id"], ascending=[False, True])
-            row = group.iloc[0].to_dict()
-            winners[str(sample_id)] = {str(k): "" if pd.isna(v) else str(v) for k, v in row.items()}
-        return winners
-
     payload_rank = {"contig": 3, "contig_alt": 2, "singlet": 1, "none": 0}
+
+    if "selection_trace_path" not in df.columns:
+        df["selection_trace_path"] = ""
+    if "winner_reason" not in df.columns:
+        df["winner_reason"] = ""
+
+    trace_root = compare_tsv.parent / "selection_trace"
+
     for sample_id, group in df.groupby("sample_id"):
-        group = group.copy()
+        g = group.copy()
+        g["_assembler_id"] = g.get("assembler_id", "").fillna("").astype(str)
+        g["_assembler_name"] = g.get("assembler_name", "").fillna("").astype(str)
+        g["_status"] = g.get("status", "").fillna("").astype(str)
+        g["_payload_fasta"] = g.get("payload_fasta", "").fillna("").astype(str)
+        g["_success_rank"] = g["_status"].map(lambda v: 2 if v in {"assembled", "merged"} else 1)
 
-        kind_raw = group["payload_kind"] if "payload_kind" in group.columns else "none"
-        amb_raw = group["ambiguity_flag"] if "ambiguity_flag" in group.columns else "0"
-        len_raw = group["payload_max_len"] if "payload_max_len" in group.columns else group.get("contig_len", "")
+        if mode == "selected":
+            if not assembler_id:
+                raise ValueError("selected assembler mode requires assembler_id")
+            g = g[g["_assembler_id"] == assembler_id].copy()
+            if g.empty:
+                continue
+            g["_kind"] = g.get("payload_kind", "none").fillna("none").astype(str)
+            g["_payload_rank"] = g["_kind"].map(lambda v: payload_rank.get(v, 0))
+            g["_amb_flag"] = g.get("ambiguity_flag", "0").fillna("0").astype(str)
+            g["_amb_penalty"] = g["_amb_flag"].map(lambda v: 1 if v == "1" else 0)
+            g["_len"] = pd.to_numeric(g.get("contig_len", ""), errors="coerce").fillna(-1)
+            g = g.sort_values(by=["_len", "_assembler_id"], ascending=[False, True], kind="mergesort")
+            reason = (
+                f"selected mode: restricted to assembler_id={assembler_id}; "
+                "winner is longest contig_len, then assembler_id tie-break"
+            )
+        else:
+            kind_raw = g["payload_kind"] if "payload_kind" in g.columns else "none"
+            amb_raw = g["ambiguity_flag"] if "ambiguity_flag" in g.columns else "0"
+            len_raw = g["payload_max_len"] if "payload_max_len" in g.columns else g.get("contig_len", "")
 
-        kind_series = pd.Series(kind_raw, index=group.index).fillna("none").astype(str)
-        amb_series = pd.Series(amb_raw, index=group.index).fillna("0").astype(str)
-        len_series = pd.Series(len_raw, index=group.index)
+            g["_kind"] = pd.Series(kind_raw, index=g.index).fillna("none").astype(str)
+            g["_amb_flag"] = pd.Series(amb_raw, index=g.index).fillna("0").astype(str)
+            g["_len"] = pd.to_numeric(pd.Series(len_raw, index=g.index), errors="coerce").fillna(-1)
+            g["_payload_rank"] = g["_kind"].map(lambda v: payload_rank.get(v, 0))
+            g["_amb_penalty"] = g["_amb_flag"].map(lambda v: 1 if v == "1" else 0)
+            g = g.sort_values(
+                by=["_success_rank", "_payload_rank", "_amb_penalty", "_len", "_assembler_id"],
+                ascending=[False, False, True, False, True],
+                kind="mergesort",
+            )
+            reason = (
+                "all mode: ranked by success tier (assembled and merged are equivalent), "
+                "then payload_kind(contig>contig_alt>singlet>none), then ambiguity penalty (0 before 1), "
+                "then normalized length desc, then assembler_id"
+            )
 
-        group["_payload_rank"] = kind_series.map(lambda v: payload_rank.get(v, 0))
-        group["_amb_penalty"] = amb_series.map(lambda v: 1 if v == "1" else 0)
-        group["_len"] = pd.to_numeric(len_series, errors="coerce").fillna(-1)
+        winner_idx = g.index[0]
+        row = g.loc[winner_idx].to_dict()
+        winner = {str(k): "" if pd.isna(v) else str(v) for k, v in row.items() if not str(k).startswith("_")}
 
-        group = group.sort_values(by=["_payload_rank", "_amb_penalty", "_len", "assembler_id"], ascending=[False, True, False, True])
-        row = group.iloc[0].to_dict()
-        winners[str(sample_id)] = {str(k): "" if pd.isna(v) else str(v) for k, v in row.items()}
+        ranked_rows: list[dict[str, str]] = []
+        for rank_position, (_, r) in enumerate(g.iterrows(), start=1):
+            ranked_rows.append({
+                "sample_id": str(sample_id),
+                "mode": mode,
+                "rank_position": str(rank_position),
+                "is_winner": "1" if rank_position == 1 else "0",
+                "winner_reason": reason if rank_position == 1 else "",
+                "assembler_id": str(r.get("_assembler_id", "")),
+                "assembler_name": str(r.get("_assembler_name", "")),
+                "status": str(r.get("_status", "")),
+                "success_rank": str(int(r.get("_success_rank", 1))),
+                "payload_kind": str(r.get("_kind", "none")),
+                "payload_rank": str(int(r.get("_payload_rank", 0))),
+                "ambiguity_flag": str(r.get("_amb_flag", "0")),
+                "amb_penalty": str(int(r.get("_amb_penalty", 0))),
+                "normalized_len": str(int(r.get("_len", -1))),
+                "tie_break_key": str(r.get("_assembler_id", "")),
+                "payload_fasta": str(r.get("_payload_fasta", "")),
+            })
+
+        trace_path = _write_selection_trace_tsv(trace_root, str(sample_id), mode, ranked_rows, reason)
+        df.loc[group.index, "selection_trace_path"] = str(trace_path)
+        df.loc[group.index, "winner_reason"] = ""
+        df.loc[winner_idx, "winner_reason"] = reason
+
+        winner["selection_trace_path"] = str(trace_path)
+        winner["winner_reason"] = reason
+        winners[str(sample_id)] = winner
+
+    base_cols = [
+        "sample_id", "assembler_id", "assembler_name", "dup_policy", "status", "selected_engine", "contig_len", "warnings",
+        "diag_code_for_machine", "diag_detail_for_human", "cap3_contigs_n", "cap3_singlets_n", "cap3_info_path", "cap3_stdout_path", "cap3_stderr_path",
+        "tool_name", "tool_stdout_path", "tool_stderr_path", "selection_trace_path", "winner_reason",
+        "payload_fasta", "payload_kind", "payload_n", "payload_max_len", "ambiguity_flag", "safety_flag", "decision_source", "review_reason", "warning_flags",
+        "structural_hypothesis_n", "hypotheses_with_hits_n", "missing_hits_n", "hypothesis_map", "source_id_map",
+        "resolution_state", "resolved_hypothesis", "resolution_reason", "trace_status", "trace_status_f", "trace_status_r", "trace_flags",
+    ]
+    ordered_cols = [c for c in base_cols if c in df.columns] + [c for c in df.columns if c not in base_cols]
+    df = df[ordered_cols]
+    df.to_csv(compare_tsv, sep="\t", index=False)
     return winners
 
 def _build_selected_blast_inputs(
