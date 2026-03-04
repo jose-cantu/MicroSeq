@@ -88,16 +88,16 @@ def _trace_flags_to_labels(flags: str, status: str, mixed_frac: str, review_reas
     return labels
 
 from PySide6.QtCore import (
-    QLine, Qt, QObject, QThread, Signal, Slot, QSettings, QTimer, QModelIndex, QProcess, QUrl
+    QLine, Qt, QObject, QThread, Signal, Slot, QSettings, QTimer, QModelIndex, QProcess, QUrl, QPointF
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
     QHBoxLayout, QPushButton, QLabel, QListView, QSpinBox, QMessageBox,
     QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, QAbstractItemView, QLineEdit,
-    QTabWidget, QTableWidget, QTableWidgetItem, QSplitter, QDialog, QPlainTextEdit, QHeaderView, QSizePolicy 
+    QTabWidget, QTableWidget, QTableWidgetItem, QSplitter, QDialog, QPlainTextEdit, QHeaderView, QSizePolicy
 )
 from PySide6 import QtCore
-from PySide6.QtGui import QColor, QBrush, QDesktopServices 
+from PySide6.QtGui import QColor, QBrush, QDesktopServices, QPainter, QPen, QPolygonF 
 
 # ==== MicroSeq wrappers ----------
 from microseq_tests.pipeline import (
@@ -112,6 +112,255 @@ from microseq_tests.pipeline import (
 from microseq_tests.vsearch_tools import resolve_vsearch 
 from microseq_tests.assembly.pairing import DupPolicy, PairingCandidate, analyze_pairing_candidates 
 from microseq_tests.utility.utils import setup_logging, load_config
+from microseq_tests.trimming.ab1_to_fastq import build_ab1_output_key_map
+from Bio import SeqIO
+
+
+def _parse_source_values(mapping_text: str) -> list[str]:
+    values: list[str] = []
+    for token in str(mapping_text or "").split(";"):
+        tok = token.strip()
+        if not tok:
+            continue
+        rhs = tok.split("=", 1)[1] if "=" in tok else tok
+        rhs = rhs.strip()
+        if rhs and rhs not in values:
+            values.append(rhs)
+    return values
+
+
+class ChromatogramView(QWidget):
+    BASE_COLORS = {
+        "A": QColor("#2E7D32"),
+        "C": QColor("#1565C0"),
+        "G": QColor("#000000"),
+        "T": QColor("#D32F2F"),
+    }
+
+    def __init__(
+        self,
+        traces: dict[str, list[int]],
+        *,
+        basecalls: str = "",
+        peak_positions: Optional[list[int]] = None,
+        qualities: Optional[list[int]] = None,
+        quality_threshold: int = 20,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._traces = traces
+        self._basecalls = basecalls or ""
+        self._peak_positions = peak_positions or []
+        self._qualities = qualities or []
+        self._quality_threshold = quality_threshold
+        self.setMinimumHeight(260)
+
+    def _x_from_idx(self, idx: int, max_len: int, x_off: int, width: int) -> float:
+        if max_len <= 1:
+            return float(x_off)
+        return x_off + (idx / (max_len - 1)) * width
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#FFFFFF"))
+
+        if not self._traces:
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No AB1 trace data")
+            return
+
+        width = max(1, self.width() - 12)
+        height = max(1, self.height() - 24)
+        x_off = 6
+        y_off = 12
+        max_len = max((len(v) for v in self._traces.values()), default=0)
+        max_peak = max((max(v) if v else 0 for v in self._traces.values()), default=0)
+        if max_len <= 1 or max_peak <= 0:
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Trace data could not be plotted")
+            return
+
+        # Shade low-quality zones from PCON2 where available.
+        n_meta = min(len(self._basecalls), len(self._peak_positions), len(self._qualities))
+        if n_meta:
+            low_ranges: list[tuple[int, int]] = []
+            run_start: Optional[int] = None
+            run_end: Optional[int] = None
+            for i in range(n_meta):
+                pos = self._peak_positions[i]
+                is_low = self._qualities[i] < self._quality_threshold
+                if is_low:
+                    if run_start is None:
+                        run_start = pos
+                    run_end = pos
+                elif run_start is not None and run_end is not None:
+                    low_ranges.append((run_start, run_end))
+                    run_start = None
+                    run_end = None
+            if run_start is not None and run_end is not None:
+                low_ranges.append((run_start, run_end))
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 230, 230, 110))
+            for lo, hi in low_ranges:
+                x0 = self._x_from_idx(max(0, lo), max_len, x_off, width)
+                x1 = self._x_from_idx(min(max_len - 1, hi), max_len, x_off, width)
+                painter.drawRect(int(min(x0, x1)), y_off, max(1, int(abs(x1 - x0))), height)
+            if low_ranges:
+                painter.setPen(QPen(QColor("#8B0000"), 1))
+                painter.drawText(x_off + 2, y_off + 12, f"LowQ shaded (PCON2 < {self._quality_threshold})")
+
+        # Trace lines.
+        for base in ("A", "C", "G", "T"):
+            values = self._traces.get(base, [])
+            if len(values) < 2:
+                continue
+            poly = QPolygonF()
+            for i, val in enumerate(values):
+                x = self._x_from_idx(i, max_len, x_off, width)
+                y = y_off + height - (max(0, val) / max_peak) * height
+                poly.append(QPointF(x, y))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(self.BASE_COLORS[base], 1.1))
+            painter.drawPolyline(poly)
+
+        # Overlay basecalls and peak ticks from PBAS2/PLOC2.
+        if n_meta:
+            max_labels = 160
+            step = max(1, n_meta // max_labels)
+            painter.setPen(QPen(QColor("#757575"), 1))
+            for i in range(0, n_meta, step):
+                pos = self._peak_positions[i]
+                if pos < 0 or pos >= max_len:
+                    continue
+                x = self._x_from_idx(pos, max_len, x_off, width)
+                painter.drawLine(int(x), y_off + height, int(x), y_off + height - 5)
+                base = self._basecalls[i].upper()
+                painter.setPen(QPen(self.BASE_COLORS.get(base, QColor("#424242")), 1))
+                painter.drawText(int(x) - 3, y_off - 2, base)
+                painter.setPen(QPen(QColor("#757575"), 1))
+
+
+class ChromatogramDialog(QDialog):
+    def __init__(self, ab1_path: Path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Chromatogram: {ab1_path.name}")
+        self.resize(960, 360)
+        layout = QVBoxLayout(self)
+
+        path_lbl = QLabel(str(ab1_path))
+        path_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(path_lbl)
+
+        traces, basecalls, peak_positions, qualities = self._load_traces(ab1_path)
+        layout.addWidget(
+            ChromatogramView(
+                traces,
+                basecalls=basecalls,
+                peak_positions=peak_positions,
+                qualities=qualities,
+                quality_threshold=20,
+                parent=self,
+            )
+        )
+
+        legend = QLabel("A=green  C=blue  G=black  T=red   |   PCON2 low-quality zones shaded")
+        layout.addWidget(legend)
+
+        close_btn = QPushButton("Close", self)
+        close_btn.clicked.connect(self.close)
+        layout.addWidget(close_btn)
+
+    @staticmethod
+    def _decode_basecalls(value: object) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, (bytes, bytearray)):
+            return bytes(value).decode("ascii", errors="ignore").replace("\x00", "").strip()
+        text = str(value)
+        return text.replace("\x00", "").strip()
+
+    @staticmethod
+    def _coerce_ints(value: object) -> list[int]:
+        if value is None:
+            return []
+        if hasattr(value, "tolist"):
+            value = value.tolist()
+        if isinstance(value, (bytes, bytearray)):
+            return [int(b) for b in value]
+        if isinstance(value, (list, tuple)):
+            out: list[int] = []
+            for v in value:
+                try:
+                    out.append(int(v))
+                except (TypeError, ValueError):
+                    continue
+            return out
+        try:
+            return [int(value)]
+        except (TypeError, ValueError):
+            return []
+
+    @staticmethod
+    def _normalize_peak_positions(peak_positions: list[int], trace_len: int) -> list[int]:
+        if not peak_positions:
+            return []
+        if min(peak_positions) >= 0 and max(peak_positions) < trace_len:
+            return peak_positions
+        if min(peak_positions) >= 1 and max(peak_positions) - 1 < trace_len:
+            return [p - 1 for p in peak_positions]
+        return []
+
+    @classmethod
+    def _load_traces(cls, ab1_path: Path) -> tuple[dict[str, list[int]], str, list[int], list[int]]:
+        try:
+            rec = SeqIO.read(ab1_path, "abi")
+        except Exception:
+            return {}, "", [], []
+
+        raw = rec.annotations.get("abif_raw", {})
+        channel_sets = [
+            ("DATA9", "DATA10", "DATA11", "DATA12"),
+            ("DATA1", "DATA2", "DATA3", "DATA4"),
+        ]
+        keys = next((ks for ks in channel_sets if all(k in raw for k in ks)), None)
+        if not keys:
+            return {}, "", [], []
+
+        order_raw = raw.get("FWO_1", "")
+        if isinstance(order_raw, (bytes, bytearray)):
+            order = order_raw.decode("ascii", errors="ignore")
+        else:
+            order = str(order_raw or "")
+        order = order.strip().upper()
+
+        if len(order) == 4 and set(order).issubset({"A", "C", "G", "T"}):
+            base_by_idx = list(order)
+        else:
+            # defensive fallback to legacy GATC assignment if FWO_1 is absent/invalid
+            base_by_idx = ["G", "A", "T", "C"]
+
+        traces: dict[str, list[int]] = {"A": [], "C": [], "G": [], "T": []}
+        for i, key in enumerate(keys):
+            base = base_by_idx[i]
+            traces[base] = [int(v) for v in raw[key]]
+
+        basecalls = cls._decode_basecalls(raw.get("PBAS2") or raw.get("PBAS1"))
+        peak_positions = cls._coerce_ints(raw.get("PLOC2") or raw.get("PLOC1"))
+        qualities = cls._coerce_ints(raw.get("PCON2") or raw.get("PCON1"))
+
+        trace_len = max((len(v) for v in traces.values()), default=0)
+        peak_positions = cls._normalize_peak_positions(peak_positions, trace_len)
+
+        n = min(len(basecalls), len(peak_positions), len(qualities))
+        if n > 0:
+            basecalls = basecalls[:n]
+            peak_positions = peak_positions[:n]
+            qualities = qualities[:n]
+        else:
+            basecalls = ""
+            peak_positions = []
+            qualities = []
+
+        return traces, basecalls, peak_positions, qualities
 
 
 class LogBridge(QObject, logging.Handler):
@@ -1246,12 +1495,14 @@ class MainWindow(QMainWindow):
         self.detail_tool_stdout_btn = QPushButton("Open tool stdout")
         self.detail_tool_stderr_btn = QPushButton("Open tool stderr")
         self.detail_selection_trace_btn = QPushButton("Open selection trace")
+        self.detail_chrom_btn = QPushButton("View AB1 chromatogram")
         self.detail_contigs_system_btn = QPushButton("Open contigs (system)")
         self.detail_singlets_system_btn = QPushButton("Open singlets (system)")
         self.detail_info_system_btn = QPushButton("Open cap.info (system)")
         self.detail_tool_stdout_system_btn = QPushButton("Open tool stdout (system)")
         self.detail_tool_stderr_system_btn = QPushButton("Open tool stderr (system)")
         self.detail_selection_trace_system_btn = QPushButton("Open selection trace (system)")
+        self.detail_chrom_btn.setToolTip("Open AB1 trace(s) for selected sample(s) in a simple chromatogram view")
         self.detail_tool_stdout_btn.setToolTip("Open backend stdout diagnostics for selected compare row(s)")
         self.detail_tool_stderr_btn.setToolTip("Open backend stderr diagnostics for selected compare row(s)")
         self.detail_selection_trace_btn.setToolTip("Open winner-ranking selection trace for selected sample(s)")
@@ -1265,6 +1516,7 @@ class MainWindow(QMainWindow):
             self.detail_tool_stdout_btn,
             self.detail_tool_stderr_btn,
             self.detail_selection_trace_btn,
+            self.detail_chrom_btn,
             self.detail_tool_stdout_system_btn,
             self.detail_tool_stderr_system_btn,
             self.detail_selection_trace_system_btn,
@@ -1288,6 +1540,7 @@ class MainWindow(QMainWindow):
         self.detail_selection_trace_btn.clicked.connect(
             lambda: self._open_detail_paths("selection_trace", prefer_in_app=True)
         )
+        self.detail_chrom_btn.clicked.connect(self._open_chromatograms)
         self.detail_contigs_system_btn.clicked.connect(
             lambda: self._open_detail_paths("contigs", system=True)
         )
@@ -1324,6 +1577,7 @@ class MainWindow(QMainWindow):
         detail_layout.addWidget(self.detail_tool_stdout_btn)
         detail_layout.addWidget(self.detail_tool_stderr_btn)
         detail_layout.addWidget(self.detail_selection_trace_btn)
+        detail_layout.addWidget(self.detail_chrom_btn)
         detail_layout.addWidget(self.detail_contigs_system_btn)
         detail_layout.addWidget(self.detail_singlets_system_btn)
         detail_layout.addWidget(self.detail_info_system_btn)
@@ -1357,12 +1611,14 @@ class MainWindow(QMainWindow):
         self._blast_inputs_fasta: Optional[Path] = None
         self._asm_dir: Optional[Path] = None
         self._detail_paths: dict[str, list[Path]] = {"contigs": [], "singlets": [], "info": [], "tool_stdout": [], "tool_stderr": [], "selection_trace": []} 
+        self._detail_ab1_paths: list[Path] = []
         self._summary_rows: dict[str, dict[str, str]] = {}
         self._blast_rows: dict[str, dict[str, str]] = {}
         self._audit_rows: dict[str, dict[str, str]] = {}
         self._compare_rows: dict[tuple[str, str], dict[str, str]] = {} 
         self._active_viewer: Optional[QDialog] = None
         self._active_pairing_preview: Optional[QDialog] = None
+        self._active_chrom_dialogs: list[QDialog] = []
 
         # connect to model's signal to auto-scroll to the bottom on new logs if the user is already at the bottom or near it 
         sb = self.log_view.verticalScrollBar() 
@@ -2400,6 +2656,78 @@ class MainWindow(QMainWindow):
             else:
                 self._open_path(path, prefer_in_app=prefer_in_app)
 
+    def _ab1_key_map(self) -> dict[str, Path]:
+        if not self._input_path or not self._input_path.exists():
+            return {}
+        root = self._input_path if self._input_path.is_dir() else self._input_path.parent
+        key_map = build_ab1_output_key_map(root)
+        return {key: path for path, key in key_map.items()}
+
+    def _resolve_ab1_paths_for_sample(self, sample_id: str, row: Optional[dict[str, str]] = None) -> list[Path]:
+        sample = str(sample_id or "").strip()
+        if not sample:
+            return []
+
+        row_meta = row or {}
+        blast_row = self._blast_rows.get(sample, {})
+        source_values = _parse_source_values(row_meta.get("source_id_map", ""))
+        if not source_values:
+            source_values = _parse_source_values(row_meta.get("payload_ids", ""))
+        if not source_values:
+            source_values = _parse_source_values(blast_row.get("source_id_map", ""))
+        if not source_values:
+            source_values = _parse_source_values(blast_row.get("payload_ids", ""))
+
+        key_to_path = self._ab1_key_map()
+        out: list[Path] = []
+        for source in source_values:
+            base = Path(source).stem
+            if base in key_to_path:
+                p = key_to_path[base]
+                if p.exists() and p not in out:
+                    out.append(p)
+            elif "_paired" in base:
+                for part in (base.replace("_paired", "_fwd"), base.replace("_paired", "_rev")):
+                    if part in key_to_path:
+                        p = key_to_path[part]
+                        if p.exists() and p not in out:
+                            out.append(p)
+
+        if out:
+            return out
+
+        fallback_root = self._input_path if self._input_path and self._input_path.is_dir() else (self._input_path.parent if self._input_path else None)
+        if not fallback_root:
+            return []
+        sample_parts = [part.lower() for part in re.split(r"[^A-Za-z0-9]+", sample) if part]
+        if not sample_parts:
+            return []
+
+        matched: list[Path] = []
+        for ab1 in sorted(fallback_root.rglob("*.ab1")):
+            name = ab1.stem.lower()
+            if all(part in name for part in sample_parts):
+                matched.append(ab1)
+        return matched
+
+    def _open_chromatograms(self) -> None:
+        if not self._detail_ab1_paths:
+            self._show_box(QMessageBox.Icon.Information, "No AB1 trace", "No AB1 trace files were resolved for this selection.")
+            return
+
+        self._active_chrom_dialogs = [dlg for dlg in self._active_chrom_dialogs if dlg is not None]
+        for dialog in list(self._active_chrom_dialogs):
+            dialog.close()
+        self._active_chrom_dialogs.clear()
+
+        for path in self._detail_ab1_paths[:4]:
+            dialog = ChromatogramDialog(path, self)
+            dialog.setModal(False)
+            dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+            dialog.destroyed.connect(lambda _obj=None, d=dialog: self._active_chrom_dialogs.remove(d) if d in self._active_chrom_dialogs else None)
+            self._active_chrom_dialogs.append(dialog)
+            dialog.open()
+
     def _show_cell_text(self, table: QTableWidget, row: int, col: int) -> None:
         item = table.item(row, col)
         if not item:
@@ -2570,6 +2898,7 @@ class MainWindow(QMainWindow):
                 "blast_payload": row_values[1],
                 "reason": row_values[2],
                 "payload_ids": row_values[3],
+                "source_id_map": self._fmt_table_value(row.get("source_id_map", "")),
                 "trace_status": row_values[4],
                 "trace_flags": self._fmt_table_value(row.get("trace_flags", "")),
                 "trace_mixed_peak_frac_max": self._fmt_table_value(row.get("trace_mixed_peak_frac_max", "")),
@@ -2728,6 +3057,8 @@ class MainWindow(QMainWindow):
                 "selection_trace_path": self._fmt_table_value(row.get("selection_trace_path", "")),
                 "winner_reason": self._fmt_table_value(row.get("winner_reason", "")),
                 "payload_fasta": self._fmt_table_value(row.get("payload_fasta", "")),
+                "payload_ids": self._fmt_table_value(row.get("payload_ids", "")),
+                "source_id_map": self._fmt_table_value(row.get("source_id_map", "")),
                 "payload_kind": self._fmt_table_value(row.get("payload_kind", "none")),
                 "payload_n": self._fmt_table_value(row.get("payload_n", "0")),
                 "payload_max_len": self._fmt_table_value(row.get("payload_max_len", "0")),
@@ -3011,6 +3342,7 @@ class MainWindow(QMainWindow):
 
             for key in self._detail_paths:
                 self._detail_paths[key] = []
+            self._detail_ab1_paths = []
             for r in rows:
                 payload = r.get("payload_fasta", "")
                 if payload:
@@ -3058,7 +3390,14 @@ class MainWindow(QMainWindow):
             self.detail_info_system_btn.setEnabled(bool(self._detail_paths["info"]))
             self.detail_tool_stdout_system_btn.setEnabled(bool(self._detail_paths["tool_stdout"]))
             self.detail_tool_stderr_system_btn.setEnabled(bool(self._detail_paths["tool_stderr"]))
+            for r in rows:
+                sid = r.get("sample_id", "")
+                for ab1 in self._resolve_ab1_paths_for_sample(sid, row=r):
+                    if ab1 not in self._detail_ab1_paths:
+                        self._detail_ab1_paths.append(ab1)
+
             self.detail_selection_trace_system_btn.setEnabled(bool(self._detail_paths["selection_trace"]))
+            self.detail_chrom_btn.setEnabled(bool(self._detail_ab1_paths))
             return
 
         summary_vals = [self._summary_rows.get(sid, {}).get("status", "—") for sid in sample_ids]
@@ -3155,6 +3494,7 @@ class MainWindow(QMainWindow):
 
         for key in self._detail_paths:
             self._detail_paths[key] = []
+        self._detail_ab1_paths = []
 
         self._append_sample_cap3_paths(sample_ids)
         self._append_sample_trace_and_logs(sample_ids)
@@ -3171,6 +3511,11 @@ class MainWindow(QMainWindow):
         self.detail_tool_stdout_system_btn.setEnabled(bool(self._detail_paths["tool_stdout"]))
         self.detail_tool_stderr_system_btn.setEnabled(bool(self._detail_paths["tool_stderr"]))
         self.detail_selection_trace_system_btn.setEnabled(bool(self._detail_paths["selection_trace"]))
+        for sid in sample_ids:
+            for ab1 in self._resolve_ab1_paths_for_sample(sid):
+                if ab1 not in self._detail_ab1_paths:
+                    self._detail_ab1_paths.append(ab1)
+        self.detail_chrom_btn.setEnabled(bool(self._detail_ab1_paths))
  
     # closeEvent ----------------------------
     def closeEvent(self, event):
