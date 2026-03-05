@@ -11,6 +11,7 @@ from Bio import SeqIO
 
 from microseq_tests.utility.utils import load_config
 from microseq_tests.trimming.ab1_to_fastq import build_ab1_output_key_map
+from microseq_tests.trimming.ab1_trace_utils import Ab1TraceBundle, extract_ab1_trace_bundle
 
 L = logging.getLogger(__name__)
 
@@ -20,6 +21,9 @@ TRACE_QC_COLUMNS = [
     "trace_median_peak",
     "trace_noise_mad",
     "trace_snr",
+    "trace_snr_global_mad",
+    "trace_snr_basecall_aware",
+    "trace_snr_mode",
     "trace_mixed_peak_frac",
     "trace_mixed_peak_p95",
     "trace_mixed_base_frac",
@@ -39,9 +43,21 @@ class TraceQcParams:
     mixed_ratio_thresh: float = 0.25
     mixed_frac_fail: float = 0.10
     min_peak_height_for_mixed: float = 100.0
-    snr_warn: float = 100.0
-    snr_fail: float = 25.0
+    mixed_min_run: int = 3
+    core_min_quality: int = 20
+    core_start_frac: float = 0.10
+    core_end_frac: float = 0.85
+    snr_mode: str = "global_mad"
+    snr_warn_global_mad: float = 12.0
+    snr_fail_global_mad: float = 7.0
+    snr_warn_basecall_aware: float = 2.0
+    snr_fail_basecall_aware: float = 1.3
+    low_snr_fail_core_pcon_min: float = 20.0
+    low_snr_fail_avg_q_min: float = 20.0
+    low_snr_missing_quality_policy: str = "warn_if_quality_missing"
+    snr_fail_hard: float = 0.8
     peak_window: int = 8
+    ploc_local_half_window: int = 1
 
 
 @dataclass(frozen=True)
@@ -51,6 +67,9 @@ class TraceQcSummary:
     trace_median_peak: float | None
     trace_noise_mad: float | None
     trace_snr: float | None
+    trace_snr_global_mad: float | None
+    trace_snr_basecall_aware: float | None
+    trace_snr_mode: str | None
     trace_mixed_peak_frac: float | None
     trace_mixed_peak_p95: float | None
     trace_mixed_base_frac: float | None
@@ -79,6 +98,9 @@ class TraceQcSummary:
             self.trace_median_peak,
             self.trace_noise_mad,
             self.trace_snr,
+            self.trace_snr_global_mad,
+            self.trace_snr_basecall_aware,
+            self.trace_snr_mode,
             self.trace_mixed_peak_frac,
             self.trace_mixed_peak_p95,
             self.trace_mixed_base_frac,
@@ -92,10 +114,8 @@ class TraceQcSummary:
         return [_fmt(val) for val in values]
 
 
-
 def trace_qc_header() -> str:
     return "\t".join(TRACE_QC_COLUMNS)
-
 
 
 def _trace_qc_defaults() -> TraceQcParams:
@@ -107,11 +127,27 @@ def _trace_qc_defaults() -> TraceQcParams:
         min_peak_height_for_mixed=trace_cfg.get(
             "min_peak_height_for_mixed", TraceQcParams.min_peak_height_for_mixed
         ),
-        snr_warn=trace_cfg.get("snr_warn", TraceQcParams.snr_warn),
-        snr_fail=trace_cfg.get("snr_fail", TraceQcParams.snr_fail),
+        mixed_min_run=trace_cfg.get("mixed_min_run", TraceQcParams.mixed_min_run),
+        core_min_quality=trace_cfg.get("core_min_quality", TraceQcParams.core_min_quality),
+        core_start_frac=trace_cfg.get("core_start_frac", TraceQcParams.core_start_frac),
+        core_end_frac=trace_cfg.get("core_end_frac", TraceQcParams.core_end_frac),
+        snr_mode=str(trace_cfg.get("snr_mode", TraceQcParams.snr_mode) or TraceQcParams.snr_mode).strip().lower(),
+        snr_warn_global_mad=trace_cfg.get("snr_warn_global_mad", TraceQcParams.snr_warn_global_mad),
+        snr_fail_global_mad=trace_cfg.get("snr_fail_global_mad", TraceQcParams.snr_fail_global_mad),
+        snr_warn_basecall_aware=trace_cfg.get("snr_warn_basecall_aware", TraceQcParams.snr_warn_basecall_aware),
+        snr_fail_basecall_aware=trace_cfg.get("snr_fail_basecall_aware", TraceQcParams.snr_fail_basecall_aware),
+        low_snr_fail_core_pcon_min=trace_cfg.get(
+            "low_snr_fail_core_pcon_min", TraceQcParams.low_snr_fail_core_pcon_min
+        ),
+        low_snr_fail_avg_q_min=trace_cfg.get("low_snr_fail_avg_q_min", TraceQcParams.low_snr_fail_avg_q_min),
+        low_snr_missing_quality_policy=str(
+            trace_cfg.get("low_snr_missing_quality_policy", TraceQcParams.low_snr_missing_quality_policy)
+            or TraceQcParams.low_snr_missing_quality_policy
+        ).strip().lower(),
+        snr_fail_hard=trace_cfg.get("snr_fail_hard", TraceQcParams.snr_fail_hard),
         peak_window=trace_cfg.get("peak_window", TraceQcParams.peak_window),
+        ploc_local_half_window=trace_cfg.get("ploc_local_half_window", TraceQcParams.ploc_local_half_window),
     )
-
 
 
 def _trace_qc_apply_thresholds() -> bool:
@@ -119,6 +155,11 @@ def _trace_qc_apply_thresholds() -> bool:
     trace_cfg = cfg.get("trace_qc", {})
     return bool(trace_cfg.get("enable_flags", False))
 
+
+def _trace_qc_diagnostic_logging_enabled() -> bool:
+    cfg = load_config()
+    trace_cfg = cfg.get("trace_qc", {})
+    return bool(trace_cfg.get("diagnostic_logging", True))
 
 
 def _coerce_basecalls(value: object) -> str:
@@ -134,7 +175,6 @@ def _coerce_basecalls(value: object) -> str:
         except (ValueError, TypeError):
             return ""
     return ""
-
 
 
 def _coerce_float_values(value: object) -> list[float]:
@@ -161,12 +201,10 @@ def _coerce_float_values(value: object) -> list[float]:
         return []
 
 
-
 def _median_or_none(values: list[float]) -> float | None:
     if not values:
         return None
     return float(statistics.median(values))
-
 
 
 def _mad(values: Iterable[float]) -> float:
@@ -175,7 +213,6 @@ def _mad(values: Iterable[float]) -> float:
         return float("nan")
     med = statistics.median(vals)
     return statistics.median([abs(v - med) for v in vals])
-
 
 
 def _percentile(values: Iterable[float], p: float) -> float:
@@ -190,7 +227,6 @@ def _percentile(values: Iterable[float], p: float) -> float:
     return float(vals[f] + (vals[c] - vals[f]) * (k - f))
 
 
-
 def _to_none_if_nan(value: float | None) -> float | None:
     if value is None:
         return None
@@ -199,64 +235,16 @@ def _to_none_if_nan(value: float | None) -> float | None:
     return value
 
 
-
-def _select_trace_channels(raw: dict) -> list[list[int]]:
-    if all(k in raw for k in ("DATA9", "DATA10", "DATA11", "DATA12")):
-        keys = ("DATA9", "DATA10", "DATA11", "DATA12")
-    elif all(k in raw for k in ("DATA1", "DATA2", "DATA3", "DATA4")):
-        keys = ("DATA1", "DATA2", "DATA3", "DATA4")
-    else:
-        return []
-    channels: list[list[int]] = []
-    for key in keys:
-        channels.append([int(v) for v in raw[key]])
-    return channels
-
-
-
-def _resolve_ploc(raw: dict) -> list[int]:
-    ploc = raw.get("PLOC2") or raw.get("PLOC1")
-    if not ploc:
-        return []
-    return [int(v) for v in ploc]
-
-
-
-def _normalize_ploc(ploc: list[int], trace_len: int) -> list[int]:
-    if not ploc:
-        return []
-    if max(ploc) < trace_len and min(ploc) >= 0:
-        return ploc
-    if max(ploc) - 1 < trace_len and min(ploc) >= 1:
-        return [idx - 1 for idx in ploc]
-    return []
-
-
-
-def _build_intervals(idx: list[int], trace_len: int) -> list[tuple[int, int]]:
-    if not idx:
-        return []
-    intervals: list[tuple[int, int]] = []
-    for i, pos in enumerate(idx):
-        prev_pos = idx[i - 1] if i > 0 else 0
-        next_pos = idx[i + 1] if i + 1 < len(idx) else trace_len - 1
-        lo = max(0, (prev_pos + pos) // 2)
-        hi = min(trace_len - 1, (pos + next_pos) // 2)
-        if hi < lo:
-            continue
-        intervals.append((lo, hi))
-    return intervals
-
-
-
-def _interval_channel_max(channels: list[list[int]], lo: int, hi: int) -> list[float]:
-    if hi < lo:
-        return []
-    vals: list[float] = []
-    for ch in channels:
-        vals.append(float(max(ch[lo : hi + 1])))
-    return vals
-
+def _longest_true_run(values: list[bool]) -> int:
+    best = 0
+    cur = 0
+    for v in values:
+        if v:
+            cur += 1
+            best = max(best, cur)
+        else:
+            cur = 0
+    return best
 
 
 def read_ab1_vendor_metrics(record) -> dict[str, float | None]:
@@ -280,69 +268,142 @@ def read_ab1_vendor_metrics(record) -> dict[str, float | None]:
 
 
 
-def compute_trace_qc(
-    channels: list[list[int]],
-    ploc: list[int],
-    params: TraceQcParams,
-) -> tuple[float | None, float | None, float | None, float | None, float | None]:
-    trace_len = len(channels[0]) if channels else 0
-    idx = _normalize_ploc(ploc, trace_len)
-    if not channels or not idx:
-        return None, None, None, None, None
 
-    intervals = _build_intervals(idx, trace_len)
-    use_interval = bool(intervals)
+def _snr_severity(value: float | None, warn: float, fail: float) -> int:
+    """0=PASS, 1=WARN, 2=FAIL, -1=undefined."""
+    if value is None:
+        return -1
+    if value < fail:
+        return 2
+    if value < warn:
+        return 1
+    return 0
+
+def _snr_thresholds(params: TraceQcParams) -> tuple[float, float]:
+    if params.snr_mode == "basecall_aware":
+        return float(params.snr_warn_basecall_aware), float(params.snr_fail_basecall_aware)
+    return float(params.snr_warn_global_mad), float(params.snr_fail_global_mad)
+
+
+def compute_trace_qc(
+    bundle: Ab1TraceBundle,
+    params: TraceQcParams,
+) -> tuple[
+    float | None,
+    float | None,
+    float | None,
+    float | None,
+    float | None,
+    int | None,
+    int | None,
+    float | None,
+    float | None,
+    float | None,
+]:
+    channels = bundle.channels
+    qpairs = list(bundle.qc_pairs)
+    qualities = bundle.qualities
+    trace_len = len(channels[0]) if channels else 0
+    if not channels or not qpairs:
+        return None, None, None, None, None, None, None, None, None, None
+
+    n_idx = len(qpairs)
+    core_start_i = max(0, min(n_idx - 1, int(n_idx * params.core_start_frac)))
+    core_end_i = max(core_start_i + 1, min(n_idx, int(n_idx * params.core_end_frac)))
+    core_pairs = qpairs[core_start_i:core_end_i]
+
+    if qualities:
+        q_len = len(qualities)
+        core_pairs = [pair for pair in core_pairs if pair[0] < q_len and qualities[pair[0]] >= params.core_min_quality]
+
+    if not core_pairs:
+        core_pairs = qpairs[core_start_i:core_end_i]
+
+    call_indices = [ci for ci, _ in core_pairs]
+    core_positions = [pos for _, pos in core_pairs]
 
     top_peaks: list[float] = []
     ratios: list[float] = []
+    mixed_events: list[bool] = []
+    snr_per_base: list[float] = []
 
-    if use_interval:
-        for lo, hi in intervals:
-            vals = _interval_channel_max(channels, lo, hi)
-            if len(vals) != 4:
-                continue
-            vals_sorted = sorted(vals)
-            top = float(vals_sorted[-1])
-            second = float(vals_sorted[-2])
-            top_peaks.append(top)
-            if top >= params.min_peak_height_for_mixed:
-                ratios.append(second / top if top > 0 else 0.0)
-    else:
-        for pos in idx:
-            vals = [ch[pos] for ch in channels]
-            vals_sorted = sorted(vals)
-            top = float(vals_sorted[-1])
-            second = float(vals_sorted[-2])
-            top_peaks.append(top)
-            if top >= params.min_peak_height_for_mixed:
-                ratios.append(second / top if top > 0 else 0.0)
+    for call_i, pos in core_pairs:
+        local_lo = max(0, pos - params.ploc_local_half_window)
+        local_hi = min(trace_len, pos + params.ploc_local_half_window + 1)
+        vals = [float(max(ch[local_lo:local_hi])) for ch in channels]
+        vals_sorted = sorted(vals)
+        top = float(vals_sorted[-1])
+        second = float(vals_sorted[-2])
+        top_peaks.append(top)
+        ratio = second / top if top > 0 else 0.0
+        if top >= params.min_peak_height_for_mixed:
+            ratios.append(ratio)
+            mixed_events.append(ratio > params.mixed_ratio_thresh)
+        else:
+            mixed_events.append(False)
+
+        if call_i < len(bundle.basecalls):
+            base = bundle.basecalls[call_i].upper()
+            called_trace = bundle.traces_by_base.get(base, [])
+            if called_trace and base in {"A", "C", "G", "T"}:
+                sig = float(max(called_trace[local_lo:local_hi]))
+                other = [
+                    float(max(bundle.traces_by_base[b][local_lo:local_hi]))
+                    for b in ("A", "C", "G", "T")
+                    if b != base and bundle.traces_by_base.get(b)
+                ]
+                if other:
+                    noise = float(statistics.median(other))
+                    snr_per_base.append(sig / (noise + 1e-9))
 
     median_peak = float(statistics.median(top_peaks)) if top_peaks else float("nan")
+    core_lo = min(core_positions) if core_positions else None
+    core_hi = max(core_positions) if core_positions else None
 
     mask = [True] * trace_len
-    for pos in idx:
+    for pos in core_positions:
         lo = max(0, pos - params.peak_window)
         hi = min(trace_len, pos + params.peak_window + 1)
         for i in range(lo, hi):
             mask[i] = False
 
     baseline_values: list[float] = []
-    for ch in channels:
-        baseline_values.extend(float(v) for i, v in enumerate(ch) if mask[i])
+    if core_lo is not None and core_hi is not None:
+        for ch in channels:
+            baseline_values.extend(float(ch[i]) for i in range(core_lo, core_hi + 1) if mask[i])
+        if not baseline_values:
+            for ch in channels:
+                baseline_values.extend(float(ch[i]) for i in range(core_lo, core_hi + 1))
+    else:
+        for ch in channels:
+            baseline_values.extend(float(v) for v in ch)
 
     noise_mad = float(_mad(baseline_values))
-    snr = float(median_peak / (noise_mad + 1e-9))
-    mixed_frac = float(sum(r > params.mixed_ratio_thresh for r in ratios) / max(1, len(ratios)))
+    snr_global_mad = float(median_peak / (noise_mad + 1e-9))
+    snr_basecall_aware = float(statistics.median(snr_per_base)) if snr_per_base else float("nan")
+    snr_selected = snr_basecall_aware if params.snr_mode == "basecall_aware" else snr_global_mad
+
+    mixed_frac = float(sum(mixed_events) / max(1, len(mixed_events)))
     mixed_p95 = float(_percentile(ratios, 0.95)) if ratios else float("nan")
+
+    if _longest_true_run(mixed_events) < params.mixed_min_run:
+        mixed_frac = 0.0
+
+    core_qualities = [float(qualities[i]) for i in call_indices if i < len(qualities)] if qualities else []
+    core_quality_median = float(statistics.median(core_qualities)) if core_qualities else None
 
     return (
         _to_none_if_nan(median_peak),
         _to_none_if_nan(noise_mad),
-        _to_none_if_nan(snr),
+        _to_none_if_nan(snr_selected),
         _to_none_if_nan(mixed_frac),
         _to_none_if_nan(mixed_p95),
+        core_lo,
+        core_hi,
+        _to_none_if_nan(core_quality_median),
+        _to_none_if_nan(snr_global_mad),
+        _to_none_if_nan(snr_basecall_aware),
     )
-
 
 
 def summarize_ab1_qc(
@@ -350,6 +411,7 @@ def summarize_ab1_qc(
     params: TraceQcParams | None = None,
     *,
     apply_thresholds: bool | None = None,
+    file_avg_q: float | None = None,
 ) -> TraceQcSummary:
     params = params or _trace_qc_defaults()
     if apply_thresholds is None:
@@ -357,13 +419,24 @@ def summarize_ab1_qc(
 
     record = SeqIO.read(path, "abi")
     raw = record.annotations.get("abif_raw", {})
-    channels = _select_trace_channels(raw)
-    ploc = _resolve_ploc(raw)
+    bundle = extract_ab1_trace_bundle(raw)
 
     vendor = read_ab1_vendor_metrics(record)
-    median_peak, noise_mad, snr, mixed_frac, mixed_p95 = compute_trace_qc(channels, ploc, params)
+    (
+        median_peak,
+        noise_mad,
+        snr,
+        mixed_frac,
+        mixed_p95,
+        core_lo,
+        core_hi,
+        core_quality_median,
+        snr_global_mad,
+        snr_basecall_aware,
+    ) = compute_trace_qc(bundle, params)
 
-    missing_primitives = not channels or not ploc
+    missing_primitives = not bundle.channels or not bundle.qc_pairs
+    snr_warn, snr_fail = _snr_thresholds(params)
 
     flags: list[str] = []
     status: str | None = None
@@ -376,9 +449,21 @@ def summarize_ab1_qc(
             if snr is None:
                 flags.append("SNR_UNDEFINED")
                 status = "NA"
-            elif snr < params.snr_fail:
-                flags.append("LOW_SNR")
-            elif snr < params.snr_warn:
+            elif snr < snr_fail:
+                quality_support_low = False
+                if core_quality_median is not None and core_quality_median < params.low_snr_fail_core_pcon_min:
+                    quality_support_low = True
+                if file_avg_q is not None and file_avg_q < params.low_snr_fail_avg_q_min:
+                    quality_support_low = True
+
+                if quality_support_low:
+                    flags.append("LOW_SNR")
+                else:
+                    if params.low_snr_missing_quality_policy == "fail_if_snr_below_hard_floor" and snr < params.snr_fail_hard:
+                        flags.append("LOW_SNR_HARD_FAIL")
+                    else:
+                        flags.append("LOW_SNR_NO_QUALITY_SUPPORT")
+            elif snr < snr_warn:
                 flags.append("LOW_SNR_WARN")
 
             if mixed_frac is None:
@@ -388,19 +473,55 @@ def summarize_ab1_qc(
                 flags.append("MIXED_PEAKS")
 
             if status != "NA":
-                if any(flag in {"LOW_SNR", "MIXED_PEAKS"} for flag in flags):
+                if any(flag in {"LOW_SNR", "LOW_SNR_HARD_FAIL", "MIXED_PEAKS"} for flag in flags):
                     status = "FAIL"
                 elif flags:
                     status = "WARN"
 
-    n_bases = len(ploc) if ploc else None
+            # Canonical mode decides FAIL; disagreement escalates to non-blocking WARN.
+            global_warn, global_fail = float(params.snr_warn_global_mad), float(params.snr_fail_global_mad)
+            aware_warn, aware_fail = float(params.snr_warn_basecall_aware), float(params.snr_fail_basecall_aware)
+            sev_global = _snr_severity(snr_global_mad, global_warn, global_fail)
+            sev_aware = _snr_severity(snr_basecall_aware, aware_warn, aware_fail)
+            if status != "NA" and sev_global >= 0 and sev_aware >= 0 and sev_global != sev_aware:
+                flags.append("SNR_MODE_DISCORDANT_WARN")
+                if status == "PASS":
+                    status = "WARN"
+
+    if _trace_qc_diagnostic_logging_enabled():
+        L.info(
+            "AB1_TRACE_DIAG file=%s data_tags=%s channel_map=%s snr_mode=%s median_primary_peak=%s baseline_MAD=%s SNR_selected=%s SNR_global_mad=%s SNR_basecall_aware=%s mixed_peak_fraction=%s qc_window_start=%s qc_window_end=%s n_called_bases=%s ploc_total=%s ploc_in_range=%s core_pcon_median=%s snr_warn=%s snr_fail=%s",
+            path.name,
+            ",".join(bundle.data_tags or ()),
+            bundle.channel_map,
+            params.snr_mode,
+            median_peak,
+            noise_mad,
+            snr,
+            snr_global_mad,
+            snr_basecall_aware,
+            mixed_frac,
+            core_lo,
+            core_hi,
+            len(bundle.peak_positions),
+            bundle.ploc_total,
+            len(bundle.qc_pairs),
+            core_quality_median,
+            snr_warn,
+            snr_fail,
+        )
+
+    n_bases = len(bundle.qc_pairs) if bundle.qc_pairs else None
 
     return TraceQcSummary(
-        trace_has_data=bool(channels and ploc),
+        trace_has_data=bool(bundle.channels and bundle.qc_pairs),
         trace_n_bases=n_bases,
         trace_median_peak=median_peak,
         trace_noise_mad=noise_mad,
         trace_snr=snr,
+        trace_snr_global_mad=snr_global_mad,
+        trace_snr_basecall_aware=snr_basecall_aware,
+        trace_snr_mode=params.snr_mode,
         trace_mixed_peak_frac=mixed_frac,
         trace_mixed_peak_p95=mixed_p95,
         trace_mixed_base_frac=vendor["mixed_base_frac"],
@@ -413,12 +534,12 @@ def summarize_ab1_qc(
     )
 
 
-
 def summarize_ab1_folder(
     path: Path,
     params: TraceQcParams | None = None,
     *,
     apply_thresholds: bool | None = None,
+    file_avg_q_by_key: dict[str, float] | None = None,
 ) -> dict[str, TraceQcSummary]:
     summaries: dict[str, TraceQcSummary] = {}
     key_map = build_ab1_output_key_map(path)
@@ -427,7 +548,13 @@ def summarize_ab1_folder(
         if key in summaries:
             L.warning("Duplicate AB1 trace QC key %s for %s", key, ab1)
         try:
-            summaries[key] = summarize_ab1_qc(ab1, params=params, apply_thresholds=apply_thresholds)
+            avg_q = file_avg_q_by_key.get(key) if file_avg_q_by_key else None
+            summaries[key] = summarize_ab1_qc(
+                ab1,
+                params=params,
+                apply_thresholds=apply_thresholds,
+                file_avg_q=avg_q,
+            )
         except Exception as exc:
             L.warning("Trace QC parse failed for %s: %s", ab1, exc)
             summaries[key] = TraceQcSummary(
@@ -436,6 +563,9 @@ def summarize_ab1_folder(
                 trace_median_peak=None,
                 trace_noise_mad=None,
                 trace_snr=None,
+                trace_snr_global_mad=None,
+                trace_snr_basecall_aware=None,
+                trace_snr_mode=None,
                 trace_mixed_peak_frac=None,
                 trace_mixed_peak_p95=None,
                 trace_mixed_base_frac=None,

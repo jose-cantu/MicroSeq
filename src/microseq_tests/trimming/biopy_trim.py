@@ -7,7 +7,7 @@ from typing import Iterable, List, Optional
 
 from Bio import SeqIO
 
-from microseq_tests.trimming.ab1_qc import TRACE_QC_COLUMNS, TraceQcSummary
+from microseq_tests.trimming.ab1_qc import TRACE_QC_COLUMNS, TraceQcSummary, summarize_ab1_qc
 
 L = logging.getLogger(__name__)
 
@@ -181,6 +181,8 @@ def _trim_all(
     stats_root: Path,
     comb: Optional[open],
     trace_qc: dict[str, TraceQcSummary] | None,
+    trace_ab1_by_key: dict[str, Path] | None,
+    trace_qc_apply_thresholds: bool | None,
     bar,
 ) -> None:
     _ = (mee_max, mee_min_len, min_reads_kept, max_drop_fraction)
@@ -242,7 +244,19 @@ def _trim_all(
             if trace_qc:
                 match = next((k for k in _trace_lookup_keys(fq.stem) if k in trace_qc), None)
                 if match is not None:
-                    trace_row = trace_qc[match].to_row()
+                    # Recompute with file_avg_q so LOW_SNR gating can use per-file quality evidence.
+                    if trace_ab1_by_key and match in trace_ab1_by_key:
+                        try:
+                            trace_row = summarize_ab1_qc(
+                                trace_ab1_by_key[match],
+                                apply_thresholds=trace_qc_apply_thresholds,
+                                file_avg_q=avg_q,
+                            ).to_row()
+                        except Exception as exc:
+                            L.debug("Trace QC recompute with avg_q failed for %s: %s", match, exc)
+                            trace_row = trace_qc[match].to_row()
+                    else:
+                        trace_row = trace_qc[match].to_row()
             if not trace_row:
                 trace_row = ["" for _ in TRACE_QC_COLUMNS]
             comb.write("\t".join(row + trace_row) + "\n")
@@ -266,6 +280,8 @@ def trim_folder(
     max_drop_fraction: float | None = None,
     combined_tsv: str | Path | None = None,
     trace_qc: dict[str, TraceQcSummary] | None = None,
+    trace_ab1_by_key: dict[str, Path] | None = None,
+    trace_qc_apply_thresholds: bool | None = None,
     threads: int = 1,
     **kwargs,
 ) -> None:
@@ -306,6 +322,8 @@ def trim_folder(
             stats_root=output_dir,
             comb=comb,
             trace_qc=trace_qc,
+            trace_ab1_by_key=trace_ab1_by_key,
+            trace_qc_apply_thresholds=trace_qc_apply_thresholds,
             bar=bar,
         )
 

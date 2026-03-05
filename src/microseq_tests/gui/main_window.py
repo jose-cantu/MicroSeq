@@ -23,6 +23,7 @@ import collections
 
 from microseq_tests.primer_catalog import pairing_label_sets, build_primer_cfg_override, trim_presets
 from microseq_tests.assembly.registry import list_assemblers
+from microseq_tests.trimming.ab1_trace_utils import coerce_ints, decode_basecalls, extract_ab1_trace_bundle, trim_called_arrays
 
 PRIMER_SETS: dict[str, tuple[list[str], list[str]]] = pairing_label_sets()
 TRIM_PRESETS: list[str] = sorted(trim_presets())
@@ -68,8 +69,15 @@ def _trace_flags_to_labels(flags: str, status: str, mixed_frac: str, review_reas
 
     if "LOW_SNR" in flag_set:
         labels.append("Low signal / high background (fail)")
+    elif "LOW_SNR_HARD_FAIL" in flag_set:
+        labels.append("Low signal hard-fail (missing quality support)")
     elif "LOW_SNR_WARN" in flag_set:
         labels.append("Low signal warning")
+    elif "LOW_SNR_NO_QUALITY_SUPPORT" in flag_set:
+        labels.append("Low signal not supported by quality (warn)")
+
+    if "SNR_MODE_DISCORDANT_WARN" in flag_set:
+        labels.append("SNR modes disagree (warn)")
 
     if "MIXED_PEAKS" in flag_set:
         labels.append("Mixed peaks detected")
@@ -178,13 +186,16 @@ class ChromatogramView(QWidget):
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Trace data could not be plotted")
             return
 
-        # Shade low-quality zones from PCON2 where available.
-        n_meta = min(len(self._basecalls), len(self._peak_positions), len(self._qualities))
-        if n_meta:
+        # Base labels/ticks use PBAS+PLOC even if PCON is absent.
+        n_calls = min(len(self._basecalls), len(self._peak_positions))
+
+        # Shade low-quality zones from PCON2 only when qualities are available.
+        n_qual = min(n_calls, len(self._qualities))
+        if n_qual:
             low_ranges: list[tuple[int, int]] = []
             run_start: Optional[int] = None
             run_end: Optional[int] = None
-            for i in range(n_meta):
+            for i in range(n_qual):
                 pos = self._peak_positions[i]
                 is_low = self._qualities[i] < self._quality_threshold
                 if is_low:
@@ -223,11 +234,11 @@ class ChromatogramView(QWidget):
             painter.drawPolyline(poly)
 
         # Overlay basecalls and peak ticks from PBAS2/PLOC2.
-        if n_meta:
+        if n_calls:
             max_labels = 160
-            step = max(1, n_meta // max_labels)
+            step = max(1, n_calls // max_labels)
             painter.setPen(QPen(QColor("#757575"), 1))
-            for i in range(0, n_meta, step):
+            for i in range(0, n_calls, step):
                 pos = self._peak_positions[i]
                 if pos < 0 or pos >= max_len:
                     continue
@@ -269,45 +280,6 @@ class ChromatogramDialog(QDialog):
         close_btn.clicked.connect(self.close)
         layout.addWidget(close_btn)
 
-    @staticmethod
-    def _decode_basecalls(value: object) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, (bytes, bytearray)):
-            return bytes(value).decode("ascii", errors="ignore").replace("\x00", "").strip()
-        text = str(value)
-        return text.replace("\x00", "").strip()
-
-    @staticmethod
-    def _coerce_ints(value: object) -> list[int]:
-        if value is None:
-            return []
-        if hasattr(value, "tolist"):
-            value = value.tolist()
-        if isinstance(value, (bytes, bytearray)):
-            return [int(b) for b in value]
-        if isinstance(value, (list, tuple)):
-            out: list[int] = []
-            for v in value:
-                try:
-                    out.append(int(v))
-                except (TypeError, ValueError):
-                    continue
-            return out
-        try:
-            return [int(value)]
-        except (TypeError, ValueError):
-            return []
-
-    @staticmethod
-    def _normalize_peak_positions(peak_positions: list[int], trace_len: int) -> list[int]:
-        if not peak_positions:
-            return []
-        if min(peak_positions) >= 0 and max(peak_positions) < trace_len:
-            return peak_positions
-        if min(peak_positions) >= 1 and max(peak_positions) - 1 < trace_len:
-            return [p - 1 for p in peak_positions]
-        return []
 
     @classmethod
     def _load_traces(cls, ab1_path: Path) -> tuple[dict[str, list[int]], str, list[int], list[int]]:
@@ -317,50 +289,17 @@ class ChromatogramDialog(QDialog):
             return {}, "", [], []
 
         raw = rec.annotations.get("abif_raw", {})
-        channel_sets = [
-            ("DATA9", "DATA10", "DATA11", "DATA12"),
-            ("DATA1", "DATA2", "DATA3", "DATA4"),
-        ]
-        keys = next((ks for ks in channel_sets if all(k in raw for k in ks)), None)
-        if not keys:
+        bundle = extract_ab1_trace_bundle(raw)
+        if not bundle.data_tags:
             return {}, "", [], []
 
-        order_raw = raw.get("FWO_1", "")
-        if isinstance(order_raw, (bytes, bytearray)):
-            order = order_raw.decode("ascii", errors="ignore")
-        else:
-            order = str(order_raw or "")
-        order = order.strip().upper()
+        basecalls, peak_positions, qualities = trim_called_arrays(
+            decode_basecalls(bundle.basecalls),
+            coerce_ints(bundle.peak_positions),
+            coerce_ints(bundle.qualities),
+        )
+        return bundle.traces_by_base, basecalls, peak_positions, qualities
 
-        if len(order) == 4 and set(order).issubset({"A", "C", "G", "T"}):
-            base_by_idx = list(order)
-        else:
-            # defensive fallback to legacy GATC assignment if FWO_1 is absent/invalid
-            base_by_idx = ["G", "A", "T", "C"]
-
-        traces: dict[str, list[int]] = {"A": [], "C": [], "G": [], "T": []}
-        for i, key in enumerate(keys):
-            base = base_by_idx[i]
-            traces[base] = [int(v) for v in raw[key]]
-
-        basecalls = cls._decode_basecalls(raw.get("PBAS2") or raw.get("PBAS1"))
-        peak_positions = cls._coerce_ints(raw.get("PLOC2") or raw.get("PLOC1"))
-        qualities = cls._coerce_ints(raw.get("PCON2") or raw.get("PCON1"))
-
-        trace_len = max((len(v) for v in traces.values()), default=0)
-        peak_positions = cls._normalize_peak_positions(peak_positions, trace_len)
-
-        n = min(len(basecalls), len(peak_positions), len(qualities))
-        if n > 0:
-            basecalls = basecalls[:n]
-            peak_positions = peak_positions[:n]
-            qualities = qualities[:n]
-        else:
-            basecalls = ""
-            peak_positions = []
-            qualities = []
-
-        return traces, basecalls, peak_positions, qualities
 
 
 class LogBridge(QObject, logging.Handler):

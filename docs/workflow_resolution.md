@@ -17,6 +17,30 @@ Mixture escalation is config-driven:
 - `trace_qc.enable_mixture_inference`
 - `trace_qc.mixture_suspect_threshold`
 
+### SNR modes (`trace_qc.snr_mode`)
+
+MicroSeq supports two SNR estimators for AB1 trace QC:
+
+- `global_mad`
+  - **Signal**: median primary peak height in the QC core window.
+  - **Noise**: baseline MAD from non-peak regions in the same core window.
+  - **Use when**: you want a conservative, waveform-level background-noise indicator that is easy to compare across files.
+
+- `basecall_aware`
+  - For each called base near `PLOC`, **signal** is the local max in the called base channel and **noise** is a statistic over non-called channels.
+  - Per-base ratios are aggregated (median) over the QC core window.
+  - **Use when**: you want SNR to track called-base separability/readability more closely (often better aligned with human chromatogram review).
+
+Practical guidance:
+
+- Use `basecall_aware` as the default decision mode for PASS/WARN/FAIL in typical Sanger workflows.
+- Keep `global_mad` available for diagnostics/troubleshooting as a conservative background-noise check.
+- Only one mode is active per run; compare both by rerunning QC with each mode and reviewing `qc/trim_summary.tsv` and `AB1_TRACE_DIAG` logs.
+- Use mode-specific thresholds (`snr_warn_global_mad`/`snr_fail_global_mad` vs `snr_warn_basecall_aware`/`snr_fail_basecall_aware`) because the scales differ.
+- AB1 diagnostics log both SNR estimators (`SNR_global_mad` and `SNR_basecall_aware`) and the selected mode value used for flagging.
+- Low-SNR behavior with missing quality evidence is policy-driven via `low_snr_missing_quality_policy` (warn by default, optional hard-fail floor with `snr_fail_hard`).
+- Decision policy: canonical mode decides FAIL; disagreement between estimators escalates to non-blocking WARN (`SNR_MODE_DISCORDANT_WARN`), and secondary mode never downgrades a canonical FAIL to PASS.
+
 ## 2) Assemble (Structural hypotheses)
 
 MicroSeq generates multiple hypotheses **only when there is a structural tie** (for example, ambiguous overlap outcomes).

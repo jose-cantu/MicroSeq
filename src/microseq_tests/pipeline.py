@@ -31,7 +31,7 @@ import shutil
 
 # pull the existing implementation functions
 from microseq_tests.trimming.quality_trim import  trim_fastq_inputs
-from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq as ab1_to_fastq
+from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq as ab1_to_fastq, build_ab1_output_key_map
 from microseq_tests.trimming.biopy_trim import trim_folder as biopy_trim, build_trim_summary_row
 from microseq_tests.trimming.ab1_qc import summarize_ab1_folder
 from microseq_tests.trimming.fastq_to_fasta import (
@@ -480,12 +480,15 @@ def run_trim(
             apply_thresholds = None
 
         trace_qc = summarize_ab1_folder(dst, apply_thresholds=apply_thresholds)
+        trace_ab1_by_key = {key: ab1 for ab1, key in build_ab1_output_key_map(dst).items()}
 
         biopy_trim(
             quality_input_dir,
             work / "qc",
             combined_tsv=summary_tsv,
             trace_qc=trace_qc,
+            trace_ab1_by_key=trace_ab1_by_key,
+            trace_qc_apply_thresholds=apply_thresholds,
             method=str(trim_policy["sanger_method"]),
             cutoff_q=int(trim_policy["sanger_cutoff_q"]),
             window_size=int(trim_policy["sanger_window_size"]),

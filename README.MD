@@ -448,14 +448,24 @@ trace_qc:
   mixed_ratio_thresh: 0.25
   mixed_frac_fail: 0.10
   min_peak_height_for_mixed: 100.0
-  snr_warn: 100.0
-  snr_fail: 25.0
+  snr_mode: global_mad  # or basecall_aware
+  snr_warn_global_mad: 12.0
+  snr_fail_global_mad: 7.0
+  snr_warn_basecall_aware: 2.0
+  snr_fail_basecall_aware: 1.3
+  low_snr_fail_core_pcon_min: 20.0
+  low_snr_fail_avg_q_min: 20.0
+  low_snr_missing_quality_policy: warn_if_quality_missing  # or fail_if_snr_below_hard_floor
+  snr_fail_hard: 0.8
   peak_window: 8
 ```
 
 If `enable_flags` is `false`, `trace_qc_flags` and `trace_qc_status` remain empty while metrics are still reported.
 When flags are enabled and AB1 trace primitives are missing (`DATA*`/`PLOC*`) or critical metrics are undefined,
 MicroSeq emits deterministic missing-data flags and sets `trace_qc_status=NA`.
+Trace QC TSV now includes `trace_snr_global_mad`, `trace_snr_basecall_aware`, and `trace_snr_mode` in addition to selected `trace_snr` for calibration across runs.
+If you parse `trim_summary.tsv` by column position, update parsers to use header names because new trace-QC columns were appended.
+When low SNR is detected without supporting quality evidence, MicroSeq emits `LOW_SNR_NO_QUALITY_SUPPORT` (WARN), unless `low_snr_missing_quality_policy` requests hard-fail behavior below `snr_fail_hard`.
 
 ## CAP3 (microseq assembly)
 
