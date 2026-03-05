@@ -1,0 +1,38 @@
+pairing_sets:
+  "16S (27F/1492R)":
+    forward: ["27F"]
+    reverse: ["1492R"]
+  "16S (8F/1492R)":
+    forward: ["8F"]
+    reverse: ["1492R"]
+  "16S V4 (515F/806R)":
+    forward: ["515F"]
+    reverse: ["806R"]
+  "Custom":
+    forward: []
+    reverse: []
+
+# Example synthetic flank templates for Detect/Clip configuration.
+# Non-authoritative values: replace with validated production sequences for lab workflows.
+trim_presets:
+  "VECTOR_PREFIX_EXAMPLE":
+    forward_primers: ["ACCGGTACCGGTAACTG"]
+    reverse_primers: ["CAGTTACCGGTACCGGT"]
+    max_mismatch: 1
+    max_search: 120
+    max_primer_offset: 20
+    iupac_mode: false
+  "ADAPTER_OVERHANG_EXAMPLE":
+    forward_primers: ["TCGTCGGCAGCGTCAGATGTGTATAAGAGACAG"]
+    reverse_primers: ["GTCTCGTGGGCTCGGAGATGTGTATAAGAGACAG"]
+    max_mismatch: 2
+    max_search: 120
+    max_primer_offset: 25
+    iupac_mode: false
+  "SHORT_AMPLICON_OPPOSITE_END_EXAMPLE":
+    forward_primers: ["GATCGGAAGAGCACACGTCT"]
+    reverse_primers: ["AGATCGGAAGAGCGTCGTGT"]
+    max_mismatch: 1
+    max_search: 80
+    max_primer_offset: 15
+    iupac_mode: false

@@ -1,0 +1,10 @@
+$ merge_two_reads --engine=biopython
+
+sample_id=1
+assembler_id=merge_two_reads:biopython
+merge_status=ambiguous_topk
+overlap_engine=biopython
+orientation=revcomp
+overlap_len=213
+identity=0.972477
+warning=ambiguous_overlap;policy=topk;alternatives=3

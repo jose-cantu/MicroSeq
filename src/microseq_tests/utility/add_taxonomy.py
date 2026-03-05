@@ -11,11 +11,13 @@ python add_taxonomy.py \
         --taxonomy ~/.microseq_dbs/gg2/taxonomy.tsv \
         --out data/biom/ocular_isolates_with_tax.csv 
 """
-from __future__ import annotations 
+from __future__ import annotations
+import logging 
 import re 
 from pathlib import Path 
 import pandas as pd
-from microseq_tests.utility.io_utils import normalise_tsv 
+from microseq_tests.utility.io_utils import normalise_tsv
+from microseq_tests.utility.id_normaliser import qseqid_to_sample_id
 
 # -------- helpers -----------------------------------------------------------
 
@@ -39,9 +41,9 @@ def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path, fill_speci
             dtype=str, 
             )
 
-    # Keep both qseqid (for downstream merges) and sample_id for postblast
+    # Keep both qseqid (for downstream merges + structural payload id) and sample_id for postblast + biological sample id 
     if "qseqid" in hits.columns and "sample_id" not in hits.columns:
-        hits.insert(hits.columns.get_loc("qseqid") + 1, "sample_id", hits["qseqid"])
+        hits.insert(hits.columns.get_loc("qseqid") + 1, "sample_id", hits["qseqid"].map(qseqid_to_sample_id)) 
     elif "sample_id" in hits.columns and "qseqid" not in hits.columns:
         hits.insert(0, "qseqid", hits["sample_id"])
    # canonicalize the subject ID so it can match the taxonomy table for each of the databases 
@@ -66,8 +68,12 @@ def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path, fill_speci
     
     merged = hits.merge(tax, on="sseqid", how="left")
     n_unmatched = merged["taxonomy"].isna().sum()
-    print(f"[add_taxonomy] {n_unmatched}/{len(merged)} rows unmatched")
-    
+    logging.getLogger(__name__).info(
+        "[add_taxonomy] %s/%s rows unmatched",
+        n_unmatched,
+        len(merged),
+    ) 
+
     if fill_species:
         needs_fill = (merged["taxonomy"].str.count(";") < 6) & \
                      (merged["pident"].astype(float) >= 97.0) 
@@ -92,4 +98,4 @@ def run_taxonomy_join(hits_fp: Path, taxonomy_fp: Path, out_fp: Path, fill_speci
 
     out_sep = "\t" if out_fp.suffix.lower() in {".tsv", ".txt"} else ","
     merged.to_csv(out_fp, sep=out_sep, index=False)
-    print(f"[add_taxonomy] wrote {out_fp}") 
+    logging.getLogger(__name__).info("[add_taxonomy] wrote %s", out_fp) 

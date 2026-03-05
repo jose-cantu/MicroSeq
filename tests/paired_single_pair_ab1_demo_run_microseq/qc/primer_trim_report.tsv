@@ -1,0 +1,3 @@
+file	reads	reads_trimmed	bases_trimmed	avg_trim_len	avg_mismatches	primer_hit	avg_offset	orientation_used	orientation_source	iupac_mode
+A+_1492R_2026-01-29_E07_trimmed.fastq	1	0	0	0.00	0.00	-	0.00	reverse	detector	on
+A+_27F_2026-01-29_C07_trimmed.fastq	1	0	0	0.00	0.00	-	0.00	forward	detector	on

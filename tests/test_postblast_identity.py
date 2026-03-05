@@ -67,7 +67,7 @@ def test_taxonomy_join_keeps_qseqid(tmp_path):
     hits = tmp_path / "hits.tsv"
     hits.write_text(
         "qseqid\tsseqid\tpident\tevalue\tbitscore\n"
-        "S1\tGG2_0001\t99.0\t1e-10\t200\n"
+        "S1|contig|cap3_c1\tGG2_0001\t99.0\t1e-10\t200\n"
     )
 
     tax = tmp_path / "taxonomy.tsv"
@@ -78,7 +78,8 @@ def test_taxonomy_join_keeps_qseqid(tmp_path):
 
     df = pd.read_csv(hits_tax, sep="\t")
     assert {"qseqid", "sample_id"}.issubset(df.columns)
-    assert df.loc[0, "qseqid"] == df.loc[0, "sample_id"] == "S1"
+    assert df.loc[0, "qseqid"] == "S1|contig|cap3_c1"
+    assert df.loc[0, "sample_id"] == "S1"
 
 # ---------------------------------------------------------------------------
 # 3. Tail-pipeline sanity check

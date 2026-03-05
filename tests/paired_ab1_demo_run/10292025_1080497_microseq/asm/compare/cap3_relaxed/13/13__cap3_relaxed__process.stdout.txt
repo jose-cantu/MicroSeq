@@ -1,0 +1,9 @@
+$ cap3 13_paired.fasta -o 40 -p 90 -s 900 -k 0 -y 100
+
+Number of segment pairs = 2; number of pairwise comparisons = 0
+'+' means given segment; '-' means reverse complement
+
+Overlaps            Containments  No. of Constraints Supporting Overlap
+
+
+DETAILED DISPLAY OF CONTIGS

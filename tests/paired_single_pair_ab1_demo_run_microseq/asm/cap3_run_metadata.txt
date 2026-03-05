@@ -1,0 +1,4 @@
+cap3_executable	cap3
+cap3_version	cap3 10.2011
+sample_id	cap3_command
+A+	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=563 identity=0.9982

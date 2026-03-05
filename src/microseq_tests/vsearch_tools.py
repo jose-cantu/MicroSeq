@@ -29,7 +29,7 @@ def run_vsearch(cmd: list[str], *, cwd: Path | None = None) -> None:
     full_cmd = [vsearch, *cmd]
     L.info("Running vsearch: %s", " ".join(full_cmd))
     try:
-        subprocess.run(
+        result = subprocess.run(
             full_cmd,
             check=True,
             cwd=cwd,
@@ -37,8 +37,14 @@ def run_vsearch(cmd: list[str], *, cwd: Path | None = None) -> None:
             stderr=subprocess.PIPE,
             text=True,
         )
+        if result.stdout:
+            L.info("vsearch stdout:\n%s", result.stdout)
+        if result.stderr:
+            L.warning("vsearch stderr:\n%s", result.stderr)
     except subprocess.CalledProcessError as exc:
         L.error("vsearch failed (exit %s):\n%s", exc.returncode, exc.stderr)
+        if exc.stdout:
+            L.error("vsearch stdout:\n%s", exc.stdout)
         raise
 
 
@@ -122,6 +128,37 @@ def chimera_check_ref(
         cmd.extend(["--threads", str(threads)])
     run_vsearch(cmd)
     return fasta_out, report_tsv
+
+
+def orient_reads(
+    fasta_in: Path,
+    fasta_out: Path,
+    *,
+    reference: Path,
+    notmatched_out: Path | None = None,
+    tabbed_out: Path | None = None,
+    threads: int | None = None,
+) -> tuple[Path, Path, Path | None]:
+    fasta_out.parent.mkdir(parents=True, exist_ok=True)
+    notmatched_out = notmatched_out or fasta_out.with_suffix(".notmatched.fasta")
+    cmd = [
+        "--orient",
+        str(fasta_in),
+        "--db",
+        str(reference),
+        "--fastaout",
+        str(fasta_out),
+        "--notmatched",
+        str(notmatched_out),
+        "--fasta_width",
+        "0",
+    ]
+    if tabbed_out:
+        cmd.extend(["--tabbedout", str(tabbed_out)])
+    if threads:
+        cmd.extend(["--threads", str(threads)])
+    run_vsearch(cmd)
+    return fasta_out, notmatched_out, tabbed_out
 
 
 def collapse_replicates_grouped(
@@ -220,4 +257,3 @@ def collapse_replicates_grouped(
                 weight_fh.write(f"{clean_id}\t{size}\n")
 
     return fasta_out
-

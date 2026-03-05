@@ -1,0 +1,2 @@
+sample_id	overlap_engine	orientation	overlap_len	identity	mismatches	contig_len	merge_status	qualities	merge_warning	high_conflict_mismatches
+10292025_1080497_10	edlib	forward	760	0.5268	230	0	identity_low	present		0

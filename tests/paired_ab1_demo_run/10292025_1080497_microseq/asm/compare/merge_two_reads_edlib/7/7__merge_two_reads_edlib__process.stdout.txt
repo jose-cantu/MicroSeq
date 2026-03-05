@@ -1,0 +1,10 @@
+$ merge_two_reads --engine=edlib
+
+sample_id=7
+assembler_id=merge_two_reads:edlib
+merge_status=identity_low
+overlap_engine=edlib
+orientation=forward
+overlap_len=635
+identity=0.542823
+warning=

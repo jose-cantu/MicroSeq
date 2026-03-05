@@ -1,0 +1,24 @@
+sample_id	blast_payload	payload_ids	reason	selected_assembler_id	selected_assembler_name	selected_status
+1	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+10	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+11	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+12	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+13	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	identity_low
+14	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+15	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+16	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+17	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+18	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	identity_low
+2	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+23	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+24	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+25	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+26	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+27	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+3	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+4	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+5	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+6	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+7	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+8	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap
+9	no_payload		selected_backend_no_payload	merge_two_reads:biopython	Merge two reads (Biopython overlap)	ambiguous_overlap

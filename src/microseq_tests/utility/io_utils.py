@@ -1,11 +1,18 @@
 from __future__ import annotations 
 import logging
+
+from pathlib import Path
+import re
+import shutil
+
+from Bio import SeqIO
+
 L = logging.getLogger(__name__)
 
 from pathlib import Path 
 import re, shutil, logging 
 
-__all__ = ["normalise_tsv"] 
+__all__ = ["normalise_tsv", "write_fasta_and_qual_from_fastq"] 
 
 _TAB_RX = re.compile(r"( {2,}|,)") # 2 + spaces or comma 
 _NEEDS_RX = re.compile(r"\t") # have at least one TAB char 
@@ -46,3 +53,37 @@ def cli():
     for f in sys.argv[1:]:
         normalise_tsv(f)
     print("files are normalised now and ready to run in MicroSeq", *sys.argv[1:])
+
+def write_fasta_and_qual_from_fastq(
+    fastq_path: str | Path,
+    fasta_path: str | Path,
+    qual_path: str | Path | None = None,
+) -> tuple[Path, Path] | None:
+    """Write FASTA + QUAL files from a FASTQ file.
+
+    The FASTA/QUAL outputs reuse the same record headers and verify that every
+    sequence length matches its PHRED quality length.
+    """
+
+    fastq_path = Path(fastq_path)
+    fasta_path = Path(fasta_path)
+    qual_path = Path(qual_path) if qual_path else Path(f"{fasta_path}.qual")
+
+    records = list(SeqIO.parse(fastq_path, "fastq"))
+    if not records:
+        return None
+
+    for record in records:
+        quals = record.letter_annotations.get("phred_quality")
+        if quals is None:
+            raise ValueError(f"No PHRED qualities found for {record.id} in {fastq_path}")
+        if len(quals) != len(record.seq):
+            raise ValueError(
+                f"Quality length mismatch for {record.id} in {fastq_path}: "
+                f"{len(quals)} != {len(record.seq)}"
+            )
+
+    fasta_path.parent.mkdir(parents=True, exist_ok=True)
+    SeqIO.write(records, fasta_path, "fasta")
+    SeqIO.write(records, qual_path, "qual")
+    return fasta_path, qual_path

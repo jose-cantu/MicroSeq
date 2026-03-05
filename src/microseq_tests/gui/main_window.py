@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 import logging
+
+from numpy import partition
+from pandas.core.generic import sample
 L = logging.getLogger(__name__)
 import os
 import inspect
@@ -10,57 +13,293 @@ import tracemalloc
 import tempfile 
 import shutil 
 import atexit
-import re 
-
-# Pick the first visible backend that has a server.........
-if "WSL_DISTRO_NAME" in os.environ:  # running inside WSL
-    if os.environ.get("WAYLAND_DISPLAY"):  # WSLg comositor up for windows 11
-        # here let Qt auto-select 'wayland' which is best performance
-        pass
-    elif os.environ.get("DISPLAY"):  # using external X-server/ Xwayland
-        os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
-    else:  # headless CI, SSH
-        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-elif platform.system() == "Linux":  # native Linux desktop
-    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")  # native X11
-
-    # macOS defaults to its own so no need for one here...... it would be
-    # 'Darwin' and defaults to 'cocoa' just incase for reference and i forget
+import re
+import pandas as pd 
 
 import sys, logging, traceback, subprocess, shlex, time
 from pathlib import Path
 from typing import Optional
 import collections
 
-PRIMER_SETS: dict[str, tuple[list[str], list[str]]] = {
-    "16S (27F/1492R)": (["27F"], ["1492R"]), 
-    "16S (8F/1492R)": (["8F"], ["1492R"]),
-    "16S V4 (515F/806R)": (["515F"], ["806R"]),
-    "Custom": ([], [])
-}
+from microseq_tests.primer_catalog import pairing_label_sets, build_primer_cfg_override, trim_presets
+from microseq_tests.assembly.registry import list_assemblers
+from microseq_tests.trimming.ab1_trace_utils import coerce_ints, decode_basecalls, extract_ab1_trace_bundle, trim_called_arrays
+
+PRIMER_SETS: dict[str, tuple[list[str], list[str]]] = pairing_label_sets()
+TRIM_PRESETS: list[str] = sorted(trim_presets())
+
+STATUS_COLOR_LEGEND = (
+    "Status color legend:\n"
+    "• assembled = green\n"
+    "• singlets_only = yellow\n"
+    "• cap3_no_output = orange\n"
+    "• pair_missing = red\n"
+    "• overlap_* = light blue"
+)
+
+TRACE_QC_COLOR_LEGEND = (
+    "Trace QC color legend:\n"
+    "• PASS = green\n"
+    "• WARN = yellow\n"
+    "• FAIL = red\n"
+    "• NA = gray"
+)
+
+
+def _normalize_legacy_compare_diag_detail(detail: str, selected_engine: str) -> str:
+    """Normalize legacy compare diagnostics where engine was printed as overlap_len."""
+    text = (detail or "").strip()
+    if not text:
+        return text
+    match = re.search(r"overlap_len=(\d+);identity=[^;]+;\s*engine=(\d+)$", text)
+    if not match:
+        return text
+    overlap_len, engine_token = match.groups()
+    if overlap_len != engine_token:
+        return text
+    engine_label = (selected_engine or "").strip()
+    if not engine_label or engine_label.isdigit():
+        return text
+    return text[: match.start(2)] + engine_label
+
+def _trace_flags_to_labels(flags: str, status: str, mixed_frac: str, review_reason: str = "") -> list[str]:
+    labels: list[str] = []
+    flag_set = {f.strip().upper() for f in str(flags or "").split(";") if f.strip()}
+    status_norm = str(status or "NA").strip().upper()
+
+    if "LOW_SNR" in flag_set:
+        labels.append("Low signal / high background (fail)")
+    elif "LOW_SNR_HARD_FAIL" in flag_set:
+        labels.append("Low signal hard-fail (missing quality support)")
+    elif "LOW_SNR_WARN" in flag_set:
+        labels.append("Low signal warning")
+    elif "LOW_SNR_NO_QUALITY_SUPPORT" in flag_set:
+        labels.append("Low signal not supported by quality (warn)")
+
+    if "SNR_MODE_DISCORDANT_WARN" in flag_set:
+        labels.append("SNR modes disagree (warn)")
+
+    if "MIXED_PEAKS" in flag_set:
+        labels.append("Mixed peaks detected")
+
+    if flag_set.intersection({"TRACE_DATA_MISSING", "SNR_UNDEFINED", "MIXED_UNDEFINED", "TRACE_PARSE_ERROR"}):
+        labels.append("Trace QC unavailable/NA")
+
+    if str(review_reason or "").strip().lower() == "mixture_suspected":
+        labels.append("Mixture suspected")
+
+    if mixed_frac:
+        labels.append(f"Max mixed-peak fraction: {mixed_frac}")
+
+    if not labels:
+        labels.append(f"Trace QC {status_norm}")
+    return labels
 
 from PySide6.QtCore import (
-    QLine, Qt, QObject, QThread, Signal, Slot, QMetaObject, Q_ARG, QSettings, QTimer, QModelIndex
+    QLine, Qt, QObject, QThread, Signal, Slot, QSettings, QTimer, QModelIndex, QProcess, QUrl, QPointF
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QVBoxLayout,
     QHBoxLayout, QPushButton, QLabel, QListView, QSpinBox, QMessageBox,
-    QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, QAbstractItemView, QLineEdit 
+    QComboBox, QProgressBar, QCheckBox, QGroupBox, QRadioButton, QAbstractItemView, QLineEdit,
+    QTabWidget, QTableWidget, QTableWidgetItem, QSplitter, QDialog, QPlainTextEdit, QHeaderView, QSizePolicy
 )
 from PySide6 import QtCore
+from PySide6.QtGui import QColor, QBrush, QDesktopServices, QPainter, QPen, QPolygonF 
 
 # ==== MicroSeq wrappers ----------
 from microseq_tests.pipeline import (
     run_blast_stage,
     run_postblast,
     run_full_pipeline,
+    run_trim,
+    run_compare_assemblers,
     _summarize_paired_candidates,
     _suggest_pairing_patterns
 )
 from microseq_tests.vsearch_tools import resolve_vsearch 
-from microseq_tests.assembly.pairing import DupPolicy 
+from microseq_tests.assembly.pairing import DupPolicy, PairingCandidate, analyze_pairing_candidates 
 from microseq_tests.utility.utils import setup_logging, load_config
+from microseq_tests.trimming.ab1_to_fastq import build_ab1_output_key_map
+from Bio import SeqIO
+
+
+def _parse_source_values(mapping_text: str) -> list[str]:
+    values: list[str] = []
+    for token in str(mapping_text or "").split(";"):
+        tok = token.strip()
+        if not tok:
+            continue
+        rhs = tok.split("=", 1)[1] if "=" in tok else tok
+        rhs = rhs.strip()
+        if rhs and rhs not in values:
+            values.append(rhs)
+    return values
+
+
+class ChromatogramView(QWidget):
+    BASE_COLORS = {
+        "A": QColor("#2E7D32"),
+        "C": QColor("#1565C0"),
+        "G": QColor("#000000"),
+        "T": QColor("#D32F2F"),
+    }
+
+    def __init__(
+        self,
+        traces: dict[str, list[int]],
+        *,
+        basecalls: str = "",
+        peak_positions: Optional[list[int]] = None,
+        qualities: Optional[list[int]] = None,
+        quality_threshold: int = 20,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._traces = traces
+        self._basecalls = basecalls or ""
+        self._peak_positions = peak_positions or []
+        self._qualities = qualities or []
+        self._quality_threshold = quality_threshold
+        self.setMinimumHeight(260)
+
+    def _x_from_idx(self, idx: int, max_len: int, x_off: int, width: int) -> float:
+        if max_len <= 1:
+            return float(x_off)
+        return x_off + (idx / (max_len - 1)) * width
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#FFFFFF"))
+
+        if not self._traces:
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No AB1 trace data")
+            return
+
+        width = max(1, self.width() - 12)
+        height = max(1, self.height() - 24)
+        x_off = 6
+        y_off = 12
+        max_len = max((len(v) for v in self._traces.values()), default=0)
+        max_peak = max((max(v) if v else 0 for v in self._traces.values()), default=0)
+        if max_len <= 1 or max_peak <= 0:
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Trace data could not be plotted")
+            return
+
+        # Base labels/ticks use PBAS+PLOC even if PCON is absent.
+        n_calls = min(len(self._basecalls), len(self._peak_positions))
+
+        # Shade low-quality zones from PCON2 only when qualities are available.
+        n_qual = min(n_calls, len(self._qualities))
+        if n_qual:
+            low_ranges: list[tuple[int, int]] = []
+            run_start: Optional[int] = None
+            run_end: Optional[int] = None
+            for i in range(n_qual):
+                pos = self._peak_positions[i]
+                is_low = self._qualities[i] < self._quality_threshold
+                if is_low:
+                    if run_start is None:
+                        run_start = pos
+                    run_end = pos
+                elif run_start is not None and run_end is not None:
+                    low_ranges.append((run_start, run_end))
+                    run_start = None
+                    run_end = None
+            if run_start is not None and run_end is not None:
+                low_ranges.append((run_start, run_end))
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 230, 230, 110))
+            for lo, hi in low_ranges:
+                x0 = self._x_from_idx(max(0, lo), max_len, x_off, width)
+                x1 = self._x_from_idx(min(max_len - 1, hi), max_len, x_off, width)
+                painter.drawRect(int(min(x0, x1)), y_off, max(1, int(abs(x1 - x0))), height)
+            if low_ranges:
+                painter.setPen(QPen(QColor("#8B0000"), 1))
+                painter.drawText(x_off + 2, y_off + 12, f"LowQ shaded (PCON2 < {self._quality_threshold})")
+
+        # Trace lines.
+        for base in ("A", "C", "G", "T"):
+            values = self._traces.get(base, [])
+            if len(values) < 2:
+                continue
+            poly = QPolygonF()
+            for i, val in enumerate(values):
+                x = self._x_from_idx(i, max_len, x_off, width)
+                y = y_off + height - (max(0, val) / max_peak) * height
+                poly.append(QPointF(x, y))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(self.BASE_COLORS[base], 1.1))
+            painter.drawPolyline(poly)
+
+        # Overlay basecalls and peak ticks from PBAS2/PLOC2.
+        if n_calls:
+            max_labels = 160
+            step = max(1, n_calls // max_labels)
+            painter.setPen(QPen(QColor("#757575"), 1))
+            for i in range(0, n_calls, step):
+                pos = self._peak_positions[i]
+                if pos < 0 or pos >= max_len:
+                    continue
+                x = self._x_from_idx(pos, max_len, x_off, width)
+                painter.drawLine(int(x), y_off + height, int(x), y_off + height - 5)
+                base = self._basecalls[i].upper()
+                painter.setPen(QPen(self.BASE_COLORS.get(base, QColor("#424242")), 1))
+                painter.drawText(int(x) - 3, y_off - 2, base)
+                painter.setPen(QPen(QColor("#757575"), 1))
+
+
+class ChromatogramDialog(QDialog):
+    def __init__(self, ab1_path: Path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Chromatogram: {ab1_path.name}")
+        self.resize(960, 360)
+        layout = QVBoxLayout(self)
+
+        path_lbl = QLabel(str(ab1_path))
+        path_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(path_lbl)
+
+        traces, basecalls, peak_positions, qualities = self._load_traces(ab1_path)
+        layout.addWidget(
+            ChromatogramView(
+                traces,
+                basecalls=basecalls,
+                peak_positions=peak_positions,
+                qualities=qualities,
+                quality_threshold=20,
+                parent=self,
+            )
+        )
+
+        legend = QLabel("A=green  C=blue  G=black  T=red   |   PCON2 low-quality zones shaded")
+        layout.addWidget(legend)
+
+        close_btn = QPushButton("Close", self)
+        close_btn.clicked.connect(self.close)
+        layout.addWidget(close_btn)
+
+
+    @classmethod
+    def _load_traces(cls, ab1_path: Path) -> tuple[dict[str, list[int]], str, list[int], list[int]]:
+        try:
+            rec = SeqIO.read(ab1_path, "abi")
+        except Exception:
+            return {}, "", [], []
+
+        raw = rec.annotations.get("abif_raw", {})
+        bundle = extract_ab1_trace_bundle(raw)
+        if not bundle.data_tags:
+            return {}, "", [], []
+
+        basecalls, peak_positions, qualities = trim_called_arrays(
+            decode_basecalls(bundle.basecalls),
+            coerce_ints(bundle.peak_positions),
+            coerce_ints(bundle.qualities),
+        )
+        return bundle.traces_by_base, basecalls, peak_positions, qualities
+
 
 
 class LogBridge(QObject, logging.Handler):
@@ -73,6 +312,18 @@ class LogBridge(QObject, logging.Handler):
 
     def emit(self, record):
         self.sig.emit(self.format(record))
+
+
+def _set_header_tooltips(table: QTableWidget, tooltip_by_header: dict[str, str]) -> None:
+    """Attach tooltips to table header labels by exact header text."""
+    for col in range(table.columnCount()):
+        item = table.horizontalHeaderItem(col)
+        if not item:
+            continue
+        text = item.text().strip()
+        tooltip = tooltip_by_header.get(text)
+        if tooltip:
+            item.setToolTip(tooltip)
 
 
 # Logging class
@@ -88,22 +339,420 @@ class LogModel(QtCore.QAbstractListModel): # defining a new class
         return len(self._lines) # returning number from deque w/ _parent unused
 
     def data(self, index, role=QtCore.Qt.ItemDataRole.DisplayRole): # data to display specific item
-        if role == QtCore.Qt.ItemDataRole.DisplayRole: # just display the text by first checking
-            return self._lines[index.row()] # fetch line text
-        return None
-
+        if role != QtCore.Qt.ItemDataRole.DisplayRole:
+            return None
+        if not index.isValid():
+            return None
+        row = index.row()
+        if row < 0 or row >= len(self._lines):
+            return None 
+        return self._lines[row] # fetch line text 
     # public API
     @QtCore.Slot(str)
     def append(self, line: str):
-        if len(self._lines) >= self.MAX_ROWS: # overflow? drop oldest
-            self.beginRemoveRows(QtCore.QModelIndex(), 0, 0)
-            self._lines.popleft()
-            self.endRemoveRows() # Finished removing can update again
+        self.append_many([line]) 
+   
+    @QtCore.Slot(list)
+    def append_many(self, lines: list[str]) -> None:
+        if not lines:
+            return 
+        total = len(self._lines) + len(lines)
+        overflow = max(0, total - self.MAX_ROWS)
+        if overflow:
+            self.beginRemoveRows(QtCore.QModelIndex(), 0, overflow -1)
+            for _ in range(overflow):
+                self._lines.popleft()
+            self.endRemoveRows()
 
-        row = len(self._lines) # figure row end of current list place new row
-        self.beginInsertRows(QtCore.QModelIndex(), row, row) # insert row end
-        self._lines.append(line)
-        self.endInsertRows() # Done inserting can update now
+        row0 = len(self._lines)
+        row1 = row0 + len(lines) - 1 
+        self.beginInsertRows(QtCore.QModelIndex(), row0, row1)
+        self._lines.extend(lines)
+        self.endInsertRows() 
+
+TEXT_FILE_EXTENSIONS = {
+    ".txt",
+    ".log",
+    ".info",
+    ".fasta",
+    ".fa",
+    ".fna",
+    ".fastq",
+    ".fq",
+    ".tsv",
+    ".csv",
+}
+
+def is_wsl() -> bool:
+    """Checks if the code is executing inside Windows SubSystem for Linux."""
+    return bool(os.environ.get("WSL_INTEROP") or os.environ.get("WSL_DISTRO_NAME"))
+
+def has_gui_session() -> bool:
+    """Checking if there an is an active windowing system (x11/Wayland/Win/macOS) to show a UI."""
+    if platform.system() in ("Darwin", "Windows"):
+        return True 
+    return bool(os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY"))
+
+def looks_texty(path: Path) -> bool:
+    """ 
+    Heuristic here I made to determine if a file is plain text. Due to the limit I'm using here of a max of 2MB inorder to deal with not overloading the machine and GUI by not opening huge byte files that are non text otherwise it risks being either not as responsive or worse freezing outright. Will test run this more robustly at a lter date for now the max is 2MB for opening files in the GUI which should be sufficient. 
+
+    This function checks the extension first, then reads 4KB chunk of data to look for null bytes which is a binary marker if it does appear it will not load it in the GUI.    """ 
+    if path.suffix.lower() in TEXT_FILE_EXTENSIONS:
+        return True 
+    try: 
+       chunk = path.read_bytes()[:4096]
+    except OSError:
+        return False 
+    return b"\x00" not in chunk
+
+class TextViewerDialog(QDialog):
+    def __init__(self, path: Path, parent=None, max_bytes: int = 2_000_000):
+        super().__init__(parent)
+        self.setWindowTitle(str(path))
+        self.resize(900, 600)
+
+        layout = QVBoxLayout(self)
+
+        header = QLabel(f"{path} (showing up to {max_bytes:,} bytes)")
+        header.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(header)
+
+        editor = QPlainTextEdit(self)
+        editor.setReadOnly(True)
+        editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        layout.addWidget(editor)
+
+        try:
+            data = path.read_bytes()[:max_bytes]
+            text = data.decode("utf-8", errors="replace")
+        except OSError as exc:
+            text = f"Failed to read file: {exc}"
+        editor.setPlainText(text)
+
+        btn_row = QHBoxLayout()
+        copy_btn = QPushButton("Copy path", self)
+        copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(str(path)))
+        btn_row.addWidget(copy_btn)
+        btn_row.addStretch()
+
+        close_btn = QPushButton("Close", self)
+        close_btn.clicked.connect(self.close)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+class TextBlobDialog(QDialog):
+    def __init__(self, title: str, text: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(800, 500)
+
+        layout = QVBoxLayout(self)
+
+        editor = QPlainTextEdit(self)
+        editor.setReadOnly(True)
+        editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        editor.setPlainText(text)
+        layout.addWidget(editor)
+
+        btn_row = QHBoxLayout()
+        copy_btn = QPushButton("Copy", self)
+        copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(text))
+        btn_row.addWidget(copy_btn)
+        btn_row.addStretch()
+        close_btn = QPushButton("Close", self)
+        close_btn.clicked.connect(self.close)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+class PairingPreviewDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        summary: str,
+        suggestions: str,
+        candidates: list[PairingCandidate],
+        enforce_same_well: bool,
+        refresh_callback=None,
+        open_callback=None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Pairing Preview")
+        self.resize(1100, 650)
+        self._candidates = candidates
+        self._enforce_same_well = enforce_same_well
+        self._refresh_callback = refresh_callback
+        self._open_callback = open_callback
+        self._renamed_paths: set[Path] = set()
+        self._rename_map: list[tuple[Path, Path]] = []
+
+        layout = QVBoxLayout(self)
+        self._header = QLabel()
+        self._header.setWordWrap(True)
+        self._header.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self._header)
+        self._set_header(summary, suggestions, candidates)
+
+        self.table = QTableWidget(0, 7, self)
+        self.table.setHorizontalHeaderLabels(
+            ["File", "Detected", "Sample ID", "Well", "Issues", "Suggested rename", "Status"]
+        )
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.table)
+
+        self._populate_table()
+
+        btn_row = QHBoxLayout()
+        copy_btn = QPushButton("Copy rename map", self)
+        copy_btn.clicked.connect(self._copy_rename_map)
+        btn_row.addWidget(copy_btn)
+
+        open_btn = QPushButton("Open containing folder", self)
+        open_btn.clicked.connect(self._open_containing_folder)
+        btn_row.addWidget(open_btn)
+
+        copy_cmd_btn = QPushButton("Copy rename commands", self)
+        copy_cmd_btn.clicked.connect(self._copy_rename_commands)
+        btn_row.addWidget(copy_cmd_btn)
+
+        export_btn = QPushButton("Export rename script…", self)
+        export_btn.clicked.connect(self._export_rename_script)
+        btn_row.addWidget(export_btn)
+
+        apply_btn = QPushButton("Apply suggested renames…", self)
+        apply_btn.clicked.connect(self._apply_renames)
+        btn_row.addWidget(apply_btn)
+
+        btn_row.addStretch()
+        close_btn = QPushButton("Close", self)
+        close_btn.clicked.connect(self.close)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+    def _set_header(
+        self,
+        summary: str,
+        suggestions: str,
+        candidates: list[PairingCandidate],
+    ) -> None:
+        mismatch = any(
+            "well mismatch" in issue
+            for candidate in candidates
+            for issue in candidate.issues
+        )
+        if self._enforce_same_well and mismatch:
+            pairing_line = (
+                "Pairs will not assemble until well codes match for each sample ID.\n"
+            )
+        else:
+            pairing_line = (
+                "Pairs will still assemble, but naming is non-canonical; suggested renames improve reproducibility.\n"
+            )
+        self._header.setText(
+            f"{summary}\n"
+            f"{pairing_line}"
+            f"Suggestions: {suggestions}"
+        )
+
+    def _populate_table(self) -> None:
+        self.table.setRowCount(0)
+        self._rename_map = []
+        for candidate in self._candidates:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            detected = candidate.orient or "-"
+            issues = "; ".join(candidate.issues) if candidate.issues else "-"
+            suggested = candidate.suggested_name or "-"
+            status = "Issue corrected" if candidate.path in self._renamed_paths and not candidate.issues else "Issue" if candidate.issues else "OK"
+
+            items = [
+                candidate.path.name,
+                detected,
+                candidate.sid or "-",
+                candidate.well or "-",
+                issues,
+                suggested,
+                status,
+            ]
+            for col, value in enumerate(items):
+                item = QTableWidgetItem(value)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.table.setItem(row, col, item)
+
+            if candidate.suggested_name and candidate.path.name != candidate.suggested_name:
+                self._rename_map.append(
+                    (candidate.path, candidate.path.with_name(candidate.suggested_name))
+                )
+
+    def _copy_rename_map(self) -> None:
+        if not self._rename_map:
+            QApplication.clipboard().setText("No rename suggestions available.")
+            return
+        lines = ["source\ttarget"]
+        lines.extend(f"{src}\t{dest}" for src, dest in self._rename_map)
+        QApplication.clipboard().setText("\n".join(lines))
+
+    def _open_containing_folder(self) -> None:
+        if not self._candidates:
+            QMessageBox.information(self, "No files", "No files are available to open.")
+            return
+        folder = self._candidates[0].path.parent
+        if self._open_callback is not None:
+            ok = self._open_callback(folder)
+            if ok:
+                return
+        QMessageBox.information(
+            self,
+            "Open manually",
+            f"Unable to open folder via system handler:\n{folder}",
+        )
+
+    def _copy_rename_commands(self) -> None:
+        if not self._rename_map:
+            QApplication.clipboard().setText("No rename suggestions available.")
+            return
+        if os.name == "nt":
+            lines = [
+                f'Rename-Item -LiteralPath {shlex.quote(str(src))} -NewName {shlex.quote(dest.name)}'
+                for src, dest in self._rename_map
+            ]
+        else:
+            lines = [
+                f"mv -n -- {shlex.quote(str(src))} {shlex.quote(str(dest))}"
+                for src, dest in self._rename_map
+            ]
+        QApplication.clipboard().setText("\n".join(lines))
+
+    def _rename_conflicts(self) -> tuple[set[Path], set[Path]]:
+        targets = [dest for _, dest in self._rename_map]
+        conflicts = {dest for dest in targets if dest.exists()}
+        target_counts = collections.Counter(targets)
+        duplicate_targets = {dest for dest, count in target_counts.items() if count > 1}
+        return conflicts, duplicate_targets
+
+    def _export_rename_script(self) -> None:
+        if not self._rename_map:
+            QMessageBox.information(self, "No renames", "No suggested renames to export.")
+            return
+        conflicts, duplicate_targets = self._rename_conflicts()
+        if conflicts or duplicate_targets:
+            details = []
+            if conflicts:
+                details.append(
+                    "Targets already exist:\n" + "\n".join(str(p) for p in sorted(conflicts))
+                )
+            if duplicate_targets:
+                details.append(
+                    "Duplicate target names:\n"
+                    + "\n".join(str(p) for p in sorted(duplicate_targets))
+                )
+            QMessageBox.warning(
+                self,
+                "Rename conflicts",
+                "Unable to export renames due to conflicts.\n\n" + "\n\n".join(details),
+            )
+            return
+
+        default_path = None
+        if self._candidates:
+            default_path = str(self._candidates[0].path.parent / "rename_map.tsv")
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export rename script",
+            default_path or "",
+            "TSV (*.tsv);;Shell script (*.sh);;All files (*)",
+        )
+        if not path:
+            return
+        out_path = Path(path)
+        if out_path.suffix.lower() == ".sh":
+            if os.name == "nt":
+                lines = [
+                    f'Rename-Item -LiteralPath {shlex.quote(str(src))} -NewName {shlex.quote(dest.name)}'
+                    for src, dest in self._rename_map
+                ]
+            else:
+                lines = [
+                    f"mv -n -- {shlex.quote(str(src))} {shlex.quote(str(dest))}"
+                    for src, dest in self._rename_map
+                ]
+            out_path.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + "\n".join(lines) + "\n", encoding="utf-8")
+        else:
+            lines = ["source\ttarget"]
+            lines.extend(f"{src}\t{dest}" for src, dest in self._rename_map)
+            out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        QMessageBox.information(self, "Export complete", f"Rename script written to:\n{out_path}")
+
+    def _apply_renames(self) -> None:
+        if not self._rename_map:
+            QMessageBox.information(self, "No renames", "No suggested renames to apply.")
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Apply renames",
+            "Apply the suggested renames to the files on disk? This cannot be undone.",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        conflicts, duplicate_targets = self._rename_conflicts()
+        if conflicts or duplicate_targets:
+            details = []
+            if conflicts:
+                details.append(
+                    "Targets already exist:\n" + "\n".join(str(p) for p in sorted(conflicts))
+                )
+            if duplicate_targets:
+                details.append(
+                    "Duplicate target names:\n"
+                    + "\n".join(str(p) for p in sorted(duplicate_targets))
+                )
+            QMessageBox.warning(
+                self,
+                "Rename conflicts",
+                "Unable to apply renames due to conflicts.\n\n" + "\n\n".join(details),
+            )
+            return
+
+        errors: list[str] = []
+        for src, dest in self._rename_map:
+            try:
+                if src.exists():
+                    src.rename(dest)
+            except OSError as exc:
+                errors.append(f"{src} → {dest}: {exc}")
+
+        if errors:
+            QMessageBox.warning(
+                self,
+                "Rename errors",
+                "Some renames failed:\n" + "\n".join(errors),
+            )
+            return
+
+        self._renamed_paths = {dest for _, dest in self._rename_map}
+        if self._refresh_callback is not None:
+            summary, suggestions, candidates = self._refresh_callback()
+            self._candidates = candidates
+            self._set_header(summary, suggestions, candidates)
+            self._populate_table()
+            QMessageBox.information(
+                self,
+                "Renames complete",
+                "Suggested renames applied. Preview refreshed.",
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            "Renames complete",
+            "Suggested renames applied. Re-run Preview Pairs to refresh results.",
+        )
+        self.close()
 
 
 # Worker class ----------------
@@ -123,6 +772,9 @@ class Worker(QObject):
 
     @Slot() # design to warn if any errors occur
     def run(self):
+        if QThread.currentThread().isInterruptionRequested():
+            self.finished.emit(RuntimeError("Cancelled"))
+            return 
         # Drop any duplicate that might have been supplied on mistake
         self._kwargs.pop("on_stage", None)
         self._kwargs.pop("on_progress", None) # guard
@@ -132,10 +784,21 @@ class Worker(QObject):
             self._kwargs["on_stage"] = self.status.emit
         if "on_progress" in params:
             self._kwargs["on_progress"] = self.progress.emit
+        if "stop_cb" in params or "is_cancelled" in params:
+            def _is_cancelled() -> bool:
+                thr = QThread.currentThread()
+                return bool(thr and thr.isInterruptionRequested())
+
+            if "stop_cb" in params:
+                self._kwargs["stop_cb"] = _is_cancelled
+            if "is_cancelled" in params:
+                self._kwargs["is_cancelled"] = _is_cancelled
 
         try:
             logging.info("%s started", self._fn.__name__)
             result = self._fn(*self._args, **self._kwargs)
+            if QThread.currentThread().isInterruptionRequested():
+                raise RuntimeError("Cancelled")
             logging.info("%s finished", self._fn.__name__)
         except Exception as e:
             logging.exception("Worker crashed:")
@@ -150,6 +813,21 @@ class MainWindow(QMainWindow):
         self.settings = QSettings("MicroSeq", "MicroSeq")
         self.setWindowTitle("MicroSeq GUI v1.0") # title for it
         self.resize(800, 520) # size of app considering also log space here
+
+        normal_geom = self.settings.value("window_normal_geometry", None)
+        if isinstance(normal_geom, (list, tuple)) and len(normal_geom) == 4:
+            try:
+                x, y, w, h = [int(v) for v in normal_geom]
+                self.setGeometry(x, y, w, h)
+            except (TypeError, ValueError):
+                pass
+        else:
+            # Legacy migration path from old saveGeometry blob key.
+            geom = self.settings.value("window_geometry")
+            if geom is not None:
+                self.restoreGeometry(geom)
+
+        self._start_maximized = self.settings.value("window_start_maximized", False, type=bool)
 
         # widgets --------------------------------------------------------
         self.fasta_lbl = QLabel("Input: —")
@@ -198,17 +876,31 @@ class MainWindow(QMainWindow):
         # add the Paired option to dropdown, storing paired as internal data 
         self.mode_combo.addItem("Paired", userData="paired")
 
+        self.assembler_combo = QComboBox()
+        self.assembler_combo.addItem("CAP3 default (legacy paired pipeline)", userData="__cap3_default__")
+        self.assembler_combo.addItem("All assemblers (compare + pick best contig)", userData="__all__")
+        for assembler in list_assemblers():
+            self.assembler_combo.addItem(assembler.display_name, userData=assembler.id)
+        self.assembler_combo.setToolTip(
+                "Choose legacy CAP3 flow, a single assembler (faster: runs only that assembler), or all assemblers with auto-selection for BLAST payloads (in spirit of metawrap compare assebmlest and select best one)."
+        )
+
+        self.compare_assemblers_btn = QPushButton("Compare assemblers")
+        self.compare_assemblers_btn.setToolTip("Compare all registered assemblers on paired FASTA inputs and write asm/compare_assemblers.tsv")
+        self.assembler_combo.setVisible(False)
+        self.assembler_combo.setEnabled(False)
+
         self.primer_set_combo = QComboBox()
         for label in PRIMER_SETS: 
             self.primer_set_combo.addItem(label)
 
         # Create a single-line text input field for the forward read tokens 
         self.fwd_pattern_edit = QLineEdit()
-        self.fwd_pattern_edit.setPlaceholderText("Forward tokens (comma-separated, e.g. 27F,8F,515F)")
+        self.fwd_pattern_edit.setPlaceholderText("Forward primer labels (comma-separated, e.g. 27F,8F,515F)")
 
         # Create a single-line text input field for the reverse read tokens 
         self.rev_pattern_edit = QLineEdit()
-        self.rev_pattern_edit.setPlaceholderText("Reverse tokens (comma-separated, e.g. 1492R, 806R)")
+        self.rev_pattern_edit.setPlaceholderText("Reverse primer labels (comma-separated, e.g. 1492R, 806R)")
 
         self.detect_tokens_btn = QPushButton("Auto-detect Primers")
 
@@ -217,12 +909,93 @@ class MainWindow(QMainWindow):
         self.preview_pairs_btn = QPushButton("Preview Pairs")
         self.preview_pairs_btn.setToolTip("Summarize detected forward/reverse reads w/o running pipeline in a dry run")
 
+        self.primer_preview_btn = QPushButton("Primer preview")
+        self.primer_preview_btn.setToolTip("Run primer detect-only scan and show per-file hit metrics.")
+
         self.enforce_well_chk = QCheckBox("Enforce same plate well (A1-H12)")
 
         self.enforce_well_chk.setToolTip("Only pair forward/reverse reads when the same well plate code (e.g. B10)")
 
+        self.cap3_profile_combo = QComboBox()
+        self.cap3_profile_combo.addItem("Strict", userData="strict")
+        self.cap3_profile_combo.addItem("Diagnostic", userData="diagnostic")
+        self.cap3_profile_combo.addItem("Relaxed", userData="relaxed")
+        self.cap3_profile_combo.setToolTip("Preset CAP3 overlap thresholds")
+
+        self.cap3_extra_args_edit = QLineEdit()
+        self.cap3_extra_args_edit.setPlaceholderText("Extra CAP3 args (e.g., -a 20 -b 15)")
+
+        self.cap3_qual_chk = QCheckBox("Use per-base quality scores for assembly (its required for correct CAP3 scoring)")
+        self.cap3_qual_chk.setToolTip("Use QUAL files to weight CAP3 assembly scoring it ensures its correct.")
+
+        self.write_blast_inputs_chk = QCheckBox("Create BLAST input file (contigs or singlets)")
+        self.write_blast_inputs_chk.setToolTip("Emit asm/blast_inputs.fasta + asm/blast_inputs.tsv.")
+
+        self.use_blast_inputs_combo = QComboBox()
+        self.use_blast_inputs_combo.addItem(
+            "Paired contigs only (paired_contigs.fasta)", userData=False
+        )
+        self.use_blast_inputs_combo.addItem(
+            "Contig or singlets (blast_inputs.fasta)", userData=True
+        )
+
+        self.overlap_audit_chk = QCheckBox("Overlap audit (diagnostic only)")
+        self.overlap_audit_chk.setToolTip("Run overlap heuristic and write qc/overlap_audit.tsv.")
+
+        self.primer_trim_mode_combo = QComboBox()
+        self.primer_trim_mode_combo.addItems(["Off", "Detect", "Clip"])
+        self.primer_trim_mode_combo.setCurrentText(self.settings.value("primer_trim_mode", "Off"))
+        self.primer_trim_mode_combo.currentTextChanged.connect(
+            lambda txt: self.settings.setValue("primer_trim_mode", txt)
+        )
+
+        self.primer_trim_stage_combo = QComboBox()
+        self.primer_trim_stage_combo.addItem("Post-quality", userData="post_quality")
+        self.primer_trim_stage_combo.addItem("Pre-quality", userData="pre_quality")
+        stg = self.settings.value("primer_trim_stage", "post_quality")
+        self.primer_trim_stage_combo.setCurrentIndex(max(0, self.primer_trim_stage_combo.findData(stg)))
+        self.primer_trim_stage_combo.currentIndexChanged.connect(
+            lambda _i: self.settings.setValue("primer_trim_stage", self.primer_trim_stage_combo.currentData())
+        )
+
+        self.primer_trim_preset_combo = QComboBox()
+        self.primer_trim_preset_combo.addItem("Custom from config", userData="")
+        for preset_name in TRIM_PRESETS:
+            self.primer_trim_preset_combo.addItem(preset_name, userData=preset_name)
+        pst = self.settings.value("primer_trim_preset", "")
+        self.primer_trim_preset_combo.setCurrentIndex(max(0, self.primer_trim_preset_combo.findData(pst)))
+        self.primer_trim_preset_combo.currentIndexChanged.connect(
+            lambda _i: self.settings.setValue("primer_trim_preset", self.primer_trim_preset_combo.currentData())
+        )
+
+        self.primer_fwd_edit = QPlainTextEdit()
+        self.primer_fwd_edit.setPlaceholderText("Forward synthetic flank sequences (one per line)")
+        self.primer_fwd_edit.setFixedHeight(54)
+        self.primer_fwd_edit.setPlainText(self.settings.value("primer_trim_fwd", ""))
+        self.primer_fwd_edit.textChanged.connect(
+            lambda: self.settings.setValue("primer_trim_fwd", self.primer_fwd_edit.toPlainText())
+        )
+
+        self.primer_rev_edit = QPlainTextEdit()
+        self.primer_rev_edit.setPlaceholderText("Reverse synthetic flank sequences (one per line)")
+        self.primer_rev_edit.setFixedHeight(54)
+        self.primer_rev_edit.setPlainText(self.settings.value("primer_trim_rev", ""))
+        self.primer_rev_edit.textChanged.connect(
+            lambda: self.settings.setValue("primer_trim_rev", self.primer_rev_edit.toPlainText())
+        )
+
+        self.primer_save_btn = QPushButton("Use custom flanks for this run")
+        self.primer_save_btn.setToolTip("Use current forward/reverse synthetic flank sequences for this session.")
+        self.primer_save_btn.clicked.connect(lambda: self.primer_trim_preset_combo.setCurrentIndex(0))
+
         self.collapse_reps_chk = QCheckBox("Collapse replicates")
         self.collapse_reps_chk.setToolTip("Collapse technical replicates with vsearch (requires vsearch).")
+
+        self.orient_reads_chk = QCheckBox("Orient reads")
+        self.orient_reads_chk.setToolTip(
+            "Orient reads against the selected DB reference before collapse/chimera. "
+            "Recommended for mixed-orientation Sanger (forward+reverse primer runs)."
+        )
 
         self.chimera_mode_combo = QComboBox()
         self.chimera_mode_combo.addItem("Off", userData="off")
@@ -260,6 +1033,13 @@ class MainWindow(QMainWindow):
         # Immediately call function to update the UI based on intial mode selection (example: show/hide reverse pattern field) 
         self._on_mode_changed(idx) 
 
+        saved_assembler = self.settings.value("assembler_id", self.assembler_combo.itemData(0))
+        asm_idx = self.assembler_combo.findData(saved_assembler)
+        self.assembler_combo.setCurrentIndex(0 if asm_idx < 0 else asm_idx)
+        self.assembler_combo.currentIndexChanged.connect(
+            lambda _i: self.settings.setValue("assembler_id", self.assembler_combo.currentData())
+        )
+
         # ------ Connect UI events to functions/settings storage -------- 
 
         # Connect signal emitted when dropdown index changes to the function handles the change 
@@ -293,6 +1073,9 @@ class MainWindow(QMainWindow):
         self.collapse_reps_chk.setChecked(
             self.settings.value("collapse_replicates", False, type=bool)
         )
+        self.orient_reads_chk.setChecked(
+            self.settings.value("orient_reads", False, type=bool)
+        )
 
         saved_chimera_mode = self.settings.value("chimera_mode", "off")
         chimera_idx = max(0, self.chimera_mode_combo.findData(saved_chimera_mode))
@@ -302,11 +1085,34 @@ class MainWindow(QMainWindow):
         dup_idx = max(0, self.dup_policy_combo.findData(saved_dup_policy))
         self.dup_policy_combo.setCurrentIndex(dup_idx)
 
+        saved_profile = self.settings.value("cap3_profile", "strict")
+        profile_idx = max(0, self.cap3_profile_combo.findData(saved_profile))
+        self.cap3_profile_combo.setCurrentIndex(profile_idx)
+
+        saved_cap3_extra = self.settings.value("cap3_extra_args", "")
+        self.cap3_extra_args_edit.setText(saved_cap3_extra)
+
+        self.cap3_qual_chk.setChecked(
+            self.settings.value("cap3_use_qual", True, type=bool)
+        )
+        self.write_blast_inputs_chk.setChecked(
+            self.settings.value("write_blast_inputs", True, type=bool)
+        )
+        saved_use_blast_inputs = self.settings.value("use_blast_inputs", False, type=bool)
+        use_blast_idx = max(0, self.use_blast_inputs_combo.findData(saved_use_blast_inputs))
+        self.use_blast_inputs_combo.setCurrentIndex(use_blast_idx)
+
+        self.overlap_audit_chk.setChecked(
+            self.settings.value("overlap_audit", False, type=bool)
+        )
+
         # ------ connecting user action event handlers -----------------
         # For when users change selection in drop down menu 
         self.primer_set_combo.currentIndexChanged.connect(self._on_primer_set_changed)
         self.detect_tokens_btn.clicked.connect(self._detect_tokens)
         self.preview_pairs_btn.clicked.connect(self._preview_pairs)
+        self.primer_preview_btn.clicked.connect(self._preview_primers)
+        self.compare_assemblers_btn.clicked.connect(self._compare_assemblers)
         self.advanced_regex_chk.toggled.connect(self._toggle_advanced_regex)
         self.enforce_well_chk.toggled.connect(
             lambda checked: self.settings.setValue("enforce_same_well", checked)
@@ -314,6 +1120,9 @@ class MainWindow(QMainWindow):
 
         self.collapse_reps_chk.toggled.connect(
             lambda checked: self.settings.setValue("collapse_replicates", checked)
+        )
+        self.orient_reads_chk.toggled.connect(
+            lambda checked: self.settings.setValue("orient_reads", checked)
         )
 
         self.chimera_mode_combo.currentIndexChanged.connect(
@@ -327,7 +1136,31 @@ class MainWindow(QMainWindow):
                 "dup_policy", 
                 getattr(data := self.dup_policy_combo.itemData(idx), "value", data),
             ) 
-        ) 
+        )
+        
+        self.cap3_profile_combo.currentIndexChanged.connect(
+            lambda idx: self.settings.setValue(
+                "cap3_profile", self.cap3_profile_combo.itemData(idx)
+            )
+        )
+        self.cap3_extra_args_edit.textEdited.connect(
+            lambda txt: self.settings.setValue("cap3_extra_args", txt)
+        )
+        self.cap3_qual_chk.toggled.connect(
+            lambda checked: self.settings.setValue("cap3_use_qual", checked)
+        )
+        self.write_blast_inputs_chk.toggled.connect(
+            lambda checked: self.settings.setValue("write_blast_inputs", checked)
+        )
+        self.use_blast_inputs_combo.currentIndexChanged.connect(
+            lambda idx: self.settings.setValue(
+                "use_blast_inputs", self.use_blast_inputs_combo.itemData(idx)
+            )
+        )
+        self.overlap_audit_chk.toggled.connect(
+            lambda checked: self.settings.setValue("overlap_audit", checked)
+        )
+
         # Connect the signal for text edits in the forward field to an anonymous function that saves the new text to settings. 
         self.fwd_pattern_edit.textEdited.connect(
             lambda txt: self._on_token_edited("fwd_tokens", txt)
@@ -402,21 +1235,333 @@ class MainWindow(QMainWindow):
         # Performance tweak tells view all rows are the same height
         self.log_view.setUniformItemSizes(True)
 
-        # connect to model's signal to auto-scroll to the bottom on new logs
-        self.log_model.rowsInserted.connect(
-            lambda _parent, _first, last: # _ to mark unused
-                # Safely queue a call to the scrollTo method to run after the current            # event (the paint event) has finished. THis helps in avoiding 
-                # and preventing re-entrancy crashes.
-                QTimer.singleShot(
-                    0,
-                    lambda row=last: # capture the value 
-                       self.log_view.scrollTo(
-                           self.log_model.index(row, 0),
-                           QAbstractItemView.ScrollHint.PositionAtBottom
-                       ) 
+        # ---- Output tables + tabs ----
+        self.summary_filter = QComboBox()
+        self.summary_filter.addItem("All statuses", userData=None)
 
-                )
+        self.summary_table = QTableWidget(0, 15)
+        self.summary_table.setHorizontalHeaderLabels(
+            [
+                "sample_id",
+                "status",
+                "assembler",
+                "contig_len",
+                "blast_payload",
+                "selected_engine",
+                "configured_engine",
+                "merge_status",
+                "merge_overlap_len",
+                "merge_identity",
+                "overlaps_saved",
+                "overlaps_removed",
+                "primer_mode",
+                "primer_stage",
+                "trace_qc",
+            ]
         )
+        _set_header_tooltips(self.summary_table, {"status": STATUS_COLOR_LEGEND})
+        self.summary_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.summary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.summary_table.itemSelectionChanged.connect(self._update_detail_panel)
+
+        self.blast_table = QTableWidget(0, 5)
+        self.blast_table.setHorizontalHeaderLabels(
+            ["sample_id", "blast_payload", "reason", "payload_ids", "trace_qc"]
+        )
+        self.blast_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.blast_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.blast_table.itemSelectionChanged.connect(self._update_detail_panel)
+
+        self.diagnostics_table = QTableWidget(0, 40)
+        self.diagnostics_table.setHorizontalHeaderLabels(
+            [
+                "sample_id",
+                "overlap_len",
+                "overlap_identity",
+                "overlap_quality",
+                "orientation",
+                "status",
+                "best_identity",
+                "best_identity_orientation",
+                "anchoring_feasible",
+                "end_anchored_possible",
+                "fwd_best_identity",
+                "revcomp_best_identity",
+                "fwd_best_overlap_len",
+                "revcomp_best_overlap_len",
+                "fwd_anchor_feasible",
+                "revcomp_anchor_feasible",
+                "identity_delta_revcomp_minus_fwd",
+                "selected_vs_best_identity_delta",
+                "top_candidate_count",
+                "top2_identity_delta",
+                "top2_overlap_len_delta",
+                "top2_quality_delta",
+                "tie_reason_code",
+                "fwd_best_identity_any",
+                "revcomp_best_identity_any",
+                "fwd_best_overlap_len_any",
+                "revcomp_best_overlap_len_any",
+                "pretrim_best_identity",
+                "posttrim_best_identity",
+                "pretrim_best_overlap_len",
+                "posttrim_selected_overlap_len",
+                "pretrim_status",
+                "posttrim_status",
+                "ambiguity_identity_delta_used",
+                "ambiguity_quality_epsilon_used",
+                "primer_trim_bases_fwd",
+                "primer_trim_bases_rev",
+                "selected_engine",
+                "fallback_used",
+                "overlap_engine",
+            ]
+        )
+        _set_header_tooltips(
+            self.diagnostics_table,
+            {
+                "status": STATUS_COLOR_LEGEND,
+                "trace_qc": TRACE_QC_COLOR_LEGEND,
+                "trace_qc_status": TRACE_QC_COLOR_LEGEND,
+            },
+        )
+        self.diagnostics_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.diagnostics_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+        self.compare_table = QTableWidget(0, 12)
+        self.compare_table.setHorizontalHeaderLabels(
+            [
+                "sample_id",
+                "assembler_id",
+                "assembler_name",
+                "dup_policy",
+                "status",
+                "selected_engine",
+                "contig_len",
+                "diag_code_for_machine",
+                "diag_detail_for_human",
+                "cap3_contigs_n",
+                "cap3_singlets_n",
+                "warnings",
+            ]
+        )
+        self.compare_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.compare_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.compare_table.itemSelectionChanged.connect(self._update_detail_panel)
+
+        self.open_blast_inputs_btn = QPushButton("Open blast_inputs.fasta")
+        self.open_blast_inputs_btn.clicked.connect(lambda: self._open_path(self._blast_inputs_fasta, prefer_in_app=True))
+        self.open_blast_inputs_btn.setEnabled(False)
+
+        self.open_blast_inputs_system_btn = QPushButton("Open blast_inputs.fasta (system)")
+        self.open_blast_inputs_system_btn.clicked.connect(
+            lambda: self._open_path_system(self._blast_inputs_fasta)
+        )
+        self.open_blast_inputs_system_btn.setEnabled(False)
+
+
+        self.open_asm_folder_btn = QPushButton("Open asm folder")
+        self.open_asm_folder_btn.clicked.connect(lambda: self._open_path(self._asm_dir))
+        self.open_asm_folder_btn.setEnabled(False)
+
+        summary_tab = QWidget()
+        summary_layout = QVBoxLayout(summary_tab)
+        summary_filter_row = QHBoxLayout()
+        summary_filter_row.addWidget(QLabel("Status filter"))
+        summary_filter_row.addWidget(self.summary_filter)
+        summary_filter_row.addStretch()
+        summary_layout.addLayout(summary_filter_row)
+        summary_layout.addWidget(self.summary_table)
+
+        blast_tab = QWidget()
+        blast_layout = QVBoxLayout(blast_tab)
+        blast_buttons = QHBoxLayout()
+        blast_buttons.addWidget(self.open_blast_inputs_btn)
+        blast_buttons.addWidget(self.open_blast_inputs_system_btn) 
+        blast_buttons.addWidget(self.open_asm_folder_btn)
+        blast_buttons.addStretch()
+        blast_layout.addLayout(blast_buttons)
+        blast_layout.addWidget(self.blast_table)
+
+        diagnostics_tab = QWidget()
+        diagnostics_layout = QVBoxLayout(diagnostics_tab)
+        diagnostics_layout.addWidget(self.diagnostics_table)
+
+        compare_tab = QWidget()
+        compare_layout = QVBoxLayout(compare_tab)
+        compare_layout.addWidget(self.compare_table)
+
+        logs_tab = QWidget()
+        logs_layout = QVBoxLayout(logs_tab)
+        logs_layout.addWidget(self.log_view)
+
+        self.output_tabs = QTabWidget()
+        self.output_tabs.addTab(logs_tab, "Logs")
+        self.output_tabs.addTab(summary_tab, "Assembly Summary")
+        self.output_tabs.addTab(blast_tab, "BLAST Inputs")
+        self.output_tabs.addTab(diagnostics_tab, "Diagnostics")
+        self.output_tabs.addTab(compare_tab, "Compare Assemblers")
+
+        # ---- Detail panel ----
+        self.detail_sample_lbl = QLabel("sample_id: ")
+        self.detail_status_lbl = QLabel("status: ")
+        self.detail_reason_lbl = QLabel("reason: ")
+        self.detail_payload_lbl = QLabel("blast_payload: ")
+        self.detail_payload_ids_lbl = QLabel("payload_ids: ")
+        self.detail_overlap_lbl = QLabel("overlap: ")
+        self.detail_assembly_engine_lbl = QLabel("assembly path: ")
+        self.detail_trace_qc_lbl = QLabel("trace_qc: ")
+        self.detail_trace_reason_lbl = QLabel("trace_qc_detail: ")
+        self.detail_trace_qc_lbl.setToolTip(
+            "Trace QC flags are chromatogram-signal indicators; contamination is not directly inferred from trace alone."
+        )
+        self.detail_trace_reason_lbl.setToolTip(
+            "Trace QC flags are chromatogram-signal indicators; contamination is not directly inferred from trace alone."
+        )
+        for detail_lbl in (
+            self.detail_reason_lbl,
+            self.detail_payload_ids_lbl,
+            self.detail_overlap_lbl,
+            self.detail_trace_reason_lbl,
+        ):
+            detail_lbl.setWordWrap(True)
+            detail_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            detail_lbl.setMinimumWidth(0)
+
+        self.detail_contigs_btn = QPushButton("Open contigs")
+        self.detail_singlets_btn = QPushButton("Open singlets")
+        self.detail_info_btn = QPushButton("Open cap.info")
+        self.detail_tool_stdout_btn = QPushButton("Open tool stdout")
+        self.detail_tool_stderr_btn = QPushButton("Open tool stderr")
+        self.detail_selection_trace_btn = QPushButton("Open selection trace")
+        self.detail_chrom_btn = QPushButton("View AB1 chromatogram")
+        self.detail_contigs_system_btn = QPushButton("Open contigs (system)")
+        self.detail_singlets_system_btn = QPushButton("Open singlets (system)")
+        self.detail_info_system_btn = QPushButton("Open cap.info (system)")
+        self.detail_tool_stdout_system_btn = QPushButton("Open tool stdout (system)")
+        self.detail_tool_stderr_system_btn = QPushButton("Open tool stderr (system)")
+        self.detail_selection_trace_system_btn = QPushButton("Open selection trace (system)")
+        self.detail_chrom_btn.setToolTip("Open AB1 trace(s) for selected sample(s) in a simple chromatogram view")
+        self.detail_tool_stdout_btn.setToolTip("Open backend stdout diagnostics for selected compare row(s)")
+        self.detail_tool_stderr_btn.setToolTip("Open backend stderr diagnostics for selected compare row(s)")
+        self.detail_selection_trace_btn.setToolTip("Open winner-ranking selection trace for selected sample(s)")
+        for btn in (
+            self.detail_contigs_btn,
+            self.detail_singlets_btn,
+            self.detail_info_btn,
+            self.detail_contigs_system_btn,
+            self.detail_singlets_system_btn,
+            self.detail_info_system_btn,
+            self.detail_tool_stdout_btn,
+            self.detail_tool_stderr_btn,
+            self.detail_selection_trace_btn,
+            self.detail_chrom_btn,
+            self.detail_tool_stdout_system_btn,
+            self.detail_tool_stderr_system_btn,
+            self.detail_selection_trace_system_btn,
+        ): 
+            btn.setEnabled(False)
+        self.detail_contigs_btn.clicked.connect(
+            lambda: self._open_detail_paths("contigs", prefer_in_app=True)
+        )
+        self.detail_singlets_btn.clicked.connect(
+            lambda: self._open_detail_paths("singlets", prefer_in_app=True)
+        )
+        self.detail_info_btn.clicked.connect(
+            lambda: self._open_detail_paths("info", prefer_in_app=True)
+        )
+        self.detail_tool_stdout_btn.clicked.connect(
+            lambda: self._open_detail_paths("tool_stdout", prefer_in_app=True)
+        )
+        self.detail_tool_stderr_btn.clicked.connect(
+            lambda: self._open_detail_paths("tool_stderr", prefer_in_app=True)
+        )
+        self.detail_selection_trace_btn.clicked.connect(
+            lambda: self._open_detail_paths("selection_trace", prefer_in_app=True)
+        )
+        self.detail_chrom_btn.clicked.connect(self._open_chromatograms)
+        self.detail_contigs_system_btn.clicked.connect(
+            lambda: self._open_detail_paths("contigs", system=True)
+        )
+        self.detail_singlets_system_btn.clicked.connect(
+            lambda: self._open_detail_paths("singlets", system=True)
+        )
+        self.detail_info_system_btn.clicked.connect(
+            lambda: self._open_detail_paths("info", system=True) 
+        )
+        self.detail_tool_stdout_system_btn.clicked.connect(
+            lambda: self._open_detail_paths("tool_stdout", system=True)
+        )
+        self.detail_tool_stderr_system_btn.clicked.connect(
+            lambda: self._open_detail_paths("tool_stderr", system=True)
+        )
+        self.detail_selection_trace_system_btn.clicked.connect(
+            lambda: self._open_detail_paths("selection_trace", system=True)
+        )
+
+        detail_box = QGroupBox("Details")
+        detail_layout = QVBoxLayout(detail_box)
+        detail_layout.addWidget(self.detail_sample_lbl)
+        detail_layout.addWidget(self.detail_status_lbl)
+        detail_layout.addWidget(self.detail_reason_lbl)
+        detail_layout.addWidget(self.detail_payload_lbl)
+        detail_layout.addWidget(self.detail_payload_ids_lbl)
+        detail_layout.addWidget(self.detail_overlap_lbl)
+        detail_layout.addWidget(self.detail_assembly_engine_lbl)
+        detail_layout.addWidget(self.detail_trace_qc_lbl)
+        detail_layout.addWidget(self.detail_trace_reason_lbl)
+        detail_layout.addWidget(self.detail_contigs_btn)
+        detail_layout.addWidget(self.detail_singlets_btn)
+        detail_layout.addWidget(self.detail_info_btn)
+        detail_layout.addWidget(self.detail_tool_stdout_btn)
+        detail_layout.addWidget(self.detail_tool_stderr_btn)
+        detail_layout.addWidget(self.detail_selection_trace_btn)
+        detail_layout.addWidget(self.detail_chrom_btn)
+        detail_layout.addWidget(self.detail_contigs_system_btn)
+        detail_layout.addWidget(self.detail_singlets_system_btn)
+        detail_layout.addWidget(self.detail_info_system_btn)
+        detail_layout.addWidget(self.detail_tool_stdout_system_btn)
+        detail_layout.addWidget(self.detail_tool_stderr_system_btn)
+        detail_layout.addWidget(self.detail_selection_trace_system_btn)
+        detail_layout.addStretch()
+
+        self.output_splitter = QSplitter()
+        self.output_splitter.addWidget(self.output_tabs)
+        self.output_splitter.addWidget(detail_box)
+        self.output_splitter.setStretchFactor(0, 3)
+        self.output_splitter.setStretchFactor(1, 1)
+
+        self.summary_filter.currentIndexChanged.connect(self._apply_summary_filter)
+        self.diagnostics_table.itemSelectionChanged.connect(self._update_detail_panel)
+        self.summary_table.cellDoubleClicked.connect(
+            lambda row, col: self._show_cell_text(self.summary_table, row, col)
+        )
+        self.blast_table.cellDoubleClicked.connect(
+            lambda row, col: self._show_cell_text(self.blast_table, row, col)
+        )
+        self.diagnostics_table.cellDoubleClicked.connect(
+            lambda row, col: self._show_cell_text(self.diagnostics_table, row, col)
+        )
+        self.compare_table.cellDoubleClicked.connect(
+            lambda row, col: self._show_cell_text(self.compare_table, row, col)
+        )
+
+
+        self._blast_inputs_fasta: Optional[Path] = None
+        self._asm_dir: Optional[Path] = None
+        self._detail_paths: dict[str, list[Path]] = {"contigs": [], "singlets": [], "info": [], "tool_stdout": [], "tool_stderr": [], "selection_trace": []} 
+        self._detail_ab1_paths: list[Path] = []
+        self._summary_rows: dict[str, dict[str, str]] = {}
+        self._blast_rows: dict[str, dict[str, str]] = {}
+        self._audit_rows: dict[str, dict[str, str]] = {}
+        self._compare_rows: dict[tuple[str, str], dict[str, str]] = {} 
+        self._active_viewer: Optional[QDialog] = None
+        self._active_pairing_preview: Optional[QDialog] = None
+        self._active_chrom_dialogs: list[QDialog] = []
+
+        # connect to model's signal to auto-scroll to the bottom on new logs if the user is already at the bottom or near it 
+        sb = self.log_view.verticalScrollBar() 
+        sb.valueChanged.connect(lambda v: setattr(self, "_autoscroll", (sb.maximum() - v) <= 2))
 
         # ---- Layout here will update UX -------------------------
         top = QHBoxLayout()
@@ -467,9 +1612,33 @@ class MainWindow(QMainWindow):
         pipeline_opts = QHBoxLayout()
         pipeline_opts.addWidget(QLabel("Pipeline options"))
         pipeline_opts.addWidget(self.collapse_reps_chk)
+        pipeline_opts.addWidget(self.orient_reads_chk)
         pipeline_opts.addWidget(QLabel("Chimera"))
         pipeline_opts.addWidget(self.chimera_mode_combo)
         pipeline_opts.addStretch()
+
+        cap3_opts = QHBoxLayout()
+        cap3_opts.addWidget(QLabel("CAP3 profile"))
+        cap3_opts.addWidget(self.cap3_profile_combo)
+        cap3_opts.addWidget(self.cap3_extra_args_edit)
+        cap3_opts.addWidget(self.cap3_qual_chk)
+        cap3_opts.addWidget(self.write_blast_inputs_chk)
+        cap3_opts.addWidget(self.use_blast_inputs_combo)
+        cap3_opts.addWidget(self.overlap_audit_chk)
+        cap3_opts.addWidget(QLabel("Primer trim"))
+        cap3_opts.addWidget(self.primer_trim_mode_combo)
+        cap3_opts.addWidget(QLabel("Primer stage"))
+        cap3_opts.addWidget(self.primer_trim_stage_combo)
+        cap3_opts.addWidget(QLabel("Known synthetic flank preset"))
+        cap3_opts.addWidget(self.primer_trim_preset_combo)
+        cap3_opts.addWidget(self.primer_save_btn)
+        cap3_opts.addStretch()
+
+        primer_seq_opts = QHBoxLayout()
+        primer_seq_opts.addWidget(QLabel("Trim primers (F)"))
+        primer_seq_opts.addWidget(self.primer_fwd_edit)
+        primer_seq_opts.addWidget(QLabel("Trim primers (R)"))
+        primer_seq_opts.addWidget(self.primer_rev_edit)
 
         pairing = QHBoxLayout()
         pairing.addWidget(QLabel("Primer set"))
@@ -478,6 +1647,10 @@ class MainWindow(QMainWindow):
         pairing.addWidget(self.rev_pattern_edit)
         pairing.addWidget(self.detect_tokens_btn)
         pairing.addWidget(self.preview_pairs_btn)
+        pairing.addWidget(self.primer_preview_btn)
+        pairing.addWidget(self.compare_assemblers_btn)
+        pairing.addWidget(QLabel("Assembler selection"))
+        pairing.addWidget(self.assembler_combo)
         pairing.addWidget(self.dup_policy_lbl)
         pairing.addWidget(self.dup_policy_combo) 
         pairing.addWidget(self.enforce_well_chk)
@@ -490,8 +1663,10 @@ class MainWindow(QMainWindow):
         outer.addLayout(top)
         outer.addLayout(mid)
         outer.addLayout(pipeline_opts)
+        outer.addLayout(cap3_opts)
+        outer.addLayout(primer_seq_opts)
         outer.addLayout(pairing) 
-        outer.addWidget(self.log_view)
+        outer.addWidget(self.output_splitter)
 
         # Embed composite layout as the window's central widget
         root = QWidget(); root.setLayout(outer)
@@ -509,6 +1684,13 @@ class MainWindow(QMainWindow):
         self._thread: Optional[QThread] = None
         self._worker: Optional[Worker] = None
         self._log_handler: Optional[LogBridge] = None
+        self._pending_logs: list[str] = [] 
+        self._log_flush_timer = QTimer(self)
+        self._log_flush_timer.setInterval(33) # ~33Hz 
+        self._log_flush_timer.setSingleShot(True) 
+        self._log_flush_timer.timeout.connect(self._flush_logs)
+        self._autoscroll = True
+        self._active_box: Optional[QMessageBox] = None 
         setup_logging(level=logging.INFO) # file + console stderr + GUI output
         root_logger = logging.getLogger() # grab singleton root logger
         self._log_handler = LogBridge(self)
@@ -528,12 +1710,27 @@ class MainWindow(QMainWindow):
             self.primer_set_combo,
             self.detect_tokens_btn,
             self.preview_pairs_btn,
+            self.primer_preview_btn,
+            self.compare_assemblers_btn,
+            self.assembler_combo,
             self.dup_policy_lbl,
             self.dup_policy_combo,
             self.advanced_regex_chk,
             self.fwd_regex_edit, 
             self.rev_regex_edit,
-            self.enforce_well_chk
+            self.enforce_well_chk,
+            self.cap3_profile_combo,
+            self.cap3_extra_args_edit,
+            self.cap3_qual_chk,
+            self.write_blast_inputs_chk,
+            self.use_blast_inputs_combo,
+            self.overlap_audit_chk,
+            self.primer_trim_mode_combo,
+            self.primer_trim_stage_combo,
+            self.primer_trim_preset_combo,
+            self.primer_fwd_edit,
+            self.primer_rev_edit,
+            self.primer_save_btn,
         ):
             widget.setVisible(is_paired)
             widget.setEnabled(is_paired)
@@ -548,20 +1745,51 @@ class MainWindow(QMainWindow):
         if mode == "paired":
             fwd, rev = self._current_patterns()
         else:
-            fwd = rev = None 
+            fwd = rev = None
+        raw_extra_args = self.cap3_extra_args_edit.text().strip()
+        extra_args = raw_extra_args.split() if raw_extra_args else None
+        write_blast_inputs = self.write_blast_inputs_chk.isChecked()
+        use_blast_inputs = self.use_blast_inputs_combo.currentData()
         return {
             "mode": mode, 
+            "assembler_id": self.assembler_combo.currentData(),
             "fwd_pattern": fwd,
             "rev_pattern": rev, 
             "enforce_same_well": self.enforce_well_chk.isChecked(),
-            "dup_policy": self.dup_policy_combo.currentData() 
+            "dup_policy": self.dup_policy_combo.currentData(),
+            "cap3_profile": self.cap3_profile_combo.currentData(),
+            "cap3_extra_args": extra_args,
+            "cap3_use_qual": self.cap3_qual_chk.isChecked(),
+            "write_blast_inputs": write_blast_inputs,
+            "use_blast_inputs": use_blast_inputs,
         }
 
     def _pipeline_kwargs(self) -> dict:
         return {
             "collapse_replicates": self.collapse_reps_chk.isChecked(),
+            "orient_reads": self.orient_reads_chk.isChecked(),
             "chimera_mode": self.chimera_mode_combo.currentData(),
+            "overlap_audit": self.overlap_audit_chk.isChecked(),
         }
+
+
+    def _primer_override_kwargs(self, *, for_preview: bool = False) -> dict:
+        mode_label = self.primer_trim_mode_combo.currentText().strip().lower()
+        mode_map = {"off": "off", "detect": "detect", "clip": "clip"}
+        mode = mode_map.get(mode_label, "off")
+        stage = self.primer_trim_stage_combo.currentData()
+        preset = self.primer_trim_preset_combo.currentData()
+        forward_raw = self.primer_fwd_edit.toPlainText()
+        reverse_raw = self.primer_rev_edit.toPlainText()
+        override = build_primer_cfg_override(
+            mode=mode,
+            stage=stage,
+            preset=preset,
+            forward_raw=forward_raw,
+            reverse_raw=reverse_raw,
+            for_preview=for_preview,
+        )
+        return {"primer_cfg_override": override}
     
     def _tokens_to_regex(self, text: str) -> str | None:
         tokens = [t.strip() for t in text.split(",") if t.strip()]
@@ -579,13 +1807,33 @@ class MainWindow(QMainWindow):
             rev = self._tokens_to_regex(self.rev_pattern_edit.text())
         return fwd, rev
 
+    def _current_token_list(self) -> list[str]:
+        if self.advanced_regex_chk.isChecked():
+            return []
+        tokens = [
+            token.strip()
+            for raw in (self.fwd_pattern_edit.text(), self.rev_pattern_edit.text())
+            for token in raw.split(",")
+        ]
+        cleaned = [tok for tok in tokens if tok]
+        if cleaned:
+            return cleaned
+        label = self.primer_set_combo.currentText()
+        fwd_tokens, rev_tokens = PRIMER_SETS.get(label, ([], []))
+        return [*fwd_tokens, *rev_tokens]
+
+
     def _ensure_vsearch_available(self) -> bool:
-        if not (self.collapse_reps_chk.isChecked() or self.chimera_mode_combo.currentData() != "off"):
+        if not (
+            self.collapse_reps_chk.isChecked()
+            or self.orient_reads_chk.isChecked()
+            or self.chimera_mode_combo.currentData() != "off"
+        ):
             return True
         try:
             resolve_vsearch()
         except FileNotFoundError as exc:
-            QMessageBox.warning(self, "vsearch not found", str(exc))
+            self._show_box(QMessageBox.Icon.Warning, "vsearch not found", str(exc))
             return False
         return True
 
@@ -625,17 +1873,17 @@ class MainWindow(QMainWindow):
 
     def _detect_tokens(self):
         if not self._input_path:
-            QMessageBox.warning(self, "No input", "Choose a file or folder first please.")
+            self._show_box(QMessageBox.Icon.Warning,"No input", "Choose a file or folder first please.")
             return 
         directory = self._input_path if self._input_path.is_dir() else self._input_path.parent
 
         fwd_tokens, rev_tokens = self._scan_tokens(directory)
 
         if not fwd_tokens and not rev_tokens:
-            QMessageBox.information(
-                self,
-                "No tokens found",
-                "No primer-like forward/reverse tokens were detected in the filenames."
+            self._show_box(
+                QMessageBox.Icon.Information,
+                "No primer labels found",
+                "No primer-like forward/reverse labels were detected in the filenames."
             )
             return 
         
@@ -648,11 +1896,11 @@ class MainWindow(QMainWindow):
             self.rev_pattern_edit.setText(joined)
             self._on_token_edited("rev_tokens", joined)
 
-        QMessageBox.information(
-            self,
-            "Primers/tokens detected",
-            f"Forward primers/tokens: {', '.join(fwd_tokens) or '-'}\n"
-            f"Reverse primers/tokens: {', '.join(rev_tokens) or '-'}\n"
+        self._show_box(
+            QMessageBox.Icon.Information,
+            "Primers/primer labels detected",
+            f"Forward primers/primer labels: {', '.join(fwd_tokens) or '-'}\n"
+            f"Reverse primers/primer labels: {', '.join(rev_tokens) or '-'}\n"
         ) 
 
     def _scan_tokens(self, directory: Path) -> tuple[list[str], list[str]]:
@@ -676,27 +1924,84 @@ class MainWindow(QMainWindow):
 
     def _preview_pairs(self):
         if self.mode_combo.currentData() != "paired":
-            QMessageBox.information(self, "Not paired", "Preview is only available in paired mode.")
+            self._show_box(QMessageBox.Icon.Information, "Not paired", "Preview is only available in paired mode.")
             return 
 
         if not self._input_path:
-            QMessageBox.warning(self, "No input", "Choose a file or folder first for set of inputs.")
+            self._show_box(QMessageBox.Icon.Warning, "No input", "Choose a file or folder first for set of inputs.")
             return 
 
         directory = self._input_path if self._input_path.is_dir() else self._input_path.parent 
         fwd, rev = self._current_patterns()
-        summary = _summarize_paired_candidates(
-            directory,
-            fwd,
-            rev,
-            enforce_same_well=self.enforce_well_chk.isChecked()
+        def _refresh_preview():
+            summary_text = _summarize_paired_candidates(
+                directory,
+                fwd,
+                rev,
+                enforce_same_well=self.enforce_well_chk.isChecked()
+            )
+            suggestions_text = _suggest_pairing_patterns(directory)
+            candidates_list = analyze_pairing_candidates(
+                directory,
+                fwd,
+                rev,
+                known_tokens=self._current_token_list(),
+                enforce_same_well=self.enforce_well_chk.isChecked(),
+            )
+            return summary_text, suggestions_text, candidates_list
+
+        summary, suggestions, candidates = _refresh_preview() 
+        dialog = PairingPreviewDialog(
+            summary=summary,
+            suggestions=suggestions,
+            candidates=candidates,
+            enforce_same_well=self.enforce_well_chk.isChecked(),
+            refresh_callback=_refresh_preview,
+            open_callback=self._open_external_detached,
+            parent=self,
         )
-        suggestions = _suggest_pairing_patterns(directory)
-        QMessageBox.information(
-            self,
-            "Pairing Preview",
-            f"{summary}.\n\nSuggestions: {suggestions}"
-        )
+        # Avoid nested event loops from exec();  keep this as show() to avoid the GUI being unresponsive from minimizing the window from preview_pairs 
+        # aligns with the rest of the app's no-nested-event-loop stance that I will have moving foward given past issues.
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.setModal(False)
+        dialog.setWindowModality(Qt.WindowModality.NonModal)
+        self._active_pairing_preview = dialog
+        dialog.destroyed.connect(lambda *_: setattr(self, "_active_pairing_preview", None))
+        dialog.show()
+
+    def _run_primer_preview_job(self, input_path: Path, primer_override: dict[str, object]) -> dict[str, object]:
+        with tempfile.TemporaryDirectory(prefix="microseq_primer_preview_") as td:
+            out_dir = Path(td)
+            summary_tsv = out_dir / "qc" / "trim_summary.tsv"
+            run_trim(
+                input_path,
+                out_dir,
+                sanger=(input_path.suffix.lower() == ".ab1" or (input_path.is_dir() and any(input_path.glob("*.ab1")))),
+                summary_tsv=summary_tsv,
+                primer_cfg_override=primer_override,
+            )
+            report = out_dir / "qc" / "primer_detect_report.tsv"
+            if not report.exists():
+                return {
+                    "primer_preview_notice": "No primer detect report was generated. Check primer_trim preset/sequences in config.",
+                }
+            return {
+                "primer_preview_text": report.read_text(encoding="utf-8"),
+            }
+
+    def _preview_primers(self):
+        if not self._input_path:
+            self._show_box(QMessageBox.Icon.Warning, "No input", "Choose a file or folder first.")
+            return
+
+        try:
+            primer_override = dict(self._primer_override_kwargs(for_preview=True).get("primer_cfg_override", {}))
+        except ValueError as exc:
+            self._show_box(QMessageBox.Icon.Warning, "Invalid primer sequence", str(exc))
+            return
+        primer_override["mode"] = "detect"
+        self._launch(self._run_primer_preview_job, Path(self._input_path), primer_override)
+
 
     def _cleanup_input_staging(self) -> None:
         if self._input_staging:
@@ -784,7 +2089,7 @@ class MainWindow(QMainWindow):
     # guarding against accidental click
     def _launch_blast(self):
         if not self._input_path:
-            QMessageBox.warning(self, "No input", "Choose a file or folder first.")
+            self._show_box(QMessageBox.Icon.Warning, "No input", "Choose a file or folder first.")
             return
 
         self.progress.setValue(0) # resets progress bar during each run
@@ -871,13 +2176,53 @@ class MainWindow(QMainWindow):
         thread.started.connect(worker.run)
         thread.start()
 
+    def _compare_assemblers(self):
+        if not self._input_path:
+            self._show_box(QMessageBox.Icon.Warning, "No input", "Choose a file or folder first.")
+            return
+        if self.mode_combo.currentData() != "paired":
+            self._show_box(QMessageBox.Icon.Information, "Paired mode required", "Assembler comparison requires paired mode.")
+            return
+
+        # Explicit contract: comparison runs on staged paired FASTA inputs.
+        source_dir = self._input_path if self._input_path.is_dir() else self._input_path.parent
+        has_fasta = any(source_dir.rglob("*.fasta")) or any(source_dir.rglob("*.fa")) or any(source_dir.rglob("*.fna")) or any(source_dir.rglob("*.fas"))
+        has_raw = any(source_dir.rglob("*.ab1")) or any(source_dir.rglob("*.fastq")) or any(source_dir.rglob("*.fq"))
+        if has_raw and not has_fasta:
+            self._show_box(
+                QMessageBox.Icon.Information,
+                "Staged FASTA required",
+                "Compare assemblers expects pre-staged paired FASTA inputs (e.g., qc/paired_fasta).",
+            )
+            return
+
+        self.log_model.append("\n▶ Compare all assemblers")
+
+        self._launch(
+            run_compare_assemblers,
+            source_dir,
+            self.out_dir if self.out_dir else source_dir.parent,
+            fwd_pattern=self._current_patterns()[0],
+            rev_pattern=self._current_patterns()[1],
+            enforce_same_well=self.enforce_well_chk.isChecked(),
+            threads=self.threads_spin.value(),
+        )
+
+
     # -------- Trim -> Convert -> BLAST -> Taxonomy ---------------
     def _launch_qc(self):
         if not self._input_path:
-            QMessageBox.warning(self, "No input", "Choose a file or folder first.")
+            self._show_box(QMessageBox.Icon.Warning, "No input", "Choose a file or folder first.")
             return
         if not self._ensure_vsearch_available():
             return
+        primer_kw: dict = {}
+        if self.mode_combo.currentData() == "paired":
+            try:
+                primer_kw = self._primer_override_kwargs()
+            except ValueError as exc:
+                self._show_box(QMessageBox.Icon.Warning, "Invalid primer sequence", str(exc))
+                return
         task = self.settings.value("blast_task", "megablast")
         self._launch(
             run_full_pipeline,
@@ -888,20 +2233,28 @@ class MainWindow(QMainWindow):
             metadata=None,   # Trim → Convert → BLAST → Tax
             blast_task=task,
             **self._assembly_kwargs(),
-            **self._pipeline_kwargs()
+            **self._pipeline_kwargs(),
+            **primer_kw,
         )
 
     # ------ Run full pipeline with Post-Blast as well -------------
     def _launch_full(self):
         if not self._input_path:
-            QMessageBox.warning(self, "No input", "Choose a file or folder first.")
+            self._show_box(QMessageBox.Icon.Warning, "No input", "Choose a file or folder first.")
             return
         if not self._ensure_vsearch_available():
             return
+        primer_kw: dict = {}
+        if self.mode_combo.currentData() == "paired":
+            try:
+                primer_kw = self._primer_override_kwargs()
+            except ValueError as exc:
+                self._show_box(QMessageBox.Icon.Warning, "Invalid primer sequence", str(exc))
+                return
         # if user asked for BIOM but hasn't chosen metadata, abort early
         if self.biom_chk.isChecked() and not self.meta_path:
-            QMessageBox.warning(
-                self, "No metadata",
+            self._show_box(QMessageBox.Icon.Warning,
+                "No metadata",
                 "A metadata file is required to build the BIOM table.\n"
                 "Click ‘Browse metadata…’ first or un-tick ‘Make BIOM’."
             )
@@ -917,16 +2270,17 @@ class MainWindow(QMainWindow):
             metadata=self.meta_path,      # None or Path run the Post-BLAST stage too
             blast_task=task,
             **self._assembly_kwargs(),
-            **self._pipeline_kwargs()
+            **self._pipeline_kwargs(),
+            **primer_kw,
         )
 
     # ------ Run stand-alone Post-BLAST ---------------------------------
     def _launch_postblast(self):
         if not self.hits_path:
-            QMessageBox.warning(self, "No hits", "Choose a BLAST hits file first.")
+            self._show_box(QMessageBox.Icon.Warning, "No hits", "Choose a BLAST hits file first.")
             return
         if not self.meta_path:
-            QMessageBox.warning(self, "No metadata", "Choose a metadata file first.")
+            self._show_box(QMessageBox.Icon.Warning, "No metadata", "Choose a metadata file first.")
             return
 
         self.progress.setValue(0)
@@ -954,6 +2308,41 @@ class MainWindow(QMainWindow):
         thread.start()
 
     # Helper method using here for batch log signals from worker threads
+    @Slot(str)
+    def _queue_log(self, line: str):
+        """Appends the log line directly to the model on the GUI thread.
+        This is called from the Python Logger to update the GUI model."""
+        self._pending_logs.append(line)
+        if not self._log_flush_timer.isActive():
+            self._log_flush_timer.start() 
+
+    @Slot()
+    def _flush_logs(self) -> None:
+        if not self._pending_logs:
+            return 
+        lines = self._pending_logs
+        self._pending_logs = [] 
+        self.log_model.append_many(lines)
+
+        if self._autoscroll:
+            last = self.log_model.rowCount() - 1 
+            if last >= 0:
+                self.log_view.scrollTo(
+                    self.log_model.index(last, 0),
+                    QAbstractItemView.ScrollHint.PositionAtBottom
+                ) 
+    def _show_box(self, icon: QMessageBox.Icon, title: str, text: str) -> None:
+        box = QMessageBox(self)
+        box.setIcon(icon)
+        box.setWindowTitle(title)
+        box.setText(text)
+        box.setStandardButtons(QMessageBox.Ok)
+        box.setModal(True)
+        box.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self._active_box = box
+        box.finished.connect(lambda *_: setattr(self, "_active_box", None))
+        box.open()
+
     @Slot(str) 
     def _stage_slot(self, msg: str) -> None: 
         """Update the status bar text - runs in the GUI thread."""
@@ -982,15 +2371,6 @@ class MainWindow(QMainWindow):
         """Runs in the GUI thread -> safe to touch self.* attributes."""
         self._last_result = result
 
-    @Slot(str)
-    def _queue_log(self, line: str):
-        """Safely asks the GUI thread to call the Model's "append" method.
-        This is the bridge from Python Logger to the GUI model."""
-        QMetaObject.invokeMethod(
-            self.log_model, "append",
-            QtCore.Qt.ConnectionType.QueuedConnection,
-            Q_ARG(str, line))
-
     def _cancel_run(self):
         """Request interruption of the running worker thread."""
         if self._thread and self._thread.isRunning():
@@ -1004,6 +2384,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._safe_cleanup)
 
     def _safe_cleanup(self):
+        self._flush_logs() 
         self._thread = None
         self._finalise_ui() # old _done body
 
@@ -1017,33 +2398,46 @@ class MainWindow(QMainWindow):
         All UI mutations are queued with single Shot(0, ..) so they execute only
         after Qt has finished any pending paint events. 
         """
+        assert QThread.currentThread() == QApplication.instance().thread() 
         # interpret the saved result --------------------------------
         result = getattr(self, "_last_result", 1)      # default = error
+        out: Optional[Path] = None 
 
         # --- decide status/message -------------------------------- 
         if isinstance(result, dict):                   # full‑pipeline success
-            rc, out = 0, result.get("tax", Path())        # pick any key to show
+            rc = 0 
+            for key in ("tax", "hits_tax", "biom", "fasta", "assembly_summary"): 
+                candidate = result.get(key)
+                if candidate:
+                    path = Path(candidate)
+                    if path.exists():
+                        out = path 
+                        break 
         elif isinstance(result, RuntimeError) and str(result) == "Cancelled":
-            rc, out = None, Path()
+            rc = None 
         elif isinstance(result, Exception):            # Worker caught an error
-            rc, out = 1, Path()
+            rc = 1 
             err = str(result) 
 
             # friendlier message for the "no hits" situation
             if "no blast hits" in err.lower(): 
-                dialog_fn = lambda: QMessageBox.information(
-                    self, "Nothing to summarise",
+                dialog_fn = lambda: self._show_box(
+                    QMessageBox.Icon.Information, 
+                    "Nothing to summarise",
                     ("BLAST finished, but no hits met the filters.\n"
                      "You can:\n"
                      " lower Identity / Q-cov, or\n"
                      "run again without the BIOM option.")
                 )
             else:
-                dialog_fn = lambda e=err: QMessageBox.warning(self, 
+                dialog_fn = lambda e=err: self._show_box(
+                    QMessageBox.Icon.Warning,
                     "Run Failed", e)
             QTimer.singleShot(0, dialog_fn)
+        elif isinstance(result, Path):
+            rc, out = 0, result
         else:                                          # int from BLAST‑only path
-            rc, out = int(result), Path()
+            rc, out = int(result), None
 
         # log + optional dialog -------------------------------------
         msg = "Cancelled" if rc is None else ("Success" if rc == 0 else f"Failed (exit {rc})") 
@@ -1052,14 +2446,24 @@ class MainWindow(QMainWindow):
             0, lambda m=msg: self.log_model.append(f"● {m}\n")
         )
 
-        if rc == 0 and out:
+        if rc == 0 and out and not (isinstance(result, dict) and ("primer_preview_text" in result or "primer_preview_notice" in result)):
             QTimer.singleShot(
                 0,
-                lambda p=out: QMessageBox.information(
-                self,
+                lambda p=out: self._show_box(
+                QMessageBox.Icon.Information,
                 "Pipeline finished",
                 f"Last output file:\n{p}") 
             )
+
+        if rc == 0 and isinstance(result, dict) and "primer_preview_text" not in result and "primer_preview_notice" not in result:
+            QTimer.singleShot(0, lambda r=result: self._load_output_tables(r))
+        elif rc == 0 and isinstance(result, Path) and result.name == "compare_assemblers.tsv":
+            QTimer.singleShot(0, lambda p=result: self._load_output_tables({"compare_assemblers": p}))
+
+        if rc == 0 and isinstance(result, dict) and "primer_preview_text" in result:
+            QTimer.singleShot(0, lambda t=result["primer_preview_text"]: TextBlobDialog("Primer preview (detect-only)", t, parent=self).exec())
+        if rc == 0 and isinstance(result, dict) and "primer_preview_notice" in result:
+            QTimer.singleShot(0, lambda m=result["primer_preview_notice"]: self._show_box(QMessageBox.Icon.Information, "Primer preview", m))
 
         # re‑enable buttons -----------------------------------------
         def _reenable():
@@ -1073,8 +2477,985 @@ class MainWindow(QMainWindow):
            self._worker = None
            self._thread = None
 
-        QTimer.singleShot(0, _reenable) 
+        QTimer.singleShot(0, _reenable)
 
+    def _open_path(self, path: Optional[Path], prefer_in_app: bool = False) -> None:
+        if not path:
+            self._show_box(QMessageBox.Icon.Information, "No file", "No file is available for this selection.")
+            return
+        if not path.exists():
+            self._show_box(QMessageBox.Icon.Warning, "Missing file", f"File not found:\n{path}")
+            return
+
+        if prefer_in_app and path.is_file():
+            self._open_text_viewer(path)
+            return
+
+        if self._open_external_detached(path):
+            return
+
+        self._open_path_fallback(path, reason="Unable to open via system handler.")
+
+    def _open_path_system(self, path: Optional[Path]) -> None:
+        if not path:
+            self._show_box(QMessageBox.Icon.Information, "No file", "No file is available for this selection.")
+            return
+        if not path.exists():
+            self._show_box(QMessageBox.Icon.Warning, "Missing file", f"File not found:\n{path}")
+            return 
+        if self._open_external_detached(path):
+            return
+
+        self._open_path_fallback(path, reason="Unable to open via system handler.")
+
+    def _open_external_detached(self, path: Path) -> bool:
+        if is_wsl():
+            if shutil.which("wslview"):
+                ok, _pid = QProcess.startDetached("wslview", [str(path)])
+                return ok
+            if shutil.which("explorer.exe") and shutil.which("wslpath"):
+                try:
+                    win_path = subprocess.check_output(
+                        ["wslpath", "-w", str(path)],
+                        text=True,
+                    ).strip()
+                except (OSError, subprocess.SubprocessError):
+                    win_path = ""
+                if win_path:
+                    ok, _pid = QProcess.startDetached("explorer.exe", [win_path])
+                    return ok
+
+        if sys.platform == "darwin" and shutil.which("open"):
+            ok, _pid = QProcess.startDetached("open", [str(path)])
+            return ok
+
+        if os.name == "nt" and shutil.which("explorer.exe"):
+            ok, _pid = QProcess.startDetached("explorer.exe", [str(path)])
+            return ok
+
+        if shutil.which("xdg-open"):
+            ok, _pid = QProcess.startDetached("xdg-open", [str(path)])
+            return ok
+
+        url = QUrl.fromLocalFile(str(path))
+        return QDesktopServices.openUrl(url)
+
+    def _open_text_viewer(self, path: Path) -> None:
+        dialog = TextViewerDialog(path, self)
+        dialog.setModal(True)
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self._active_viewer = dialog
+        dialog.finished.connect(lambda *_: setattr(self, "_active_viewer", None))
+        dialog.open()
+
+    def _open_path_fallback(self, path: Path, reason: str) -> None:
+        if path.is_file() and looks_texty(path):
+            self._open_text_viewer(path)
+            return
+
+        message = (
+            f"{reason}\n\n"
+            f"Path:\n{path}"
+        )
+        self._show_box(QMessageBox.Icon.Information, "Open manually", message)
+
+    def _open_detail_paths(
+        self,
+        kind: str,
+        prefer_in_app: bool = False,
+        system: bool = False,
+    ) -> None:
+        paths = self._detail_paths.get(kind, [])
+        if not paths:
+            self._show_box(QMessageBox.Icon.Information, "No file", "No file is available for this selection.")
+            return
+        self._open_paths(paths, prefer_in_app=prefer_in_app, system=system)
+
+    def _open_paths(
+        self,
+        paths: list[Path],
+        prefer_in_app: bool = False,
+        system: bool = False,
+    ) -> None:
+        if not paths:
+            return
+        if len(paths) > 5:
+            reply = QMessageBox.question(
+                self,
+                "Open multiple files",
+                f"Open {len(paths)} files?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        for path in paths:
+            if system:
+                self._open_path_system(path)
+            else:
+                self._open_path(path, prefer_in_app=prefer_in_app)
+
+    def _ab1_key_map(self) -> dict[str, Path]:
+        if not self._input_path or not self._input_path.exists():
+            return {}
+        root = self._input_path if self._input_path.is_dir() else self._input_path.parent
+        key_map = build_ab1_output_key_map(root)
+        return {key: path for path, key in key_map.items()}
+
+    def _resolve_ab1_paths_for_sample(self, sample_id: str, row: Optional[dict[str, str]] = None) -> list[Path]:
+        sample = str(sample_id or "").strip()
+        if not sample:
+            return []
+
+        row_meta = row or {}
+        blast_row = self._blast_rows.get(sample, {})
+        source_values = _parse_source_values(row_meta.get("source_id_map", ""))
+        if not source_values:
+            source_values = _parse_source_values(row_meta.get("payload_ids", ""))
+        if not source_values:
+            source_values = _parse_source_values(blast_row.get("source_id_map", ""))
+        if not source_values:
+            source_values = _parse_source_values(blast_row.get("payload_ids", ""))
+
+        key_to_path = self._ab1_key_map()
+        out: list[Path] = []
+        for source in source_values:
+            base = Path(source).stem
+            if base in key_to_path:
+                p = key_to_path[base]
+                if p.exists() and p not in out:
+                    out.append(p)
+            elif "_paired" in base:
+                for part in (base.replace("_paired", "_fwd"), base.replace("_paired", "_rev")):
+                    if part in key_to_path:
+                        p = key_to_path[part]
+                        if p.exists() and p not in out:
+                            out.append(p)
+
+        if out:
+            return out
+
+        fallback_root = self._input_path if self._input_path and self._input_path.is_dir() else (self._input_path.parent if self._input_path else None)
+        if not fallback_root:
+            return []
+        sample_parts = [part.lower() for part in re.split(r"[^A-Za-z0-9]+", sample) if part]
+        if not sample_parts:
+            return []
+
+        matched: list[Path] = []
+        for ab1 in sorted(fallback_root.rglob("*.ab1")):
+            name = ab1.stem.lower()
+            if all(part in name for part in sample_parts):
+                matched.append(ab1)
+        return matched
+
+    def _open_chromatograms(self) -> None:
+        if not self._detail_ab1_paths:
+            self._show_box(QMessageBox.Icon.Information, "No AB1 trace", "No AB1 trace files were resolved for this selection.")
+            return
+
+        self._active_chrom_dialogs = [dlg for dlg in self._active_chrom_dialogs if dlg is not None]
+        for dialog in list(self._active_chrom_dialogs):
+            dialog.close()
+        self._active_chrom_dialogs.clear()
+
+        for path in self._detail_ab1_paths[:4]:
+            dialog = ChromatogramDialog(path, self)
+            dialog.setModal(False)
+            dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+            dialog.destroyed.connect(lambda _obj=None, d=dialog: self._active_chrom_dialogs.remove(d) if d in self._active_chrom_dialogs else None)
+            self._active_chrom_dialogs.append(dialog)
+            dialog.open()
+
+    def _show_cell_text(self, table: QTableWidget, row: int, col: int) -> None:
+        item = table.item(row, col)
+        if not item:
+            return
+        text = item.text()
+        if not text:
+            return
+        dialog = TextBlobDialog("Cell details", text, self)
+        dialog.setModal(True)
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.open()
+ 
+
+    @Slot(object)
+    def _close_after_worker_finished(self, _result=None) -> None: 
+        self.close() 
+
+    def _load_output_tables(self, paths: dict) -> None:
+        assembly_summary = paths.get("assembly_summary")
+        if assembly_summary:
+            self._load_summary_table(Path(assembly_summary))
+
+        asm_dir = None
+        if assembly_summary:
+            asm_dir = Path(assembly_summary).parent
+        elif paths.get("fasta"):
+            asm_dir = Path(paths.get("fasta")).parent
+
+        blast_tsv = asm_dir / "blast_inputs.tsv" if asm_dir else None
+        if blast_tsv and blast_tsv.exists():
+            self._load_blast_inputs_table(blast_tsv)
+
+        overlap_audit = paths.get("overlap_audit")
+        if overlap_audit:
+            self._load_overlap_audit_table(Path(overlap_audit))
+
+        compare_tsv = paths.get("compare_assemblers")
+        if compare_tsv:
+            self._load_compare_assemblers_table(Path(compare_tsv))
+        elif asm_dir:
+            compare_candidate = asm_dir / "compare_assemblers.tsv"
+            if compare_candidate.exists():
+                self._load_compare_assemblers_table(compare_candidate)
+
+        if asm_dir:
+            self._asm_dir = asm_dir
+            self._blast_inputs_fasta = self._asm_dir / "blast_inputs.fasta"
+            self.open_blast_inputs_btn.setEnabled(self._blast_inputs_fasta.exists())
+            self.open_blast_inputs_system_btn.setEnabled(self._blast_inputs_fasta.exists())
+            self.open_asm_folder_btn.setEnabled(self._asm_dir.exists())
+
+    @staticmethod
+    def _fmt_table_value(value: object) -> str:
+        if value is None:
+            return ""
+        text = str(value)
+        if text.lower() == "nan":
+            return ""
+        return text
+
+    def _load_summary_table(self, summary_path: Path) -> None:
+        if not summary_path.exists():
+            return
+        df = pd.read_csv(summary_path, sep="\t")
+        self.summary_table.setRowCount(0)
+        self._summary_rows.clear()
+        self.summary_filter.blockSignals(True)
+        self.summary_filter.clear()
+        self.summary_filter.addItem("All statuses", userData=None)
+
+        status_colors = {
+            "assembled": QColor("#C8E6C9"),
+            "singlets_only": QColor("#FFF9C4"),
+            "cap3_no_output": QColor("#FFE0B2"),
+            "pair_missing": QColor("#FFCDD2"),
+        }
+
+        trace_colors = {
+            "FAIL": QColor("#FFCDD2"),
+            "WARN": QColor("#FFE0B2"),
+            "PASS": QColor("#C8E6C9"),
+            "NA": QColor("#E0E0E0"),
+        }
+
+        for row_idx, row in df.iterrows():
+            self.summary_table.insertRow(row_idx)
+            row_values = [
+                self._fmt_table_value(row.get("sample_id", "")),
+                self._fmt_table_value(row.get("status", "")),
+                self._fmt_table_value(row.get("assembler", "")),
+                self._fmt_table_value(row.get("contig_len", "")),
+                self._fmt_table_value(row.get("blast_payload", "")),
+                self._fmt_table_value(row.get("selected_engine", "")),
+                self._fmt_table_value(row.get("configured_engine", "")),
+                self._fmt_table_value(row.get("merge_status", "")),
+                self._fmt_table_value(row.get("merge_overlap_len", "")),
+                self._fmt_table_value(row.get("merge_identity", "")),
+                self._fmt_table_value(row.get("overlaps_saved", "")),
+                self._fmt_table_value(row.get("overlaps_removed", "")),
+                self._fmt_table_value(row.get("primer_mode", "")),
+                self._fmt_table_value(row.get("primer_stage", "")),
+                self._fmt_table_value(row.get("trace_status", "NA")),
+            ]
+            for col, value in enumerate(row_values):
+                item = QTableWidgetItem(value)
+                item.setToolTip(value) 
+                if col == 1:
+                    status = value
+                    color = status_colors.get(status, QColor("#E1F5FE") if status.startswith("overlap_") else None)
+                    if color:
+                        item.setBackground(QBrush(color))
+                elif col == 14:
+                    color = trace_colors.get(value.strip().upper(), QColor("#E0E0E0"))
+                    item.setBackground(QBrush(color))
+                self.summary_table.setItem(row_idx, col, item)
+            self._summary_rows[row_values[0]] = {
+                "status": row_values[1],
+                "assembler": row_values[2],
+                "contig_len": row_values[3],
+                "blast_payload": row_values[4],
+                "selected_engine": row_values[5],
+                "configured_engine": row_values[6],
+                "merge_status": row_values[7],
+                "merge_overlap_len": row_values[8],
+                "merge_identity": row_values[9],
+                "overlaps_saved": row_values[10],
+                "overlaps_removed": row_values[11],
+                "primer_mode": row_values[12],
+                "primer_stage": row_values[13],
+                "trace_status": row_values[14],
+                "trace_flags": self._fmt_table_value(row.get("trace_flags", "")),
+                "trace_mixed_peak_frac_max": self._fmt_table_value(row.get("trace_mixed_peak_frac_max", "")),
+                "review_reason": self._fmt_table_value(row.get("review_reason", "")),
+            }
+        for status in sorted(df["status"].dropna().unique()):
+            self.summary_filter.addItem(status, userData=status)
+        self.summary_filter.blockSignals(False)
+        self._apply_summary_filter()
+        self._configure_table_view(self.summary_table) 
+
+    def _load_blast_inputs_table(self, blast_tsv: Path) -> None:
+        df = pd.read_csv(blast_tsv, sep="\t")
+        self.blast_table.setRowCount(0)
+        self._blast_rows.clear()
+        trace_colors = {
+            "FAIL": QColor("#FFCDD2"),
+            "WARN": QColor("#FFE0B2"),
+            "PASS": QColor("#C8E6C9"),
+            "NA": QColor("#E0E0E0"),
+        }
+        for row_idx, row in df.iterrows():
+            self.blast_table.insertRow(row_idx)
+            row_values = [
+                self._fmt_table_value(row.get("sample_id", "")),
+                self._fmt_table_value(row.get("blast_payload", "")),
+                self._fmt_table_value(row.get("reason", "")),
+                self._fmt_table_value(row.get("payload_ids", "")),
+                self._fmt_table_value(row.get("trace_status", "NA")),
+            ]
+            for col, value in enumerate(row_values):
+                item = QTableWidgetItem(value)
+                item.setToolTip(value)
+                if col == 4:
+                    color = trace_colors.get(value.strip().upper(), QColor("#E0E0E0"))
+                    item.setBackground(QBrush(color))
+                self.blast_table.setItem(row_idx, col, item)
+            self._blast_rows[row_values[0]] = {
+                "blast_payload": row_values[1],
+                "reason": row_values[2],
+                "payload_ids": row_values[3],
+                "source_id_map": self._fmt_table_value(row.get("source_id_map", "")),
+                "trace_status": row_values[4],
+                "trace_flags": self._fmt_table_value(row.get("trace_flags", "")),
+                "trace_mixed_peak_frac_max": self._fmt_table_value(row.get("trace_mixed_peak_frac_max", "")),
+                "review_reason": self._fmt_table_value(row.get("review_reason", "")),
+            }
+        self._configure_table_view(self.blast_table)
+
+    def _load_overlap_audit_table(self, audit_path: Path) -> None:
+        if not audit_path.exists():
+            return
+        df = pd.read_csv(audit_path, sep="\t")
+        self.diagnostics_table.setRowCount(0)
+        self._audit_rows.clear()
+        for row_idx, row in df.iterrows():
+            self.diagnostics_table.insertRow(row_idx)
+            row_values = [
+                self._fmt_table_value(row.get("sample_id", "")),
+                self._fmt_table_value(row.get("overlap_len", "")),
+                self._fmt_table_value(row.get("overlap_identity", "")),
+                self._fmt_table_value(row.get("overlap_quality", "")),
+                self._fmt_table_value(row.get("orientation", "")),
+                self._fmt_table_value(row.get("status", "")),
+                self._fmt_table_value(row.get("best_identity", "")),
+                self._fmt_table_value(row.get("best_identity_orientation", "")),
+                self._fmt_table_value(row.get("anchoring_feasible", "")),
+                self._fmt_table_value(row.get("end_anchored_possible", "")),
+                self._fmt_table_value(row.get("fwd_best_identity", "")),
+                self._fmt_table_value(row.get("revcomp_best_identity", "")),
+                self._fmt_table_value(row.get("fwd_best_overlap_len", "")),
+                self._fmt_table_value(row.get("revcomp_best_overlap_len", "")),
+                self._fmt_table_value(row.get("fwd_anchor_feasible", "")),
+                self._fmt_table_value(row.get("revcomp_anchor_feasible", "")),
+                self._fmt_table_value(row.get("identity_delta_revcomp_minus_fwd", "")),
+                self._fmt_table_value(row.get("selected_vs_best_identity_delta", "")),
+                self._fmt_table_value(row.get("top_candidate_count", "")),
+                self._fmt_table_value(row.get("top2_identity_delta", "")),
+                self._fmt_table_value(row.get("top2_overlap_len_delta", "")),
+                self._fmt_table_value(row.get("top2_quality_delta", "")),
+                self._fmt_table_value(row.get("tie_reason_code", "")),
+                self._fmt_table_value(row.get("fwd_best_identity_any", "")),
+                self._fmt_table_value(row.get("revcomp_best_identity_any", "")),
+                self._fmt_table_value(row.get("fwd_best_overlap_len_any", "")),
+                self._fmt_table_value(row.get("revcomp_best_overlap_len_any", "")),
+                self._fmt_table_value(row.get("pretrim_best_identity", "")),
+                self._fmt_table_value(row.get("posttrim_best_identity", "")),
+                self._fmt_table_value(row.get("pretrim_best_overlap_len", "")),
+                self._fmt_table_value(row.get("posttrim_selected_overlap_len", row.get("posttrim_best_overlap_len", ""))),
+                self._fmt_table_value(row.get("pretrim_status", "")),
+                self._fmt_table_value(row.get("posttrim_status", "")),
+                self._fmt_table_value(row.get("ambiguity_identity_delta_used", "")),
+                self._fmt_table_value(row.get("ambiguity_quality_epsilon_used", "")),
+                self._fmt_table_value(row.get("primer_trim_bases_fwd", "")),
+                self._fmt_table_value(row.get("primer_trim_bases_rev", "")),
+                self._fmt_table_value(row.get("selected_engine", "")),
+                self._fmt_table_value(row.get("fallback_used", "")),
+                self._fmt_table_value(row.get("configured_engine", row.get("overlap_engine", ""))),
+            ]
+            for col, value in enumerate(row_values):
+                item = QTableWidgetItem(value)
+                item.setToolTip(value)
+                self.diagnostics_table.setItem(row_idx, col, item)
+            self._audit_rows[row_values[0]] = {
+                "overlap_len": row_values[1],
+                "overlap_identity": row_values[2],
+                "overlap_quality": row_values[3],
+                "orientation": row_values[4],
+                "status": row_values[5],
+                "best_identity": row_values[6],
+                "best_identity_orientation": row_values[7],
+                "anchoring_feasible": row_values[8],
+                "end_anchored_possible": row_values[9],
+                "fwd_best_identity": row_values[10],
+                "revcomp_best_identity": row_values[11],
+                "fwd_best_overlap_len": row_values[12],
+                "revcomp_best_overlap_len": row_values[13],
+                "fwd_anchor_feasible": row_values[14],
+                "revcomp_anchor_feasible": row_values[15],
+                "identity_delta_revcomp_minus_fwd": row_values[16],
+                "selected_vs_best_identity_delta": row_values[17],
+                "top_candidate_count": row_values[18],
+                "top2_identity_delta": row_values[19],
+                "top2_overlap_len_delta": row_values[20],
+                "top2_quality_delta": row_values[21],
+                "tie_reason_code": row_values[22],
+                "fwd_best_identity_any": row_values[23],
+                "revcomp_best_identity_any": row_values[24],
+                "fwd_best_overlap_len_any": row_values[25],
+                "revcomp_best_overlap_len_any": row_values[26],
+                "pretrim_best_identity": row_values[27],
+                "posttrim_best_identity": row_values[28],
+                "pretrim_best_overlap_len": row_values[29],
+                "posttrim_selected_overlap_len": row_values[30],
+                "pretrim_status": row_values[31],
+                "posttrim_status": row_values[32],
+                "ambiguity_identity_delta_used": row_values[33],
+                "ambiguity_quality_epsilon_used": row_values[34],
+                "primer_trim_bases_fwd": row_values[35],
+                "primer_trim_bases_rev": row_values[36],
+                "selected_engine": row_values[37],
+                "fallback_used": row_values[38],
+                "overlap_engine": row_values[39],
+                "configured_engine": row_values[39],
+            }
+        self._configure_table_view(self.diagnostics_table)
+
+    def _load_compare_assemblers_table(self, compare_path: Path) -> None:
+        if not compare_path.exists():
+            return
+        df = pd.read_csv(compare_path, sep="\t")
+        self.compare_table.setRowCount(0)
+        self._compare_rows.clear() 
+        for row_idx, row in df.iterrows():
+            self.compare_table.insertRow(row_idx)
+            row_values = [
+                self._fmt_table_value(row.get("sample_id", "")),
+                self._fmt_table_value(row.get("assembler_id", "")),
+                self._fmt_table_value(row.get("assembler_name", "")),
+                self._fmt_table_value(row.get("dup_policy", "")),
+                self._fmt_table_value(row.get("status", "")),
+                self._fmt_table_value(row.get("selected_engine", "")),
+                self._fmt_table_value(row.get("contig_len", "")),
+                self._fmt_table_value(row.get("diag_code_for_machine", "")),
+                self._fmt_table_value(row.get("diag_detail_for_human", "")),
+                self._fmt_table_value(row.get("cap3_contigs_n", "")),
+                self._fmt_table_value(row.get("cap3_singlets_n", "")),
+                self._fmt_table_value(row.get("warnings", "")),
+            ]
+            for col, value in enumerate(row_values):
+                item = QTableWidgetItem(value)
+                item.setToolTip(value)
+                self.compare_table.setItem(row_idx, col, item)
+            sample_id = row_values[0]
+            assembler_id = row_values[1]
+            self._compare_rows[(sample_id, assembler_id)] = {
+                "sample_id": sample_id,
+                "assembler_id": assembler_id,
+                "assembler_name": row_values[2],
+                "dup_policy": row_values[3],
+                "status": row_values[4],
+                "selected_engine": row_values[5],
+                "contig_len": row_values[6],
+                "warnings": row_values[11],
+                "diag_code_for_machine": self._fmt_table_value(row.get("diag_code_for_machine", "")),
+                "diag_detail_for_human": self._normalize_compare_diag_detail(
+                    self._fmt_table_value(row.get("diag_detail_for_human", "")),
+                    row_values[5],
+                ),
+                "cap3_contigs_n": self._fmt_table_value(row.get("cap3_contigs_n", "")),
+                "cap3_singlets_n": self._fmt_table_value(row.get("cap3_singlets_n", "")),
+                "cap3_info_path": self._fmt_table_value(row.get("cap3_info_path", "")),
+                "cap3_stdout_path": self._fmt_table_value(row.get("cap3_stdout_path", "")),
+                "cap3_stderr_path": self._fmt_table_value(row.get("cap3_stderr_path", "")),
+                "tool_name": self._fmt_table_value(row.get("tool_name", "")),
+                "tool_stdout_path": self._fmt_table_value(row.get("tool_stdout_path", "")),
+                "tool_stderr_path": self._fmt_table_value(row.get("tool_stderr_path", "")),
+                "selection_trace_path": self._fmt_table_value(row.get("selection_trace_path", "")),
+                "winner_reason": self._fmt_table_value(row.get("winner_reason", "")),
+                "payload_fasta": self._fmt_table_value(row.get("payload_fasta", "")),
+                "payload_ids": self._fmt_table_value(row.get("payload_ids", "")),
+                "source_id_map": self._fmt_table_value(row.get("source_id_map", "")),
+                "payload_kind": self._fmt_table_value(row.get("payload_kind", "none")),
+                "payload_n": self._fmt_table_value(row.get("payload_n", "0")),
+                "payload_max_len": self._fmt_table_value(row.get("payload_max_len", "0")),
+                "ambiguity_flag": self._fmt_table_value(row.get("ambiguity_flag", "0")),
+                "safety_flag": self._fmt_table_value(row.get("safety_flag", "none")),
+                "review_action": self._fmt_table_value(row.get("review_action", row.get("status", "none"))),
+                "review_reason": self._fmt_table_value(row.get("review_reason", "")),
+                "advisory_reason": self._fmt_table_value(row.get("advisory_reason", "")),
+                "warning_flags": self._fmt_table_value(row.get("warning_flags", "")),
+            } 
+
+        self._configure_table_view(self.compare_table)
+
+    def _apply_summary_filter(self) -> None:
+        selected = self.summary_filter.currentData()
+        for row in range(self.summary_table.rowCount()):
+            status_item = self.summary_table.item(row, 1)
+            status = status_item.text() if status_item else ""
+            self.summary_table.setRowHidden(row, selected is not None and status != selected)
+
+    def _configure_table_view(self, table: QTableWidget) -> None:
+        table.setWordWrap(False)
+        header = table.horizontalHeader()
+        if table.rowCount() <= 500:
+            table.resizeColumnsToContents()
+            header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        else:
+            header.setSectionResizeMode(QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+            if table.columnCount() > 1:
+                header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            if table.columnCount() > 2:
+                header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            if table.columnCount() > 3:
+                header.setSectionResizeMode(3, QHeaderView.Interactive)
+                table.setColumnWidth(3, 260)
+        _set_header_tooltips(
+            table,
+            {
+                "status": STATUS_COLOR_LEGEND,
+                "trace_qc": TRACE_QC_COLOR_LEGEND,
+                "trace_qc_status": TRACE_QC_COLOR_LEGEND,
+            },
+        )
+        header.setStretchLastSection(True)
+        if table.rowCount() <= 200:
+            table.resizeRowsToContents()
+
+    def _selected_sample_ids(self, table: QTableWidget) -> list[str]:
+        model = table.selectionModel()
+        if not model:
+            return []
+        rows = model.selectedRows(0)
+        if rows:
+            return [table.item(idx.row(), 0).text() for idx in rows if table.item(idx.row(), 0)]
+        current_row = table.currentRow()
+        if current_row >= 0:
+            item = table.item(current_row, 0)
+            if item:
+                return [item.text()]
+        return []
+
+    def _selected_compare_keys(self) -> list[tuple[str, str]]:
+        """ This is to pair the sample id and asm id together to help with troubleshooting in the compare assembly tab.""" 
+        model = self.compare_table.selectionModel() 
+        if not model:
+            return [] 
+        rows = model.selectedRows(0)
+        selected: list[tuple[str, str]] = [] 
+        for idx in rows: 
+            row = idx.row() 
+            sid_item = self.compare_table.item(row, 0)
+            asm_item = self.compare_table.item(row, 1)
+            if sid_item and asm_item:
+                selected.append((sid_item.text(), asm_item.text()))
+
+            if selected:
+                return selected 
+
+            row = self.compare_table.currentRow()
+            if row >= 0: 
+                sid_item = self.compare_table.item(row, 0)
+                asm_item = self.compare_table.item(row, 1)  
+                if sid_item and asm_item:
+                    return [(sid_item.text(), asm_item.text())]
+            return [] 
+
+    def _join_values(self, values: list[str]) -> str:
+        cleaned = [v for v in values if v]
+        if not cleaned:
+            return "—"
+        unique = list(dict.fromkeys(cleaned))
+        if len(unique) <= 5:
+            return ", ".join(unique)
+        return f"{', '.join(unique[:5])}, … (+{len(unique) - 5} more)"
+
+    def _normalize_compare_diag_detail(self, detail: str, selected_engine: str) -> str:
+        return _normalize_legacy_compare_diag_detail(detail, selected_engine)
+
+    def _set_detail_label(self, label: QLabel, prefix: str, summary: str, full: str | None = None) -> None:
+        compact = (summary or "—").strip() or "—"
+        label.setText(f"{prefix}: {compact}")
+        tooltip = (full if full is not None else compact) or ""
+        label.setToolTip(tooltip)
+
+    def _winner_reason_for_compare_row(self, row: dict[str, str]) -> str:
+        """Resolve winner reason only when current row is the winner row for its sample."""
+        reason = row.get("winner_reason", "")
+        if reason:
+            return reason
+        trace_txt = row.get("selection_trace_path", "")
+        if not trace_txt:
+            return ""
+        trace_path = Path(trace_txt)
+        if not trace_path.exists():
+            return ""
+        try:
+            lines = trace_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return ""
+        if len(lines) < 2:
+            return ""
+        header = lines[0].split("	")
+        current_assembler = row.get("assembler_id", "")
+        for raw in lines[1:]:
+            cols = raw.split("	")
+            row_map = dict(zip(header, cols))
+            if row_map.get("is_winner", "") != "1":
+                continue
+            if row_map.get("assembler_id", "") != current_assembler:
+                return ""
+            return row_map.get("winner_reason", "")
+        return ""
+
+    def _append_unique_detail_path(self, kind: str, path: Path) -> None:
+        if path.exists() and path not in self._detail_paths[kind]:
+            self._detail_paths[kind].append(path)
+
+    def _append_sample_cap3_paths(self, sample_ids: list[str]) -> None:
+        """Append default CAP3 artifacts from the sample folder when available."""
+        if not self._asm_dir:
+            return
+        for sample_id in sample_ids:
+            sample_dir = self._asm_dir / sample_id
+            contig_path = sample_dir / f"{sample_id}_paired.fasta.cap.contigs"
+            singlet_path = sample_dir / f"{sample_id}_paired.fasta.cap.singlets"
+            info_path = sample_dir / f"{sample_id}_paired.fasta.cap.info"
+            self._append_unique_detail_path("contigs", contig_path)
+            self._append_unique_detail_path("singlets", singlet_path)
+            self._append_unique_detail_path("info", info_path)
+
+    def _append_compare_fallback_paths(self, rows: list[dict[str, str]]) -> None:
+        """Append fallback compare artifacts from deterministic asm outputs."""
+        if not self._asm_dir:
+            return
+        trace_dir = self._asm_dir / "selection_trace"
+        process_log_dir = self._asm_dir / "process_logs"
+
+        for row in rows:
+            sample_id = row.get("sample_id", "").strip()
+            assembler_id = row.get("assembler_id", "").strip()
+            if not sample_id:
+                continue
+
+            safe_sample = re.sub(r"[^A-Za-z0-9._-]", "_", sample_id or "sample")
+            safe_assembler = re.sub(r"[^A-Za-z0-9._-]", "_", assembler_id or "tool")
+
+            trace_path = trace_dir / f"{safe_sample}.selection_trace.tsv"
+            self._append_unique_detail_path("selection_trace", trace_path)
+
+            for root in (self._asm_dir / sample_id, process_log_dir):
+                if not root.exists() or not root.is_dir():
+                    continue
+                stdout_glob = sorted(root.glob(f"{safe_sample}__{safe_assembler}__process*.stdout.txt"))
+                stderr_glob = sorted(root.glob(f"{safe_sample}__{safe_assembler}__process*.stderr.txt"))
+                for stdout_path in stdout_glob:
+                    self._append_unique_detail_path("tool_stdout", stdout_path)
+                for stderr_path in stderr_glob:
+                    self._append_unique_detail_path("tool_stderr", stderr_path)
+
+    def _append_sample_trace_and_logs(self, sample_ids: list[str]) -> None:
+        """Append per-sample selection trace and process logs when available."""
+        if not self._asm_dir:
+            return
+        trace_dir = self._asm_dir / "selection_trace"
+        process_log_dir = self._asm_dir / "process_logs"
+
+        for sample_id in sample_ids:
+            safe_sample = re.sub(r"[^A-Za-z0-9._-]", "_", (sample_id or "").strip() or "sample")
+            trace_path = trace_dir / f"{safe_sample}.selection_trace.tsv"
+            self._append_unique_detail_path("selection_trace", trace_path)
+
+            for root in (self._asm_dir / sample_id, process_log_dir):
+                if not root.exists() or not root.is_dir():
+                    continue
+                stdout_glob = sorted(root.glob(f"{safe_sample}__*__process*.stdout.txt"))
+                stderr_glob = sorted(root.glob(f"{safe_sample}__*__process*.stderr.txt"))
+                for stdout_path in stdout_glob:
+                    self._append_unique_detail_path("tool_stdout", stdout_path)
+                for stderr_path in stderr_glob:
+                    self._append_unique_detail_path("tool_stderr", stderr_path)
+
+    def _update_detail_panel(self) -> None:
+        table = None
+        tab_index = self.output_tabs.currentIndex()
+        if tab_index == 1:
+            table = self.summary_table
+        elif tab_index == 2:
+            table = self.blast_table
+        elif tab_index == 3:
+            table = self.diagnostics_table
+        elif tab_index == 4:
+            table = self.compare_table
+        else:
+            table = self.summary_table if self.summary_table.selectedItems() else self.blast_table
+
+        sample_ids = self._selected_sample_ids(table) if table else []
+        if not sample_ids:
+            return
+
+        compare_keys = self._selected_compare_keys() if tab_index == 4 else [] 
+        if compare_keys:
+            rows = [self._compare_rows.get(k, {}) for k in compare_keys]
+            self.detail_sample_lbl.setText(
+                f"sample_id: {self._join_values([r.get('sample_id', '') for r in rows])}"
+            )
+            self.detail_status_lbl.setText(
+                f"status: {self._join_values([r.get('status', '-') for r in rows])}"
+            )
+            reason_bits = [] 
+            for r in rows:
+                winner_reason = self._winner_reason_for_compare_row(r)
+                if winner_reason:
+                    reason_bits.append(winner_reason)
+                    continue
+                parts = [
+                    r.get("diag_code_for_machine", ""),
+                    r.get("diag_detail_for_human", ""),
+                    r.get("warnings", ""),
+                    r.get("safety_flag", ""),
+                    r.get("review_action", ""),
+                    r.get("review_reason", ""),
+                    r.get("advisory_reason", ""),
+                    r.get("warning_flags", ""),
+                ]
+                reason_bits.append(" | ".join(p for p in parts if p and p != "none") or "-")
+            self.detail_reason_lbl.setText(f"reason: {self._join_values(reason_bits)}")
+            payload_vals = [f"{r.get('payload_kind', 'none')} (n={r.get('payload_n', '0')})" for r in rows]
+            self.detail_payload_lbl.setText(f"blast_payload: {self._join_values(payload_vals)}")
+            cap3_meta = [] 
+            for r in rows:
+                if r.get("cap3_contigs_n") or r.get("cap3_singlets_n"):
+                    cap3_meta.append(
+                        f"{r.get('assembler_id', '')} contigs={r.get('cap3_contigs_n', '0')} singlets= {r.get('cap3_singlets_n', '0')}"
+                    )
+                else:
+                    cap3_meta.append(r.get("assembler_id", ""))
+            self.detail_payload_ids_lbl.setText(f"payload_ids: {self._join_values(cap3_meta)}")
+            self.detail_assembly_engine_lbl.setText(
+                f"assembly path: {self._join_values([r.get('assembler_name', '') for r in rows])}"
+            )
+
+            trace_status_vals = [str(r.get("trace_status", "NA") or "NA").upper() for r in rows]
+            trace_labels = [
+                "; ".join(
+                    _trace_flags_to_labels(
+                        r.get("trace_flags", ""),
+                        r.get("trace_status", "NA"),
+                        r.get("trace_mixed_peak_frac_max", ""),
+                        r.get("review_reason", ""),
+                    )
+                )
+                for r in rows
+            ]
+            self.detail_trace_qc_lbl.setText(f"trace_qc: {self._join_values(trace_status_vals)}")
+            self.detail_trace_reason_lbl.setText(f"trace_qc_detail: {self._join_values(trace_labels)}")
+
+            audit_values = [self._audit_rows.get(r.get("sample_id", ""), {}) for r in rows]
+            statuses = [audit.get("status", "-") for audit in audit_values if audit]
+            self.detail_overlap_lbl.setText(f"overlap: {self._join_values(statuses)}")
+
+            for key in self._detail_paths:
+                self._detail_paths[key] = []
+            self._detail_ab1_paths = []
+            for r in rows:
+                payload = r.get("payload_fasta", "")
+                if payload:
+                    p = Path(payload)
+                    if p.exists():
+                        self._detail_paths["contigs"].append(p)
+                info_txt = r.get("cap3_info_path", "")
+                if info_txt:
+                    info_path = Path(info_txt)
+                    if info_path.exists():
+                        self._detail_paths["info"].append(info_path)
+                        singlet_path = info_path.with_suffix(".singlets")
+                        if singlet_path.exists():
+                            self._detail_paths["singlets"].append(singlet_path)
+                stdout_txt = r.get("tool_stdout_path", "") or r.get("cap3_stdout_path", "")
+                stderr_txt = r.get("tool_stderr_path", "") or r.get("cap3_stderr_path", "")
+                if stdout_txt:
+                    stdout_path = Path(stdout_txt)
+                    if stdout_path.exists():
+                        self._detail_paths["tool_stdout"].append(stdout_path)
+                if stderr_txt:
+                    stderr_path = Path(stderr_txt)
+                    if stderr_path.exists():
+                        self._detail_paths["tool_stderr"].append(stderr_path)
+                trace_txt = r.get("selection_trace_path", "")
+                if trace_txt:
+                    trace_path = Path(trace_txt)
+                    if trace_path.exists():
+                        self._detail_paths["selection_trace"].append(trace_path)
+
+            # Compare TSV artifacts are preferred, but older runs (or partial exports)
+            # may only have deterministic artifacts under the assembly directory.
+            selected_sample_ids = [r.get("sample_id", "") for r in rows if r.get("sample_id", "")]
+            self._append_sample_cap3_paths(selected_sample_ids)
+            self._append_compare_fallback_paths(rows)
+
+            self.detail_contigs_btn.setEnabled(bool(self._detail_paths["contigs"]))
+            self.detail_singlets_btn.setEnabled(bool(self._detail_paths["singlets"]))
+            self.detail_info_btn.setEnabled(bool(self._detail_paths["info"]))
+            self.detail_tool_stdout_btn.setEnabled(bool(self._detail_paths["tool_stdout"]))
+            self.detail_tool_stderr_btn.setEnabled(bool(self._detail_paths["tool_stderr"]))
+            self.detail_selection_trace_btn.setEnabled(bool(self._detail_paths["selection_trace"]))
+            self.detail_contigs_system_btn.setEnabled(bool(self._detail_paths["contigs"]))
+            self.detail_singlets_system_btn.setEnabled(bool(self._detail_paths["singlets"]))
+            self.detail_info_system_btn.setEnabled(bool(self._detail_paths["info"]))
+            self.detail_tool_stdout_system_btn.setEnabled(bool(self._detail_paths["tool_stdout"]))
+            self.detail_tool_stderr_system_btn.setEnabled(bool(self._detail_paths["tool_stderr"]))
+            for r in rows:
+                sid = r.get("sample_id", "")
+                for ab1 in self._resolve_ab1_paths_for_sample(sid, row=r):
+                    if ab1 not in self._detail_ab1_paths:
+                        self._detail_ab1_paths.append(ab1)
+
+            self.detail_selection_trace_system_btn.setEnabled(bool(self._detail_paths["selection_trace"]))
+            self.detail_chrom_btn.setEnabled(bool(self._detail_ab1_paths))
+            return
+
+        summary_vals = [self._summary_rows.get(sid, {}).get("status", "—") for sid in sample_ids]
+        reason_vals = [self._blast_rows.get(sid, {}).get("reason", "—") for sid in sample_ids]
+        payload_vals = [self._blast_rows.get(sid, {}).get("blast_payload", "—") for sid in sample_ids]
+        payload_ids_vals = [self._blast_rows.get(sid, {}).get("payload_ids", "—") for sid in sample_ids]
+
+        self.detail_sample_lbl.setText(f"sample_id: {self._join_values(sample_ids)}")
+        self.detail_status_lbl.setText(f"status: {self._join_values(summary_vals)}")
+        self.detail_reason_lbl.setText(f"reason: {self._join_values(reason_vals)}")
+        self.detail_payload_lbl.setText(f"blast_payload: {self._join_values(payload_vals)}")
+        self.detail_payload_ids_lbl.setText(f"payload_ids: {self._join_values(payload_ids_vals)}")
+
+        engine_vals: list[str] = []
+        for sid in sample_ids:
+            srow = self._summary_rows.get(sid, {})
+            merge_status = srow.get("merge_status", "")
+            status = srow.get("status", "")
+            if merge_status == "merged":
+                engine_vals.append("merged_two_reads")
+            elif merge_status == "high_conflict":
+                engine_vals.append("merged_two_reads -> CAP3 fallback (high_conflict)")
+            elif merge_status in {"identity_low", "overlap_too_short", "quality_low", "ambiguous_overlap"}:
+                engine_vals.append(f"merged_two_reads attempted ({merge_status}) -> CAP3 fallback")
+            elif status == "assembled":
+                engine_vals.append("CAP3 assembled")
+            elif status == "singlets_only":
+                engine_vals.append("CAP3 singlets_only")
+            else:
+                engine_vals.append("paired flow (see merge_status + status)")
+        self.detail_assembly_engine_lbl.setText(f"assembly path: {self._join_values(engine_vals)}")
+        
+        trace_status_vals = [
+            str(
+                self._summary_rows.get(sid, {}).get("trace_status")
+                or self._blast_rows.get(sid, {}).get("trace_status")
+                or "NA"
+            ).upper()
+            for sid in sample_ids
+        ]
+        trace_labels = []
+        for sid in sample_ids:
+            src = self._summary_rows.get(sid, {})
+            if not src:
+                src = self._blast_rows.get(sid, {})
+            trace_labels.append(
+                "; ".join(
+                    _trace_flags_to_labels(
+                        src.get("trace_flags", ""),
+                        src.get("trace_status", "NA"),
+                        src.get("trace_mixed_peak_frac_max", ""),
+                        src.get("review_reason", ""),
+                    )
+                )
+            )
+
+        self.detail_trace_qc_lbl.setText(f"trace_qc: {self._join_values(trace_status_vals)}")
+        self.detail_trace_reason_lbl.setText(f"trace_qc_detail: {self._join_values(trace_labels)}")
+
+        audit_values = [self._audit_rows.get(sid, {}) for sid in sample_ids]
+        if len(sample_ids) == 1 and audit_values and audit_values[0]:
+            audit = audit_values[0]
+            overlap_summary = (
+                f"{audit.get('status', '—')} (len {audit.get('overlap_len', '—')}, "
+                f"id {audit.get('overlap_identity', '—')}, "
+                f"q {audit.get('overlap_quality', '—')}, "
+                f"orient {audit.get('orientation', '—')}, "
+                f"engine {audit.get('selected_engine', '—')}, "
+                f"fallback {audit.get('fallback_used', '—')})"
+            )
+            overlap_full = (
+                f"{overlap_summary}; best-id {audit.get('best_identity', '—')} @ {audit.get('best_identity_orientation', '—')}; "
+                f"fwd-best-id {audit.get('fwd_best_identity', '—')} (any {audit.get('fwd_best_identity_any', '—')}), "
+                f"rev-best-id {audit.get('revcomp_best_identity', '—')} (any {audit.get('revcomp_best_identity_any', '—')}); "
+                f"delta(rev-fwd) {audit.get('identity_delta_revcomp_minus_fwd', '—')}; "
+                f"selected-vs-best-delta {audit.get('selected_vs_best_identity_delta', '—')}; "
+                f"fwd-anchor-feasible {audit.get('fwd_anchor_feasible', '—')}, rev-anchor-feasible {audit.get('revcomp_anchor_feasible', '—')}; "
+                f"top-cands {audit.get('top_candidate_count', '—')}, top2-id-delta {audit.get('top2_identity_delta', '—')}, "
+                f"top2-len-delta {audit.get('top2_overlap_len_delta', '—')}, top2-q-delta {audit.get('top2_quality_delta', '—')}; "
+                f"tie-reason {audit.get('tie_reason_code', '—')} (id_eps {audit.get('ambiguity_identity_delta_used', '—')}, "
+                f"q_eps {audit.get('ambiguity_quality_epsilon_used', '—')}); "
+                f"pretrim {audit.get('pretrim_status', '—')} id {audit.get('pretrim_best_identity', '—')} len {audit.get('pretrim_best_overlap_len', '—')}; "
+                f"posttrim {audit.get('posttrim_status', '—')} id {audit.get('posttrim_best_identity', '—')} "
+                f"len-selected {audit.get('posttrim_selected_overlap_len', '—')}; "
+                f"primer-trim-bases F {audit.get('primer_trim_bases_fwd', '—')} R {audit.get('primer_trim_bases_rev', '—')}; "
+                f"anchored-feasible {audit.get('anchoring_feasible', '—')}; "
+                f"end-anchored-possible {audit.get('end_anchored_possible', '—')}; "
+                f"configured-engine {audit.get('overlap_engine', '—')}"
+            )
+            self._set_detail_label(self.detail_overlap_lbl, "overlap", overlap_summary, overlap_full)
+        else:
+            statuses = [audit.get("status", "—") for audit in audit_values if audit]
+            self._set_detail_label(self.detail_overlap_lbl, "overlap", self._join_values(statuses))
+
+        for key in self._detail_paths:
+            self._detail_paths[key] = []
+        self._detail_ab1_paths = []
+
+        self._append_sample_cap3_paths(sample_ids)
+        self._append_sample_trace_and_logs(sample_ids)
+
+        self.detail_contigs_btn.setEnabled(bool(self._detail_paths["contigs"]))
+        self.detail_singlets_btn.setEnabled(bool(self._detail_paths["singlets"]))
+        self.detail_info_btn.setEnabled(bool(self._detail_paths["info"]))
+        self.detail_tool_stdout_btn.setEnabled(bool(self._detail_paths["tool_stdout"]))
+        self.detail_tool_stderr_btn.setEnabled(bool(self._detail_paths["tool_stderr"]))
+        self.detail_selection_trace_btn.setEnabled(bool(self._detail_paths["selection_trace"]))
+        self.detail_contigs_system_btn.setEnabled(bool(self._detail_paths["contigs"]))
+        self.detail_singlets_system_btn.setEnabled(bool(self._detail_paths["singlets"]))
+        self.detail_info_system_btn.setEnabled(bool(self._detail_paths["info"]))
+        self.detail_tool_stdout_system_btn.setEnabled(bool(self._detail_paths["tool_stdout"]))
+        self.detail_tool_stderr_system_btn.setEnabled(bool(self._detail_paths["tool_stderr"]))
+        self.detail_selection_trace_system_btn.setEnabled(bool(self._detail_paths["selection_trace"]))
+        for sid in sample_ids:
+            for ab1 in self._resolve_ab1_paths_for_sample(sid):
+                if ab1 not in self._detail_ab1_paths:
+                    self._detail_ab1_paths.append(ab1)
+        self.detail_chrom_btn.setEnabled(bool(self._detail_ab1_paths))
+ 
     # closeEvent ----------------------------
     def closeEvent(self, event):
         """
@@ -1083,12 +3464,20 @@ class MainWindow(QMainWindow):
         if self._thread and self._thread.isRunning():
             if self._worker:
                 # ask the thread to finish, then auto-close the window
-                self._worker.finished.connect(lambda *_: self.close())
+                self._worker.finished.connect(self._close_after_worker_finished, type=QtCore.Qt.ConnectionType.QueuedConnection) 
                 self._thread.requestInterruption()     # politely signal
                 event.ignore()                         # keep window open
                 self.log_model.append("Waiting for BLAST thread to finish…")
                 return
-        self._cleanup_input_staging() 
+        is_max = self.isMaximized()
+        normal_rect = self.normalGeometry() if is_max else self.geometry()
+        self.settings.setValue(
+            "window_normal_geometry",
+            [normal_rect.x(), normal_rect.y(), normal_rect.width(), normal_rect.height()],
+        )
+        self.settings.setValue("window_start_maximized", is_max)
+        self._cleanup_input_staging()
+        self._flush_logs() 
         event.accept()
         root = logging.getLogger()
         if self._log_handler and self._log_handler in root.handlers:
@@ -1099,11 +3488,11 @@ class MainWindow(QMainWindow):
 def qt_message_handler(mode, _context, message):
     """Redirect Qt messages to the Python logging module."""
     level = {
-        QtCore.Qt.QtMsgType.QtDebugMsg:    logging.DEBUG,
-        QtCore.Qt.QtMsgType.QtInfoMsg:     logging.INFO,
-        QtCore.Qt.QtMsgType.QtWarningMsg:  logging.WARNING,
-        QtCore.Qt.QtMsgType.QtCriticalMsg: logging.ERROR,
-        QtCore.Qt.QtMsgType.QtFatalMsg:    logging.CRITICAL,
+        QtCore.QtMsgType.QtDebugMsg:    logging.DEBUG,
+        QtCore.QtMsgType.QtInfoMsg:     logging.INFO,
+        QtCore.QtMsgType.QtWarningMsg:  logging.WARNING,
+        QtCore.QtMsgType.QtCriticalMsg: logging.ERROR,
+        QtCore.QtMsgType.QtFatalMsg:    logging.CRITICAL,
     }.get(mode, logging.CRITICAL)
     logging.log(level, "Qt: %s", message)
 
@@ -1123,6 +3512,22 @@ def launch():
     QtCore.qInstallMessageHandler(qt_message_handler) 
     win = MainWindow()
     win.show()
+    QTimer.singleShot(0, lambda: win.showMaximized() if win._start_maximized else None)
+
+    logging.info(
+        "GUI platform session: XDG_SESSION_TYPE=%s QT_QPA_PLATFORM=%s WAYLAND_DISPLAY=%s",
+        os.environ.get("XDG_SESSION_TYPE", ""),
+        os.environ.get("QT_QPA_PLATFORM", ""),
+        os.environ.get("WAYLAND_DISPLAY", ""),
+    )
+    logging.info(
+        "Qt backend decision: chosen_qt_backend=%s reason=%s",
+        os.environ.get("QT_QPA_PLATFORM", ""),
+        os.environ.get("MICROSEQ_QT_BACKEND_REASON", "unknown"),
+    )
+    logging.info(
+        "Logging vs outputs: execution logs go to logs/microseq_<session>.log; run artifacts (qc/, asm/, hits.tsv, hits_tax.tsv) are written under each run output directory."
+    )
     sys.exit(app.exec())
 
 # allow: python -m microseq_tests.gui

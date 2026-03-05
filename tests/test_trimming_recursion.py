@@ -33,3 +33,21 @@ def test_fastq_to_fasta_recursive(tmp_path: pathlib.Path) -> None:
     fastq_folder_to_fasta(inp, out)
     records = list(SeqIO.parse(out, "fasta"))
     assert len(records) == 2
+
+
+def test_ab1_to_fastq_skips_prior_pipeline_raw_ab1_tree(tmp_path: pathlib.Path) -> None:
+    fixtures = pathlib.Path(__file__).parent / "fixtures" / "39764260.ab1"
+    inp = tmp_path / "paired_ab1_demo_run"
+    inp.mkdir(parents=True)
+
+    shutil.copy2(fixtures, inp / "A01.ab1")
+
+    prior_raw = inp / "paired_ab1_demo_run_microseq" / "raw_ab1"
+    prior_raw.mkdir(parents=True)
+    shutil.copy2(fixtures, prior_raw / "A01.ab1")
+
+    out_dir = tmp_path / "fastq"
+    fastqs = ab1_folder_to_fastq(inp, out_dir)
+
+    assert len(fastqs) == 1
+    assert fastqs[0].stem == "A01"

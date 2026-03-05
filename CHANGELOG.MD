@@ -16,6 +16,18 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 
 ### Added Feature 
 
+- Compare-all workflow now writes and auto-loads `asm/compare_assemblers.tsv` into the GUI results tables.
+- Assembly reporting now surfaces primer source classification (`off|preset|custom|mixed`) alongside primer mode/stage.
+- GUI output tabs now include **Compare Assemblers** to display `asm/compare_assemblers.tsv` after comparison runs.
+- Primer-trim configuration now supports `mode: off|detect|clip` and `stage: pre_quality|post_quality`, with migration from legacy `primer_trim.enabled`.
+- Added primer detect-only reporting (`qc/primer_detect_report.tsv`) and GUI **Primer preview** action for dry-run primer hit telemetry.
+- Paired assembly summary now includes canonical cross-path fields (`assembler`, selected/configured engine, overlap metadata, `contig_len`, payload, primer mode/stage).
+- Added reporting toggles in config (`reporting.emit_engine_audit`, `reporting.emit_per_sample_merge_report`) to keep debug artifacts optional.
+- Primer preview now consumes the same GUI primer policy overrides (stage/preset/custom sequences) and forces detect mode for parity with run behavior.
+- Detect mode now avoids writing primer-trim FASTQ copies, emitting only detect telemetry reports by default.
+- Added GUI custom primer sequence entry (forward/reverse, one per line) with validation for IUPAC DNA alphabet and minimum length.
+- Canonical `assembly_summary.tsv` now derives selected/configured engine fields from merge/config truth with audit fields separated as `audit_*`.
+
 - Session-based logging; export `MICROSEQ_SESSION_ID` to aggregate logs.
 - GUI toggle for speed vs. sensitivity BLAST algorithms.
 - Fallback to classic `blastn` when identity or coverage falls below 90%.
@@ -28,7 +40,9 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 - GUI primer set dropdown plus advanced regex override for pairing. primer token detection and suggestions when no pairs are found. 
 - Paired assembly now normalizes FASTA/FASTQ/AB1 inputs to per-read FASTA, re-writes contig headers with sample-aware IDs, and records detector/well metadata in pairing reports. 
 - Documented paired vs single-mode CAP3 usage with real-world scenarios used under tests for data samples (plate runs, ad-hoc single mode) in README and reference in GUI/doc tutorials.
-- Trim summaries now report expected error telemetry (EE/kb) and qeff based lebels.  
+- Trim summaries now report expected error telemetry (EE/kb) and qeff based lebels. 
+- Paired assembly now supports CAP3 profiling presets (strict/diagnostic/relaxed), QUAL usuage, overlap auditing, and blast input manifests (`asm/blast_inputs.fasta` + `asm/blast_inputs.tsv`) 
+- GUI paired assembly panels now include CAP3 profile selection, BLAST input toggles, overlap audit display, and summary/detail views for paired outputs. 
 
 ### Changes Made 
 - Simplified `microseq-setup` wizard, removing obsolete logging mode.
@@ -46,6 +60,8 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 - Included vsearch replicate collapse per sample and reference chimera filtering in the full pipeline that you can use optionally (like a toggle in the gui to include it), with config backed references per DB (SILVA & GG2) w/ recommendations to use SILVA as the default. 
 - vsearch docs and tests added for derep / uchime plus replicate weights tsv applied in BIOM. 
 - Added CLI workflow scripts that will make it easier to use the CLI and provided examples in the /docs how to use them in the test sample datasets. 
+- Paired contigs outputs now support `paired_contigs.fasta` which is contigs only or `blast_inputs.fasta` (which is the contigs + singlets fallback) for BLAST, with payload tracebility in `asm/blast_inputs.tsv`. 
+- Clarified log-vs-artifact behavior in GUI/CLI/docs: runtime execution logs write to `logs/microseq_<session>.log`, while run outputs remain in the selected work/output directories (`qc/`, `asm/`, `hits.tsv`, etc.); also documented conda `activate.d`/`deactivate.d` hooks for persistent `QT_QPA_PLATFORM=xcb` on Wayland.
 
 ### Fixed Bugs 
 - Percent signs escape properly for `argparse`.
@@ -58,6 +74,10 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 - Fixed paired preview helper signature and added well-pattern parameters; primer token scanning uses contiguous regex to avoid missing matches. 
 - Resolved GUI dry run toggle glitches and missing message text in dialog box. 
 - Perserved original `qseqid` while adding `sample_id` during taxonomy join so downstream merges do not drop identifiers. 
+- Made logging bootstrap idempotent so repeated `setup_logging()` calls no longer duplicate `MICROSEQ_SESSION_ID` auto-generation warnings, and auto-generated session IDs are persisted for reuse in-process.
+- Advanced regex fields now store stripped strings or `None` (not bound methods).
+- BLAST-only completion no longer reports `.` as an output path.
+- GUI cancellation now interrupts background pipeline stages.
 
 
 ---
@@ -66,5 +86,3 @@ Example Format:
 ## [1.0] - 2025-05-25
 ### Fixed 
 - Fixed GUI settings file with wrong JSON key 
-
-

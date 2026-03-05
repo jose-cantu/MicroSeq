@@ -6,7 +6,7 @@ from microseq_tests.utility.progress import stage_bar
 from microseq_tests.utility.merge_hits import merge_hits 
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
-from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, run_full_pipeline, _summarize_paired_candidates, _suggest_pairing_patterns)
+from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, run_full_pipeline, _summarize_paired_candidates, _suggest_pairing_patterns, _collect_pairing_catalog, _write_overlap_audit)
 from microseq_tests.utility.utils import setup_logging, load_config, expand_db_path
 from microseq_tests.assembly.pairing import DupPolicy 
 from microseq_tests.blast.run_blast import run_blast
@@ -21,16 +21,18 @@ from microseq_tests.utility.merge_hits import merge_hits as merged_hits
 from microseq_tests.utility.cutoff_sweeper import suggest_after_collapse as suggest
 from microseq_tests.utility import filter_hits_cli 
 from microseq_tests.utility.id_normaliser import NORMALISERS
+from microseq_tests.assembly.cap3_profiles import resolve_cap3_profile, CAP3_PROFILES
 from microseq_tests.vsearch_tools import (
     collapse_replicates_grouped,
     chimera_check_ref,
+    orient_reads as vsearch_orient_reads,
 )
 from microseq_tests import __version__
 
 def main() -> None:
     cfg = load_config() 
     ap = argparse.ArgumentParser(
-    prog="microseq", description="MicroSeq QC-trim Fastq; optional CAP3 assembly; blastn search; taxonomy join; optional BIOM export")
+    prog="microseq", description="MicroSeq QC-trim Fastq; optional CAP3 assembly; blastn search; taxonomy join; optional BIOM export. Logs are written under logs/microseq_<session>.log, while run artifacts remain in your work/output directories (qc/, asm/, hits.tsv, etc.).")
     # adding global flags here ......
     ap.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}", help="Show me the current Version of MicroSeq and exit") 
     ap.add_argument("--workdir", default=cfg.get("default_workdir","data"), help="Root folder for intermediate outputs (default: ./data) note: Yaml is placed as a 2ndary place for a shared repo project which can you modify and change without using workdir flag otherwise use --workdir to point where you want to set up your individual project")
@@ -47,6 +49,12 @@ def main() -> None:
     p_trim.set_defaults(sanger=None) # default = auto-detect in this case 
     p_trim.add_argument("--link-raw", action="store_true", help="Symlink AB1 traces into workdir instead of copying")
     p_trim.add_argument("--combined-tsv", metavar="TSV", help="Write trim summary TSV")
+    p_trim.add_argument(
+        "--trace-qc-flags",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help="Toggle threshold-based AB1 trace QC flags (auto=use config trace_qc.enable_flags)",
+    )
     
     # ── AB1 -> FASTQ -------------------------------------------------------
     p_ab1 = sp.add_parser("ab1-to-fastq",
@@ -81,7 +89,12 @@ def main() -> None:
     p_asm.add_argument("--rev-pattern", default="1492R|806R|926R|R", help="Regex pattern used to detect reverse primer tokens in filenames (paired mode)") 
     p_asm.add_argument("--enforce-well", action="store_true", help="Require forward/reverse reads to share a plate well code (A1-H12) before pairing")
     p_asm.add_argument("--well-pattern", help="Optional custom regex to detect wells (default matches A1-H12)")
-    p_asm.add_argument("--preview-pairs", action="store_true", help="Summarizing pairing candidates instead of running paired assembly") 
+    p_asm.add_argument("--preview-pairs", action="store_true", help="Summarizing pairing candidates instead of running paired assembly")
+    p_asm.add_argument("--overlap-audit", action="store_true", help="Generate qc/overlap_audit.tsv for paired assembly runs")
+    p_asm.add_argument("--cap3-profile", choices=sorted(CAP3_PROFILES.keys()), default="strict", help="CAP3 profile preset for paired assembly")
+    p_asm.add_argument("--cap3-extra-args", nargs="*", help="Additional CAP3 args appended after the selected profile")
+    p_asm.add_argument("--cap3-qual", action="store_true", default=True, help="Use per-base quality scores during CAP3 assembly (required for correct scoring)")
+    p_asm.add_argument("--no-cap3-qual", dest="cap3_qual", action="store_false", help="Disable QUAL usage for CAP3 assembly; degrades CAP3 scoring")
 
     # blast 
     db_choices = list(cfg["databases"].keys())    # e.g. here ['gg2', 'silva', 'ncbi16s']
@@ -125,6 +138,16 @@ def main() -> None:
         action="store_true",
         help="Forward --sizein to vsearch (use when FASTA has ;size= annotations)",
     )
+
+    # vsearch orient
+    p_vs_orient = sp.add_parser("vsearch-orient", help="Orient reads against a reference with vsearch")
+    p_vs_orient.add_argument("-i", "--input", required=True, help="FASTA input")
+    p_vs_orient.add_argument("-o", "--output", required=True, help="Oriented FASTA output")
+    p_vs_orient.add_argument("-d", "--db", choices=db_choices, help="Database key for default orient reference")
+    p_vs_orient.add_argument("--orient-db", help="Reference FASTA for orientation")
+    p_vs_orient.add_argument("--notmatched", help="FASTA output for reads with undetermined orientation")
+    p_vs_orient.add_argument("--report", help="Optional orient tabbed report output path")
+    p_vs_orient.add_argument("--threads", type=int, default=4, help="CPU threads to pass to vsearch")
 
     # sweeper used to predict PASS cutoff point to hit desired TARGET PASS count 
     p_sweep = sp.add_parser("suggest-cutoffs", help="Suggest identity/qcov pairs to hit TARGET PASS count of number of samples after per-sample collapse", description=("Given a BLAST sweeper table (*.tsv) from a relaxed search, "
@@ -241,7 +264,8 @@ def main() -> None:
             summary_tsv=args.combined_tsv,
             link_raw=args.link_raw,
             mee_max=args.mee_max,
-            mee_min_len=args.mee_min_len
+            mee_min_len=args.mee_min_len,
+            trace_qc_flags=args.trace_qc_flags,
 
         )
         fasta = workdir / "qc" / "trimmed.fasta"
@@ -286,11 +310,26 @@ def main() -> None:
                 args.input,
                 args.output,
                 dup_policy=DupPolicy(args.dup_policy),
+                cap3_options=resolve_cap3_profile(args.cap3_profile, args.cap3_extra_args),
                 fwd_pattern=args.fwd_pattern,
                 rev_pattern=args.rev_pattern,
                 enforce_same_well=args.enforce_well,
-                well_pattern=args.well_pattern
+                well_pattern=args.well_pattern,
+                use_qual=args.cap3_qual,
             )
+            if args.overlap_audit:
+                pairing_dir = pathlib.Path(args.input)
+                output_dir = pathlib.Path(args.output)
+                paired_samples, _ = _collect_pairing_catalog(
+                    pairing_dir,
+                    fwd_pattern=args.fwd_pattern,
+                    rev_pattern=args.rev_pattern,
+                    dup_policy=DupPolicy(args.dup_policy),
+                    enforce_same_well=args.enforce_well,
+                    well_pattern=args.well_pattern,
+                )
+                audit_path = output_dir / "qc" / "overlap_audit.tsv"
+                _write_overlap_audit(paired_samples, audit_path)
         else:
             run_assembly(args.input, args.output, threads=args.threads) 
 
@@ -376,6 +415,40 @@ def main() -> None:
         )
         print("Non-chimera FASTA:", fasta_out)
         print("Chimera report:", report_path)
+
+    elif args.cmd == "vsearch-orient":
+        fasta_in = pathlib.Path(args.input).expanduser().resolve()
+        fasta_out = pathlib.Path(args.output).expanduser().resolve()
+        notmatched = (
+            pathlib.Path(args.notmatched).expanduser().resolve()
+            if args.notmatched
+            else None
+        )
+        report = pathlib.Path(args.report).expanduser().resolve() if args.report else None
+        orient_db = args.orient_db
+        if orient_db:
+            orient_path = pathlib.Path(orient_db).expanduser().resolve()
+        else:
+            if not args.db:
+                ap.error("--db or --orient-db is required for vsearch-orient")
+            orient_ref = cfg["databases"].get(args.db, {}).get("orient_ref")
+            if not orient_ref:
+                orient_ref = cfg["databases"].get(args.db, {}).get("chimera_ref")
+            if not orient_ref:
+                ap.error(f"databases.{args.db}.orient_ref is not configured")
+            orient_path = pathlib.Path(expand_db_path(orient_ref))
+        _, notmatched_path, report_path = vsearch_orient_reads(
+            fasta_in,
+            fasta_out,
+            reference=orient_path,
+            notmatched_out=notmatched,
+            tabbed_out=report,
+            threads=args.threads,
+        )
+        print("Oriented FASTA:", fasta_out)
+        print("Notmatched FASTA:", notmatched_path)
+        if report_path:
+            print("Orient report:", report_path)
 
     elif args.cmd == "merge-hits":
         # resolve globs after argparse to keep it cross-platform functional 
@@ -463,6 +536,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main() 
-
 
 

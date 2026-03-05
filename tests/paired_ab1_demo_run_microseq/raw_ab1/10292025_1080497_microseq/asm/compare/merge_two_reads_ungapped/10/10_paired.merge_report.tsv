@@ -1,0 +1,2 @@
+sample_id	overlap_engine	orientation	overlap_len	identity	mismatches	contig_len	merge_status	qualities	merge_warning	high_conflict_mismatches
+10	ungapped	revcomp	612	0.9020	60	1357	merged	present	high_conflict	15

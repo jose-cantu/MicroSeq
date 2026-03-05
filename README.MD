@@ -12,6 +12,7 @@ For version control, please see the changelog I have attached. [CHANGELOG](https
 
 For the docs that go into more detail, such as for example how to use the GUI I have attached it here. [GUI walkthrough](https://jose-cantu.github.io/MicroSeq/gui/)
 You can also just select docs view and it will take you to the landing page for full detailed documentation. =) 
+For the resolution model used to collapse multiple hypotheses into sample-level outcomes, see [Workflow Resolution Funnel](docs/workflow_resolution.md).
 
 ---
 
@@ -39,7 +40,7 @@ You can also just select docs view and it will take you to the landing page for 
 MicroSeq began as an open-source replacement for the narrow slice of Geneious Prime we relied on turning raw Sanger chromatograms into taxonomically annotated sequences but has grown into the only FLOSS pipeline that goes from AB1 or FASTQ input to a BIOM/OTU table in one reproducible run.
 
 * **Dual input.** Accepts raw `.ab1` traces or demultiplexed FASTQ amplicons.
-* **Paired contig assembly (CAP3).** When forward/reverse files exist per sample, run `microseq assembly --mode paired` to auto-pair reads  (customizable via `--fwd-pattern` / `--rev-pattern`), enforce plate wells, pick duplicate policies (error/keep-first/keep-last/merge/keep-separate), and emit per-sample contigs + a `contig_map.tsv` manifest before BLAST. GUI support now includes primer presets, advanced regex entry, well enforcement, duplicate policies, and a pairing preview dialog box. 
+* **Paired contig assembly (CAP3).** When forward/reverse files exist per sample, run `microseq assembly --mode paired` to auto-pair reads  (customizable via `--fwd-pattern` / `--rev-pattern`), enforce plate wells, pick duplicate policies (error/keep-first/keep-last/merge/keep-separate), and emit per-sample contigs plus a blast input manifest file (`asm/blast_inputs.tsv`) before BLAST. GUI support now includes primer presets, advanced regex entry, well enforcement, duplicate policies, and a pairing preview dialog box. 
 * **GreenGenes 2, SILVA, or NCBI one switch.** `--db gg2|silva|ncbi` works in both CLI and GUI; MicroSeq is currently the only tool that ships a GreenGenes 2–indexed classifier.
 * **Immediate downstream compatibility.** `microseq postblast` writes BLAST results directly to BIOM (or flat CSV) so the same file can feed QIIME‑2, phyloseq, or scikit‑bio without hand conversion.
 * **Bench-to-cluster consistency.** A single YAML config runs unchanged on a laptop or under Slurm; thread and memory limits are flags, not hard-coded paths.
@@ -55,7 +56,7 @@ In short: MicroSeq is the only open-source package that ingests raw Sanger or FA
 * **Quality‑control & trimming**
 
   * AB1 -> FASTQ (`microseq ab1-to-fastq`)
-  * FASTQ QC (Phred, length, expected errors, adapters) with Trimmomatic / BioPython (`microseq trim`).
+  * FASTQ QC (Phred, length, adapters) with Trimmomatic / BioPython (`microseq trim`).
 * **De‑novo assembly** using *CAP3* (`microseq assembly`).
 * **Chimera checking + replicate collapse** using vsearch (it's optional to use). It enables reference based chimera filterting and dereplication before BLAST when desired. I am currently working on implmenting library dereplication across all samples, global clustering so OTU clustering across all samples, and finally denovo chimera detection . 
 * **Taxonomic classification**
@@ -66,26 +67,31 @@ In short: MicroSeq is the only open-source package that ingests raw Sanger or FA
 
   * Collapse hits, choose ID/Q‑cov cut‑offs, export BIOM / CSV tables (`microseq postblast`).
 * **Config‑driven defaults** for duplicate‑policy & ID‑normalisers (regex or built‑ins).
+* **Resolution contract + review queue semantics**
+
+  * Paired assembly manifests now use an explicit mapping split:
+    * `hypothesis_map` = `qseqid -> structural_hypothesis_id`
+    * `source_id_map` = `qseqid -> original_source_id`
+  * `payload_entity_n` is tracked separately from `structural_hypothesis_n` so multi-entity payloads are not automatically treated as structural ambiguity.
+  * `asm/blast_inputs.tsv` now uses a stable superset schema across assembler modes and is rewritten after trace/overlap enrichment and after taxonomy resolution so persisted fields match runtime decisions.
+  * Resolution outputs include `resolution_state`, `resolution_reason`, `review_action`, `review_reason`, `advisory_reason`, and normalized `warning_flags` for deterministic queue behavior.
+  * Taxonomy failure modes distinguish `taxonomy_missing` (unusable taxonomy table/schema) from `no_hits` (valid taxonomy table with no sample hits).
+
+* **Trace-QC to resolution plumbing (paired mode)**
+
+  * Trace `FAIL` is sticky and forces queue semantics (`trace_fail`), while prior reasons are retained as warnings for audit context.
+  * `mixture_suspected` can escalate to review when configured/derived.
+  * AB1 keying is symlink-safe for `--link-raw`: trace keys avoid resolved symlink targets; output FASTQ names keep legacy `<stem>` when unique and only fall back to path-derived keys on collisions.
 * **Robust logging**  – session-based logs via $MICROSEQ_SESSION_ID or timestamp fallback; logs can live anywhere you point `MICROSEQ_LOG_DIR`.
 * **TSV normalisation** (`microseq-fix-tsv`) – convert CSV or space‑delimited tables into proper TSV.
 * **Portable**  – pure‑Python (≥3.10) + external binaries already in Conda env (BLAST+, TaxonKit, CAP3).
 * **GUI preview** (`microseq-gui`) – drag‑and‑drop queue, live log pane, progress
   bar with ETA.  Running QC or the full pipeline now writes
-  `qc/trim_summary.tsv` automatically. It includes avg Phred, avg expected errors, and avg MEE per kb, and qeff/label summaries. The window provides **Run QC** and
+  `qc/trim_summary.tsv` automatically. It includes avg Phred, read-length, and primer-trim telemetry columns while merge decisions are driven by overlap-local evidence. The window provides **Run QC** and
   **Full pipeline** buttons to execute the entire workflow (trim -> BLAST ->
   taxonomy -> optional BIOM generation) with a single click.
 
-> Note: Expected errors (EE/MEE) are reported as telemetry for long Sanger reads and should be interpreted in a length-aware way. Prefer EE per kb (avg_mee_per_kb) and the derived Phred-equivalent score (qeff) as QC flags rather than strict hard gates. As a starting heuristic, consider reviewing/inspecting traces (and possibly resequencing) w hen avg_mee_per_kb is > 5 after trimming, especially if species-level BLAST calls are near your identity cutoff or the top-hit margin is small.
-> MicroSeq now assigns a `mee_qc_label` based on avg_mee_per_kb: `clean` (≤2), `watch` (2–5), and `review` (>5). This is simply meant as an extra QC heuristic only. Extra details in how this is used is in the docs. 
-
-Approximate mapping between mean Phred (or qeff) and EE per kb (length-normalized):
-
-| Mean Q | EE per kb (approx) |
-| --- | --- |
-| 30 | 1 |
-| 27 | 2 |
-| 23 | 5 |
-| 20 |10 | 
+> Note: MicroSeq uses overlap-local criteria (end-anchored overlap length/identity and policy-controlled overlap quality) for paired merge confidence in Sanger workflows.
 
 ## Chimera checking and replicate collapse | vsearch 
 
@@ -290,6 +296,7 @@ Below is an index of every sub‑command with a one‑line summary.  Click the �
 | `-o / --output PATH`     |          | `qc/trimmed.fastq`            | Override auto‑named file in `workdir/qc/`.                                 |
 | `--sanger / --no-sanger` |          | `--sanger`                    | Use BioPython’s Sanger‑specific trim as a preference.                      |
 | `--link-raw`             |          |                               | Symlink AB1 traces into `workdir/raw_ab1` instead of copying (saves disk). |
+| `--trace-qc-flags`       |          | `on` / `off` / `auto`         | Override AB1 trace-flag behavior (`auto` uses `trace_qc.enable_flags`).    |
 
 | Flag                    | Required | Example                                  |
 | ----------------------- | -------- | ---------------------------------------- |
@@ -425,9 +432,40 @@ microseq postblast    -b hits_tax.tsv -m meta.tsv -o results.biom --json \
 | Mode              | Trigger                                                                     | Toolchain                                               | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------------- | --------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **General FASTQ** | input is `.fastq` and `--no-sanger` *(default)*                             | **Trimmomatic SE** (`SLIDINGWINDOW:5:20`, `MINLEN:200`) | Reads whose 5‑bp window drops below Q20 or end < 200 bp are discarded; survivors go to `workdir/qc/trimmed.fastq`.                                                                                                                                                                                                                                                                                                                                                    |
-| **Sanger traces** | one or more `.ab1` chromatograms **or** any FASTQ processed with `--sanger` | **BioPython + MicroSeq**                                | 1. **AB1 -> FASTQ** (`ab1_to_fastq.py`) – one FASTQ per trace.<br>2. **Dynamic sliding‑window trim** (5 bp window, Q ≥ 20) per read.<br>3. Per‑read Phred, length & per‑file averages -> `*_avg_qual.txt`.<br>4. File passes if avg Q ≥ 20 -> `passed_qc_fastq/`; otherwise goes to `failed_qc_fastq/` with its stats.<br>5. Combined TSV summarises file‑level metrics.<br>6. **Passed FASTQs merged** into `workdir/qc/trimmed.fasta` for downstream assembly & BLAST. |
+| **Sanger traces** | one or more `.ab1` chromatograms **or** any FASTQ processed with `--sanger` | **BioPython + MicroSeq**                                | 1. **AB1 -> FASTQ** (`ab1_to_fastq.py`) – one FASTQ per trace.<br>2. **Dynamic sliding‑window trim** (5 bp window, Q ≥ 20) per read.<br>3. Per‑read Phred, length & per‑file averages -> `*_avg_qual.txt`.<br>4. File passes if avg Q ≥ 20 -> `passed_qc_fastq/`; otherwise goes to `failed_qc_fastq/` with its stats.<br>5. Combined TSV summarises file‑level metrics, plus trace QC fields (S/N tags when present, mixed‑base fraction, mixed‑peak and SNR metrics) for AB1 inputs.<br>6. **Passed FASTQs merged** into `workdir/qc/trimmed.fasta` for downstream assembly & BLAST. |
 
 *Why two paths?* AB1 chromatograms carry single‑end Sanger qualities that behave differently from generic FASTQ scores; the lightweight BioPython route avoids over‑trimming while still filtering low‑quality tails.
+
+### Trace QC configuration (AB1 only)
+
+MicroSeq always reports trace metrics (mixed-base fraction, peak/noise/SNR summaries, vendor tags when present) in `qc/trim_summary.tsv`.
+Threshold-based PASS/WARN/FAIL flags are **opt-in**. Enable them in `config/config.yaml`
+or force behavior per run with `microseq trim --trace-qc-flags on|off|auto` (`auto` defers to config):
+
+```yaml
+trace_qc:
+  enable_flags: true
+  mixed_ratio_thresh: 0.25
+  mixed_frac_fail: 0.10
+  min_peak_height_for_mixed: 100.0
+  snr_mode: global_mad  # or basecall_aware
+  snr_warn_global_mad: 12.0
+  snr_fail_global_mad: 7.0
+  snr_warn_basecall_aware: 2.0
+  snr_fail_basecall_aware: 1.3
+  low_snr_fail_core_pcon_min: 20.0
+  low_snr_fail_avg_q_min: 20.0
+  low_snr_missing_quality_policy: warn_if_quality_missing  # or fail_if_snr_below_hard_floor
+  snr_fail_hard: 0.8
+  peak_window: 8
+```
+
+If `enable_flags` is `false`, `trace_qc_flags` and `trace_qc_status` remain empty while metrics are still reported.
+When flags are enabled and AB1 trace primitives are missing (`DATA*`/`PLOC*`) or critical metrics are undefined,
+MicroSeq emits deterministic missing-data flags and sets `trace_qc_status=NA`.
+Trace QC TSV now includes `trace_snr_global_mad`, `trace_snr_basecall_aware`, and `trace_snr_mode` in addition to selected `trace_snr` for calibration across runs.
+If you parse `trim_summary.tsv` by column position, update parsers to use header names because new trace-QC columns were appended.
+When low SNR is detected without supporting quality evidence, MicroSeq emits `LOW_SNR_NO_QUALITY_SUPPORT` (WARN), unless `low_snr_missing_quality_policy` requests hard-fail behavior below `snr_fail_hard`.
 
 ## CAP3 (microseq assembly)
 
@@ -456,6 +494,7 @@ microseq assembly --mode paired \
 ```
 
 The same paired logic is available in the end-to-end pipeline via `run_full_pipeline(..., mode="paired")`; The GUI now supports single vs paired assembly, primer presets, advanced regex overrides, duplicate policy selection, well enforcement, and a pairing preview that summarizes detected primer tokens and missing mates/pairs before running CAP3. 
+The GUI output pane now also includes a dedicated **Compare Assemblers** tab that renders `asm/compare_assemblers.tsv` whenever assembler comparison is run.
 
 ** Paired assembly quick tutorial**
 
@@ -509,5 +548,3 @@ The Conda environment downloads `vsearch`, distributed under GPL v3 (see `LICENS
 If you use MicroSeq in a publication, please cite me! =) 
 
 > ---
-
-

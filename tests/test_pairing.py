@@ -3,6 +3,7 @@ from __future__ import annotations  # will help me with using typehints in my co
 import os 
 import stat 
 import subprocess
+import types
 from pathlib import Path 
 
 import pytest
@@ -101,8 +102,8 @@ def test_assemble_pairs_creates_contigs(tmp_path: Path, monkeypatch: pytest.Monk
     out_dir = tmp_path / "output"
     in_dir.mkdir()
 
-    (in_dir / "S1_27F.fa").write_text(">a\nA\n", encoding="utf-8")
-    (in_dir / "S1_1492R.fa").write_text(">b\nA\n", encoding="utf-8")
+    (in_dir / "S1_27F.fasta").write_text(">a\nA\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">b\nA\n", encoding="utf-8")
 
     monkeypatch.setattr(
         paired_assembly,
@@ -110,14 +111,24 @@ def test_assemble_pairs_creates_contigs(tmp_path: Path, monkeypatch: pytest.Monk
         lambda: {"tools": {"cap3": "/bin/true"}},
     )
 
-    def fake_run(cmd, check, cwd, stderr, text):
+    def fake_run(cmd, check, cwd=None, **kwargs):
         """Stub CAP3 invocation by writing the expected contig output."""
+
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
+            class Result:
+                returncode = 0
+                stdout = "CAP3 test"
+                stderr = ""
+
+            return Result()
 
         contig = Path(cwd, f"{cmd[1]}.cap.contigs")
         contig.write_text(">contig\nA\n", encoding="utf-8")
 
         class Result:
             returncode = 0
+            stdout = ""
+            stderr = ""
 
         return Result()
 
@@ -136,9 +147,9 @@ def test_assemble_pairs_keep_separate(tmp_path: Path, monkeypatch: pytest.Monkey
     out_dir = tmp_path / "output"
     in_dir.mkdir()
 
-    forward1 = in_dir / "S1_27F.fa"
-    forward2 = in_dir / "S1_8F.fa"
-    reverse = in_dir / "S1_1492R.fa"
+    forward1 = in_dir / "S1_27F.fasta"
+    forward2 = in_dir / "S1_8F.fasta"
+    reverse = in_dir / "S1_1492R.fasta"
 
     forward1.write_text(">a\nA\n", encoding="utf-8")
     forward2.write_text(">b\nA\n", encoding="utf-8")
@@ -152,8 +163,16 @@ def test_assemble_pairs_keep_separate(tmp_path: Path, monkeypatch: pytest.Monkey
 
     calls: list[tuple[tuple[str, ...], Path]] = []
 
-    def fake_run(cmd, check, cwd, stderr, text):  # noqa: D401
+    def fake_run(cmd, check, cwd=None, **kwargs):  # noqa: D401
         """Record CAP3 invocations and synthesize contig outputs."""
+
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
+            class Result:
+                returncode = 0
+                stdout = "CAP3 test"
+                stderr = ""
+
+            return Result()
 
         calls.append((tuple(cmd), Path(cwd)))
         contig = Path(cwd, f"{cmd[1]}.cap.contigs")
@@ -161,6 +180,8 @@ def test_assemble_pairs_keep_separate(tmp_path: Path, monkeypatch: pytest.Monkey
 
         class Result:
             returncode = 0
+            stdout = ""
+            stderr = ""
 
         return Result()
 
@@ -184,6 +205,57 @@ def test_assemble_pairs_keep_separate(tmp_path: Path, monkeypatch: pytest.Monkey
     assert {cwd for _, cwd in calls} == set(expected_dirs)
 
 
+def test_assemble_pairs_non_singleton_merge_fallback_logs_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+
+    (in_dir / "S1_27F.fasta").write_text(">a\nA\n>b\nA\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">c\nA\n>d\nA\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        paired_assembly,
+        "load_config",
+        lambda: {
+            "tools": {"cap3": "/bin/true"},
+            "overlap_eval": {
+                "min_overlap": 100,
+                "min_identity": 0.8,
+                "min_quality": 20.0,
+                "quality_mode": "warning",
+                "cap3_validate_pair_support": True,
+            },
+        },
+    )
+
+    def fake_run(cmd, check, cwd=None, **kwargs):
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
+            class Result:
+                returncode = 0
+                stdout = "CAP3 test"
+                stderr = ""
+
+            return Result()
+
+        contig = Path(cwd, f"{cmd[1]}.cap.contigs")
+        contig.write_text(">contig\nA\n", encoding="utf-8")
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(paired_assembly.subprocess, "run", fake_run)
+
+    paired_assembly.assemble_pairs(in_dir, out_dir)
+    meta = (out_dir / "cap3_run_metadata.txt").read_text(encoding="utf-8")
+    assert "merge_two_reads_skipped_non_singleton" in meta
+    assert "f_n=2" in meta
+    assert "r_n=2" in meta
+
+
 
 def test_cli_paired_mode(tmp_path: Path):
     """
@@ -199,8 +271,8 @@ def test_cli_paired_mode(tmp_path: Path):
     in_dir.mkdir() 
 
     # Create dummy input files 
-    (in_dir / "S1_27F.fa").write_text(">a\nA\n", encoding="utf-8")
-    (in_dir / "S1_1492R.fa").write_text(">b\nA\n", encoding="utf-8")
+    (in_dir / "S1_27F.fasta").write_text(">a\nA\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">b\nA\n", encoding="utf-8")
 
     # Create a real, exectuble dummy 'cap3' script using standard shell command. 
     fake_cap3 = tmp_path / "cap3" 
@@ -212,8 +284,10 @@ def test_cli_paired_mode(tmp_path: Path):
     fake_cap3.chmod(fake_cap3.stat().st_mode | stat.S_IEXEC) 
 
     # Modify environment variables so test subprocess can fine the fake 'cap3'.
-    env = os.environ.copy() 
+    env = os.environ.copy()
     env["PATH"] = f"{tmp_path}{os.pathsep}{env['PATH']}"
+    repo_src = Path(__file__).resolve().parents[1] / "src"
+    env["PYTHONPATH"] = f"{repo_src}{os.pathsep}{env.get('PYTHONPATH', '')}".rstrip(os.pathsep)
 
     # Run the actual CLI command via subprocess. 
     res = subprocess.run( 
@@ -239,3 +313,450 @@ def test_cli_paired_mode(tmp_path: Path):
 
 
 
+def test_assemble_pairs_runs_cap3_fallback_on_nonmerged_fast_merge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+
+    (in_dir / "S1_27F.fasta").write_text(">a\nA\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">b\nA\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        paired_assembly,
+        "load_config",
+        lambda: {
+            "tools": {"cap3": "/bin/true"},
+            "overlap_eval": {
+                "min_overlap": 100,
+                "min_identity": 0.8,
+                "min_quality": 20.0,
+                "quality_mode": "warning",
+            },
+        },
+    )
+
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(cmd, check, cwd=None, **kwargs):
+        calls.append(tuple(cmd))
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
+            class Result:
+                returncode = 0
+                stdout = "CAP3 test"
+                stderr = ""
+
+            return Result()
+
+        contig = Path(cwd, f"{cmd[1]}.cap.contigs")
+        contig.write_text(">contig\nA\n", encoding="utf-8")
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(paired_assembly.subprocess, "run", fake_run)
+
+    paths = paired_assembly.assemble_pairs(in_dir, out_dir)
+    assert paths
+    assert any(len(cmd) > 1 and cmd[1].endswith("_paired.fasta") for cmd in calls)
+
+
+def test_assemble_pairs_blocking_quality_low_skips_cap3_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+
+    (in_dir / "S1_27F.fasta").write_text(">a\n" + "A" * 120 + "\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">b\n" + "A" * 120 + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        paired_assembly,
+        "load_config",
+        lambda: {
+            "tools": {"cap3": "/bin/true"},
+            "overlap_eval": {
+                "min_overlap": 100,
+                "min_identity": 0.8,
+                "min_quality": 20.0,
+                "quality_mode": "blocking",
+            },
+        },
+    )
+
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(cmd, check, cwd=None, **kwargs):
+        calls.append(tuple(cmd))
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
+            class Result:
+                returncode = 0
+                stdout = "CAP3 test"
+                stderr = ""
+
+            return Result()
+
+        raise AssertionError("CAP3 fallback should not run for blocking quality_low")
+
+    monkeypatch.setattr(paired_assembly.subprocess, "run", fake_run)
+
+    paths = paired_assembly.assemble_pairs(in_dir, out_dir)
+    assert len(paths) == 0
+    assert all(len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3" for cmd in calls)
+
+
+def test_assemble_pairs_runs_cap3_fallback_on_ambiguous_overlap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+
+    (in_dir / "S1_27F.fasta").write_text(">a\n" + "A" * 120 + "\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">b\n" + "A" * 120 + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        paired_assembly,
+        "load_config",
+        lambda: {
+            "tools": {"cap3": "/bin/true"},
+            "overlap_eval": {
+                "min_overlap": 100,
+                "min_identity": 0.8,
+                "min_quality": 20.0,
+                "quality_mode": "warning",
+                "ambiguity_identity_delta": 0.0,
+                "cap3_validate_pair_support": False,
+            },
+        },
+    )
+
+    calls: list[tuple[str, ...]] = []
+
+    def fake_merge_two_reads(**_kwargs):
+        report = types.SimpleNamespace(
+            orientation="forward",
+            overlap_len=120,
+            identity=0.99,
+            merge_status="ambiguous_overlap",
+            high_conflict_mismatches=0,
+        )
+        return None, report
+
+    def fake_run(cmd, check, cwd=None, **kwargs):
+        calls.append(tuple(cmd))
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
+            class Result:
+                returncode = 0
+                stdout = "CAP3 test"
+                stderr = ""
+
+            return Result()
+        contig = Path(cwd, f"{cmd[1]}.cap.contigs")
+        contig.write_text(">contig\n" + "A" * 120 + "\n", encoding="utf-8")
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(paired_assembly, "merge_two_reads", fake_merge_two_reads)
+    monkeypatch.setattr(paired_assembly.subprocess, "run", fake_run)
+
+    paths = paired_assembly.assemble_pairs(in_dir, out_dir)
+    assert paths
+    assert any(len(cmd) > 1 and cmd[1].endswith("_paired.fasta") for cmd in calls)
+
+
+def test_assemble_pairs_high_conflict_route_runs_cap3(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+
+    fwd_path = in_dir / "S1_27F.fasta"
+    rev_path = in_dir / "S1_1492R.fasta"
+    fwd_seq = "A" * 120
+    rev_seq = "A" * 119 + "T"
+    fwd_path.write_text(f">a\n{fwd_seq}\n", encoding="utf-8")
+    rev_path.write_text(f">b\n{rev_seq}\n", encoding="utf-8")
+
+    from Bio.Seq import Seq
+    from Bio.SeqRecord import SeqRecord
+    from Bio import SeqIO
+    fq = SeqRecord(Seq(fwd_seq), id="a", description="")
+    rq = SeqRecord(Seq(rev_seq), id="b", description="")
+    fq.letter_annotations["phred_quality"] = [40] * len(fwd_seq)
+    rq.letter_annotations["phred_quality"] = [40] * len(rev_seq)
+    SeqIO.write([fq], Path(f"{fwd_path}.qual"), "qual")
+    SeqIO.write([rq], Path(f"{rev_path}.qual"), "qual")
+
+    monkeypatch.setattr(
+        paired_assembly,
+        "load_config",
+        lambda: {
+            "tools": {"cap3": "/bin/true"},
+            "overlap_eval": {
+                "min_overlap": 100,
+                "min_identity": 0.8,
+                "min_quality": 20.0,
+                "quality_mode": "warning",
+                "high_conflict_q_threshold": 30,
+                "high_conflict_action": "route_cap3",
+                "cap3_validate_pair_support": False,
+            },
+        },
+    )
+
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(cmd, check, cwd=None, **kwargs):
+        calls.append(tuple(cmd))
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
+            class Result:
+                returncode = 0
+                stdout = "CAP3 test"
+                stderr = ""
+
+            return Result()
+
+        contig = Path(cwd, f"{cmd[1]}.cap.contigs")
+        contig.write_text(">contig\n" + "A" * 121 + "\n", encoding="utf-8")
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(paired_assembly.subprocess, "run", fake_run)
+
+    paths = paired_assembly.assemble_pairs(in_dir, out_dir)
+    assert paths
+    assert any(len(cmd) > 1 and cmd[1].endswith("_paired.fasta") for cmd in calls)
+
+
+def test_assemble_pairs_cap3_validation_missing_ace_marks_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+
+    (in_dir / "S1_27F.fasta").write_text(">a\n" + "A" * 120 + "\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">b\n" + "C" * 120 + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        paired_assembly,
+        "load_config",
+        lambda: {
+            "tools": {"cap3": "/bin/true"},
+            "overlap_eval": {
+                "min_overlap": 200,
+                "min_identity": 1.0,
+                "min_quality": 20.0,
+                "quality_mode": "warning",
+                "cap3_validate_pair_support": True,
+            },
+        },
+    )
+
+    def fake_run(cmd, check, cwd=None, **kwargs):
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
+            class Result:
+                returncode = 0
+                stdout = "CAP3 test"
+                stderr = ""
+
+            return Result()
+
+        contig = Path(cwd, f"{cmd[1]}.cap.contigs")
+        contig.write_text(">contig\n" + "A" * 120 + "\n", encoding="utf-8")
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(paired_assembly.subprocess, "run", fake_run)
+
+    paths = paired_assembly.assemble_pairs(in_dir, out_dir)
+    assert len(paths) == 1
+    marker = out_dir / "S1" / "S1_paired.cap3_validation.txt"
+    assert marker.exists()
+    assert marker.read_text(encoding="utf-8").strip() == "unknown"
+    assert (out_dir / "S1" / "S1_paired.fasta.cap.contigs").exists()
+
+
+def test_assemble_pairs_cap3_validation_verified(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+
+    fwd = "A" * 120
+    rev = "T" * 120
+    (in_dir / "S1_27F.fasta").write_text(f">a\n{fwd}\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(f">b\n{rev}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        paired_assembly,
+        "load_config",
+        lambda: {
+            "tools": {"cap3": "/bin/true"},
+            "overlap_eval": {
+                "min_overlap": 200,
+                "min_identity": 1.0,
+                "min_quality": 20.0,
+                "quality_mode": "warning",
+                "cap3_validate_pair_support": True,
+            },
+        },
+    )
+
+    def fake_run(cmd, check, cwd=None, **kwargs):
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
+            class Result:
+                returncode = 0
+                stdout = "CAP3 test"
+                stderr = ""
+
+            return Result()
+
+        contig = Path(cwd, f"{cmd[1]}.cap.contigs")
+        contig.write_text(">contig\n" + "A" * 80 + "\n", encoding="utf-8")
+        ace = Path(cwd, f"{cmd[1]}.cap.ace")
+        ace.write_text(
+            "AS 1 2\n"
+            "CO Contig1 80 2 1 U\n"
+            "AF a U 1\n"
+            "AF b C 1\n",
+            encoding="utf-8",
+        )
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(paired_assembly.subprocess, "run", fake_run)
+
+    paths = paired_assembly.assemble_pairs(in_dir, out_dir)
+    assert len(paths) == 1
+    marker = out_dir / "S1" / "S1_paired.cap3_validation.txt"
+    assert marker.exists()
+    assert marker.read_text(encoding="utf-8").strip() == "verified"
+
+
+def test_assemble_pairs_cap3_validation_accepts_clipped_contig_when_ace_membership_present(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+
+    (in_dir / "S1_27F.fasta").write_text(">a\n" + "A" * 120 + "\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">b\n" + "T" * 120 + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        paired_assembly,
+        "load_config",
+        lambda: {
+            "tools": {"cap3": "/bin/true"},
+            "overlap_eval": {
+                "min_overlap": 200,
+                "min_identity": 1.0,
+                "min_quality": 20.0,
+                "quality_mode": "warning",
+                "cap3_validate_pair_support": True,
+            },
+        },
+    )
+
+    def fake_run(cmd, check, cwd=None, **kwargs):
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
+            class Result:
+                returncode = 0
+                stdout = "CAP3 test"
+                stderr = ""
+
+            return Result()
+
+        contig = Path(cwd, f"{cmd[1]}.cap.contigs")
+        contig.write_text(">contig\n" + "A" * 40 + "\n", encoding="utf-8")
+        ace = Path(cwd, f"{cmd[1]}.cap.ace")
+        ace.write_text(
+            "AS 1 2\n"
+            "CO Contig1 40 2 1 U\n"
+            "AF a U 1\n"
+            "AF b C 1\n",
+            encoding="utf-8",
+        )
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(paired_assembly.subprocess, "run", fake_run)
+
+    paths = paired_assembly.assemble_pairs(in_dir, out_dir)
+    assert len(paths) == 1
+    marker = out_dir / "S1" / "S1_paired.cap3_validation.txt"
+    assert marker.exists()
+    assert marker.read_text(encoding="utf-8").strip() == "verified"
+
+
+def test_assemble_pairs_cap3_validation_unknown_keeps_contig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "output"
+    in_dir.mkdir()
+
+    (in_dir / "S1_27F.fasta").write_text(">a\n" + "A" * 120 + "\n", encoding="utf-8")
+    (in_dir / "S1_1492R.fasta").write_text(">b\n" + "T" * 120 + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        paired_assembly,
+        "load_config",
+        lambda: {
+            "tools": {"cap3": "/bin/true"},
+            "overlap_eval": {
+                "min_overlap": 200,
+                "min_identity": 1.0,
+                "min_quality": 20.0,
+                "quality_mode": "warning",
+                "cap3_validate_pair_support": True,
+            },
+        },
+    )
+
+    def fake_run(cmd, check, cwd=None, **kwargs):
+        if len(cmd) >= 3 and cmd[1] == "list" and cmd[2] == "cap3":
+            class Result:
+                returncode = 0
+                stdout = "CAP3 test"
+                stderr = ""
+
+            return Result()
+
+        contig = Path(cwd, f"{cmd[1]}.cap.contigs")
+        contig.write_text(">contig\n" + "A" * 80 + "\n", encoding="utf-8")
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(paired_assembly.subprocess, "run", fake_run)
+
+    paths = paired_assembly.assemble_pairs(in_dir, out_dir)
+    assert len(paths) == 1
+    marker = out_dir / "S1" / "S1_paired.cap3_validation.txt"
+    assert marker.exists()
+    assert marker.read_text(encoding="utf-8").strip() == "unknown"
+    assert (out_dir / "S1" / "S1_paired.fasta.cap.contigs").exists()

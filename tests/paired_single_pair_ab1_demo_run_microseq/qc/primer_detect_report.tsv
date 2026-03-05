@@ -1,0 +1,3 @@
+file	reads_scanned	reads_with_primer_hit	hit_rate	avg_mismatches	avg_offset	matched_primers
+A+_1492R_2026-01-29_E07_trimmed.fastq	1	0	0.0000	0.00	0.00	-
+A+_27F_2026-01-29_C07_trimmed.fastq	1	0	0.0000	0.00	0.00	-

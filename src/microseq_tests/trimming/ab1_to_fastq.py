@@ -15,8 +15,65 @@ one path per created FASTQ file.
 
 from __future__ import annotations 
 from pathlib import Path
-from typing import List 
+from typing import List, Iterable
+import hashlib
+from collections import Counter
 from Bio import SeqIO 
+
+
+def _is_pipeline_artifact_ab1(ab1_path: Path, input_root: Path) -> bool:
+    """True when an AB1 belongs to a previous ``*_microseq/raw_ab1`` output tree."""
+    try:
+        parts = ab1_path.relative_to(input_root).parts
+    except ValueError:
+        return False
+    for i in range(len(parts) - 1):
+        if parts[i].endswith("_microseq") and parts[i + 1] == "raw_ab1":
+            return True
+    return False
+
+
+def _iter_input_ab1_paths(input_dir: Path) -> Iterable[Path]:
+    for ab1 in sorted(input_dir.rglob("*.ab1")):
+        if _is_pipeline_artifact_ab1(ab1, input_dir):
+            continue
+        yield ab1
+
+
+def ab1_rel_key(ab1_path: Path, input_root: Path) -> str:
+    """Return a collision-safe key based on AB1 path relative to the staging/input root.
+
+    Important: do not resolve symlinks here, because `--link-raw` may point outside
+    the staging tree and `.resolve()` would break `relative_to(...)`.
+    """
+    rel = ab1_path.relative_to(input_root)
+    return "__".join(rel.with_suffix("").parts)
+
+
+
+def _short_rel_hash(ab1_path: Path, input_root: Path, size: int = 8) -> str:
+    rel = ab1_path.relative_to(input_root)
+    return hashlib.sha1(rel.as_posix().encode("utf-8")).hexdigest()[:size]
+
+
+def build_ab1_output_key_map(input_dir: Path) -> dict[Path, str]:
+    """Map each AB1 path to a stable output key.
+
+    Policy: keep legacy stem-based IDs when unique; only disambiguate collisions
+    by falling back to staging-relative path keys.
+    """
+    ab1_paths = list(_iter_input_ab1_paths(input_dir))
+    stem_counts = Counter(p.stem for p in ab1_paths)
+
+    keys: dict[Path, str] = {}
+    used: dict[str, Path] = {}
+    for ab1 in ab1_paths:
+        key = ab1.stem if stem_counts[ab1.stem] == 1 else ab1_rel_key(ab1, input_dir)
+        if key in used and used[key] != ab1:
+            key = f"{key}__{_short_rel_hash(ab1, input_dir)}"
+        used[key] = ab1
+        keys[ab1] = key
+    return keys
 
 def ab1_folder_to_fastq(
         input_dir: str | Path, 
@@ -48,10 +105,11 @@ def ab1_folder_to_fastq(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True) 
 
-    out_files: list[Path] = [] 
+    out_files: list[Path] = []
+    key_map = build_ab1_output_key_map(input_dir)
 
-    for ab1 in sorted(input_dir.rglob("*.ab1")):
-        out_fq = output_dir / f"{ab1.stem}.fastq"
+    for ab1 in _iter_input_ab1_paths(input_dir):
+        out_fq = output_dir / f"{key_map[ab1]}.fastq"
         if out_fq.exists() and not overwrite:
             out_files.append(out_fq)
             continue 
@@ -61,5 +119,4 @@ def ab1_folder_to_fastq(
         out_files.append(out_fq) 
 
     return out_files 
-
 

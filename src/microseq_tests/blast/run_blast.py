@@ -49,6 +49,57 @@ def header_row() -> str:
     """Returns the TSV header line for BLAST hits including final newline. """ 
     return "\t".join(FIELD_LIST) + "\n"
 
+
+def _build_empty_query_hint(query_path: Path) -> str:
+    """Return contextual hint text when a BLAST query contains zero records."""
+    hint_lines: list[str] = []
+    blast_inputs_tsv = query_path.with_suffix(".tsv")
+    if blast_inputs_tsv.exists():
+        try:
+            df = pd.read_csv(blast_inputs_tsv, sep="\t")
+        except Exception:
+            df = pd.DataFrame()
+
+        if not df.empty:
+            if "reason" in df.columns:
+                reason_counts = (
+                    df["reason"]
+                    .fillna("unknown")
+                    .astype(str)
+                    .value_counts()
+                    .to_dict()
+                )
+                hint_lines.append(
+                    "blast_inputs reasons: "
+                    + ", ".join(f"{k}={v}" for k, v in reason_counts.items())
+                )
+
+            if "selected_status" in df.columns:
+                status_counts = (
+                    df["selected_status"]
+                    .fillna("")
+                    .astype(str)
+                    .replace("", "unknown")
+                    .value_counts()
+                    .to_dict()
+                )
+                hint_lines.append(
+                    "selected statuses: "
+                    + ", ".join(f"{k}={v}" for k, v in status_counts.items())
+                )
+
+    if not hint_lines:
+        hint_lines.append("No blast_inputs.tsv summary was found alongside the query FASTA")
+
+    hint_lines.append(
+        "If using paired selected assembler mode, this usually means the chosen backend produced no payload contigs "
+        "(for example ambiguous_overlap / identity_low)."
+    )
+    hint_lines.append(
+        "Open asm/compare_assemblers.tsv and asm/blast_inputs.tsv to confirm which statuses/reasons filtered records."
+    )
+    return " | ".join(hint_lines)
+
 # progress helper: tail the temporary TSV once per second
 def _progress_tail(tmp_path: Path, total: int, callback):
     """Background reader that counts unique qseqid already written."""
@@ -109,8 +160,9 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *, options: Bl
     if total == 0:    # input is FASTQ 
         total = sum(1 for _ in SeqIO.parse(q, "fastq")) # blast now accepts fastq on the offchance the user wants to use fastq instead of fasta.....  
     if total == 0:
+        hint = _build_empty_query_hint(q)
         raise ValueError(
-            f"{q} contains no FASTA/FASTQ records - nothing to BLAST" 
+            f"{q} contains no FASTA/FASTQ records - nothing to BLAST. {hint}"
             )
     # ------ parent tqdm bar auto-callback -------------------- 
     parent_bar = getattr(_tls, "current", None)
@@ -146,7 +198,7 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *, options: Bl
          "-num_threads", str(threads),
          ])
     # debugging to make sure it works 
-    print("BLAST CMD:", " ".join(cmd)) 
+    L.info("BLAST CMD: %s", " ".join(cmd)) 
 
     # merge env here so BLASTDB_LMDB_MAP_SIZE is kept 
     env = os.environ.copy() # start from full parent env 
@@ -342,6 +394,5 @@ def run_blast(query_fa: PathLike, db_key: str, out_tsv: PathLike, *, options: Bl
                len(pass_ids), len(missing_ids),
                log_missing, full_path, hits_path)      
     
-
 
 
