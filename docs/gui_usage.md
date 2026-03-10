@@ -62,11 +62,40 @@ MicroSeq writes **runtime logs** and **pipeline artifacts** to different places:
 
 * Logs: `logs/microseq_<session>.log` (and `logs/microseq_latest.log` symlink)
 * Run outputs: your selected output/work directory (for example `*_microseq/`) containing artifacts such as `qc/`, `asm/`, `reads.fasta`, `hits.tsv`, and `hits_tax.tsv`
+* Canonical output reference: [Output Artifacts Reference](output_artifacts.md)
 
 Examples:
 
 * CAP3 subprocess progress emitted through Python logging appears in `logs/microseq_<session>.log`.
 * CAP3 per-sample captured streams remain in run artifacts like `asm/<sample>/cap3.stdout.txt` and `asm/<sample>/cap3.stderr.txt` when produced by compare/selection paths.
+
+### Abbreviated paired single-run output tree
+
+For a complete “what each file means” table, use [Output Artifacts Reference](output_artifacts.md). The shortened tree below is a quick GUI-oriented landmark map:
+
+```text
+paired_single_pair_ab1_demo_run_microseq/
+├── raw_ab1/
+├── raw_fastq/
+├── passed_qc_fastq/
+├── failed_qc_fastq/
+├── qc/
+│   ├── trim_summary.tsv
+│   ├── pairing_report.tsv
+│   ├── overlap_audit.tsv
+│   ├── review_queue.tsv
+│   └── trimmed.fasta
+├── reads.fasta
+├── asm/
+│   ├── assembly_summary.tsv
+│   ├── blast_inputs.fasta
+│   ├── blast_inputs.tsv
+│   ├── compare_assemblers.tsv
+│   ├── compare/
+│   └── selection_trace/
+├── hits.tsv
+└── hits_tax.tsv
+```
 
 ## Select Input 
 * First you click Browse...and pick in this case a folder with ab1 files. In order to access folder selection it's impertative you click cancel first then choose folder will pop up for it. Then you can go down into the nested folders until you find the desired folder which directly in that file houses the .ab1 files you want to blast against. You can also type in the path in the search bar as well. 

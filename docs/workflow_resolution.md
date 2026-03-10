@@ -7,6 +7,8 @@ title: Workflow Resolution Funnel
 
 MicroSeq now follows a **4-stage funnel** so the default user view stays simple while preserving audit-grade details.
 
+For a consolidated file-by-file output table across QC/assembly/BLAST/postblast, see [Output Artifacts Reference](output_artifacts.md).
+
 ## 1) Ingest (Trace QC)
 
 MicroSeq computes AB1 trace-QC metrics (signal/noise, mixed-signal proxies, vendor tags when present).

@@ -7,6 +7,7 @@ title: MicroSeq Docs
 > **MicroSeq GUI preview** click and run Sanger Software tool. 
 
 * [GUI Walkthrough](gui_usage.md)
+* [Output Artifacts Reference](output_artifacts.md)
 * [Paired CAP3 Assembly Tutorial](paired_assembly.md)
 * [VSEARCH Chimera & Replicate Filters](vsearch_filters.md) 
 * [CLI Workflows](cli_workflow_tutorial.md)
@@ -18,5 +19,4 @@ title: MicroSeq Docs
 # launch the GUI from MicroSeq conda env 
 microseq-gui 
 ```
-
 
