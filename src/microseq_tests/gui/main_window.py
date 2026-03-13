@@ -543,19 +543,23 @@ class PairingPreviewDialog(QDialog):
             for candidate in candidates
             for issue in candidate.issues
         )
+        has_issues = any(candidate.issues for candidate in candidates)
+
         if self._enforce_same_well and mismatch:
+            pairing_line = "Pairs will not assemble until well codes match for each sample ID."
+        elif has_issues:
             pairing_line = (
-                "Pairs will not assemble until well codes match for each sample ID.\n"
+                "Pairs will still assemble, but naming is non-canonical; "
+                "suggested renames improve reproducibility."
             )
         else:
-            pairing_line = (
-                "Pairs will still assemble, but naming is non-canonical; suggested renames improve reproducibility.\n"
-            )
-        self._header.setText(
-            f"{summary}\n"
-            f"{pairing_line}"
-            f"Suggestions: {suggestions}"
-        )
+            pairing_line = "Pairing labels look canonical for the detected files."
+
+        header_lines = [summary, pairing_line]
+        if suggestions.strip() and has_issues:
+            header_lines.append(f"Suggestions: {suggestions}")
+
+        self._header.setText("\n".join(header_lines))
 
     def _populate_table(self) -> None:
         self.table.setRowCount(0)

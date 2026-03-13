@@ -303,3 +303,16 @@ def test_build_selected_blast_inputs_reconciles_missing_payload_file_to_none(tmp
     assert row["blast_payload"] == "no_payload"
     assert row["payload_kind"] == "none"
     assert row["reason"] == "payload_missing_or_empty"
+
+
+def test_suggest_pairing_patterns_scans_ab1_inputs(tmp_path: Path) -> None:
+    """Suggestion helper should inspect AB1 filenames, not only FASTA files."""
+
+    (tmp_path / "A+_27F_2026-01-29_C07.ab1").write_text("", encoding="utf-8")
+    (tmp_path / "A+_1492R_2026-01-29_E07.ab1").write_text("", encoding="utf-8")
+
+    suggestions = pipeline._suggest_pairing_patterns(tmp_path)
+
+    assert "No primer-like tokens detected" not in suggestions
+    assert "--fwd-pattern" in suggestions
+    assert "--rev-pattern" in suggestions

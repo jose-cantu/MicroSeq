@@ -772,7 +772,7 @@ def _suggest_pairing_patterns(directory: Path) -> str:
     rev_tokens: Counter[str] = Counter() 
     names: list[str] = [] 
 
-    for fp in sorted(directory.glob("*.fasta")):
+    for fp in iter_seq_files(directory):
         names.append(fp.name)
         for tok in token_rx.findall(fp.name):
             tok = tok.upper()
