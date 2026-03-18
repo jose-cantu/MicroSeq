@@ -618,6 +618,8 @@ Overlap feasibility: mean Phred in the overlap can be used as a gate or warning 
 
 Consensus resolution: when F and R disagree, quality-guided selection reduces error propagation into the merged contig (and CAP3 itself is explicitly quality-aware for overlap scoring and consensus).
 
+Process log contract: compare rows now write deterministic per-row process logs named with both sample + assembler labels (collision-safe suffixing if needed). In the GUI Details panel for Compare rows, use **Open tool stdout/stderr** to open backend process artifacts and **Open selection trace** to inspect winner-ranking decisions; for older runs the GUI falls back to `cap3_stdout_path` / `cap3_stderr_path`.
+
 References used here in my thinking. 
 
 Huang X, Madan A. CAP3: A DNA sequence assembly program. Genome Research (1999).
@@ -638,10 +640,4 @@ Ewing B, Hillier L, Wendl MC, Green P. Base-calling of automated sequencer trace
 
 Ewing B, Green P. Base-calling of automated sequencer traces using phred. II. Error probabilities. Genome Research (1998)
 
-<<<<<<< ours
 
-
-- Process log contract: compare rows now write deterministic per-row process logs named with both sample + assembler labels (collision-safe suffixing if needed). In the GUI Details panel for Compare rows, use **Open tool stdout/stderr** to open backend process artifacts and **Open selection trace** to inspect winner-ranking decisions; for older runs the GUI falls back to `cap3_stdout_path` / `cap3_stderr_path`.
-
-=======
->>>>>>> theirs
