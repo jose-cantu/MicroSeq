@@ -1,2 +1,0 @@
-sample_id	review_action	review_reason	advisory_reason	warning_flags	structural_hypothesis_n	hypotheses_with_hits_n	missing_hits_n	top_labels	resolution_state	resolved_hypothesis	resolution_reason	trace_status	trace_flags
-A+	none				1	1	0	paraclostridium sordellii	unambiguous	struct1	single_hypothesis	NA	

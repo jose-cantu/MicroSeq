@@ -1,2 +1,0 @@
-sample_id	engine	orientation	status	overlap_len	identity	overlap_quality	end_anchored	anchoring_feasible	selected_for_merge
-A+	biopython	revcomp	ok	563	0.9982	35.16	yes	yes	yes

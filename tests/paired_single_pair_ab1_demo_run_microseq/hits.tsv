@@ -1,6 +1,0 @@
-qseqid	sseqid	pident	qlen	qcovhsp	length	evalue	bitscore	stitle
-A+|cap3_diagnostic|contig1	RS-GCF-002865995.1-NZ-CP014150.1--12	99.926	1355	100	1356	0.0	2497	RS-GCF-002865995.1-NZ-CP014150.1--12
-A+|cap3_diagnostic|contig1	MJ010-1-barcode48-umi136510bins-ubs-4	99.926	1355	100	1356	0.0	2497	MJ010-1-barcode48-umi136510bins-ubs-4
-A+|cap3_diagnostic|contig1	MJ030-1-barcode26-umi99012bins-ubs-4	99.853	1355	100	1357	0.0	2494	MJ030-1-barcode26-umi99012bins-ubs-4
-A+|cap3_diagnostic|contig1	RS-GCF-002865995.1-NZ-CP014150.1--15	99.853	1355	100	1356	0.0	2492	RS-GCF-002865995.1-NZ-CP014150.1--15
-A+|cap3_diagnostic|contig1	RS-GCF-002865995.1-NZ-CP014150.1--11	99.853	1355	100	1356	0.0	2492	RS-GCF-002865995.1-NZ-CP014150.1--11

@@ -1,2 +1,0 @@
-sample_id	overlap_engine	orientation	overlap_len	identity	mismatches	contig_len	merge_status	qualities	merge_warning	high_conflict_mismatches
-A+	edlib	forward	773	0.5472	217	0	identity_low	present		0

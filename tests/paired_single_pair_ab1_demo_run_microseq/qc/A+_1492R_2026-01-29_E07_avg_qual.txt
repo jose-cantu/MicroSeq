@@ -1,2 +1,0 @@
-read_id	left_trim_bases	right_trim_bases	final_len	mean_q
-A+1492R	25	223	981	49.96
