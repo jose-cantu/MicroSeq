@@ -116,12 +116,12 @@ paired_single_pair_ab1_demo_run_microseq/
 
 * **Primer preview** now uses the same GUI primer stage/**Known synthetic flank preset**/custom-sequence settings as pipeline execution, but forces detect-only mode so you can validate hits before clipping.
 * **Assembler selection** (paired mode) supports: **CAP3 default (legacy paired pipeline)**, **All assemblers (compare + pick best contig)**, or any single registered assembler from the dropdown.
-* Compare assemblers produces `asm/compare_assemblers.tsv`, now shown in the GUI **Compare Assemblers** output tab for side-by-side engine review. When running full pipeline with **All assemblers**, MicroSeq reuses this comparison and ranks candidates by status (**assembled** > **merged** > others), then length, then deterministic tiebreak for downstream BLAST payloads.
+* Compare assemblers produces `asm/compare_assemblers.tsv`, now shown in the GUI **Compare Assemblers** output tab for side-by-side engine review. When running full pipeline with **All assemblers**, MicroSeq reuses this comparison and ranks candidates by status (**assembled** > **merged** > others), then length, then deterministic tiebreak for downstream sequences sent to BLAST.
 * In compare-driven **Selected/All assemblers** full-pipeline mode, MicroSeq now writes `qc/pairing_report.tsv`; when a compared backend is CAP3, the **Use per-base quality scores** toggle is also applied to CAP3 input generation.
 * **Mode semantics (authoritative):**
   * **CAP3 default (legacy paired pipeline):** runs `merge_two_reads` first (configured overlap engine/strategy), then falls back to CAP3 when merge is not accepted (subject to quality-policy exceptions).
-  * **Single selected assembler:** runs compare flow constrained to the selected `assembler_id` only; no automatic global CAP3 rescue is injected just because that backend produced no payload.
-  * **All assemblers:** runs every registered backend, writes `asm/compare_assemblers.tsv`, and selects a per-sample winner deterministically for BLAST payload generation.
+  * **Single selected assembler:** runs compare flow constrained to the selected `assembler_id` only; no automatic global CAP3 rescue is injected just because that backend produced no usable sequence output.
+  * **All assemblers:** runs every registered backend, writes `asm/compare_assemblers.tsv`, and selects a per-sample winner deterministically for BLAST input sequence generation.
 * **`merge_two_reads` overlap engines (what they are):**
   * `merge_two_reads:ungapped` = placement-driven, end-anchored **ungapped sliding** overlap (fast; does not introduce indels in the overlap candidate itself).
   * `merge_two_reads:biopython` = Biopython pairwise-alignment backend that can model **gapped** overlaps (indel-aware).
@@ -338,7 +338,7 @@ Key files to highlight in the GUI doc:
 * `asm/contig_map.tsv` links each contig back to the input reads used, which is helpful when auditing assemblies or troubleshooting mismatched pairs.
 
 ## Troublehshooting what the different Status sign means in Assembly Summary Tab
-For `CAP3 default (legacy paired pipeline)`, MicroSeq runs `merge_two_reads` first using the configured overlap engine/strategy, and if that merge path is not accepted it falls back to CAP3 using the selected CAP3 profile (strict, relaxed, diagnostic), except where quality-policy routing keeps singlets/no-payload by design.
+For `CAP3 default (legacy paired pipeline)`, MicroSeq runs `merge_two_reads` first using the configured overlap engine/strategy, and if that merge path is not accepted it falls back to CAP3 using the selected CAP3 profile (strict, relaxed, diagnostic), except where quality-policy routing keeps singlets/no-usable-sequence outcomes by design.
 
 If you get `ambiguous_overlap`, MicroSeq found near-tied top feasible overlap candidates and intentionally refused to force a unique merge. For canonical decision rules (including the **“Candidate generation in 3 stages”** walkthrough, feasibility gates, top-1 vs top-2 tie checks, and policy outcomes like `topk`/`best_guess`), see **Workflow Resolution Funnel -> “Assemble -> Validate handoff: how `ambiguous_overlap` is decided”** in [`docs/workflow_resolution.md`](workflow_resolution.md). 
 
@@ -350,7 +350,7 @@ Status glossary cross-link: for the full trigger-to-status routing matrix (`merg
 `sample_id`: The sample key used throughout paired assembly outputs. 
 `status`: Finaly summary status for that sample. In legacy Cap3 mode this can be cap3-derived (`assembled`, `singlets_only`, `cap3_no_output`) and may be overridden by overlap audit `overlap_*` or for example as I suggested earlier `ambiguous_overlap`.
 `assembler`: Which assembler path was selected for summary (ie `cap3:relaxed, merge_two_reads:*`) etc, in the selected/all mode, or `cap3/merge_two_reads` in legacy report parsing. 
-`contig_len`: Length of selected/produced contig payload (max length here when multple records) 
+`contig_len`: Length of selected/produced contig sequence output (max length here when multple records) 
 `blast_payload`: This is what is being passed to BLAST (contig, singlet, no_payload, pair_missing depending on mode/results). 
 `selected_engine`: Engine that produced the chosen result for example overlap engine for `merge_two_reads` rows, `cap3` for cap3 results etc. 
 `configured_engine`: Configured overlap engine (legacy parse path populates; selected/all summary currently leaves blank will adjust this later on). 
@@ -361,9 +361,9 @@ Status glossary cross-link: for the full trigger-to-status routing matrix (`merg
 `primer_mode / primer_stage`: Run time primer trimming policy (off/detect/clip and pre/post quality stage). 
 
 ### BLAST Inputs Tab 
-`sample_id`: Sample key for payload row. 
-`blast_payload`: Type of sequence payload sent to BLAST(`contig`, `singlet`, `no_payload`, `pair_missing`)
-`reason`: Why that payload choice happened. Legacy examples `contigs_present`, `singlets_only`, `cap3_no_output`, `pair_missing`. Selected/all compare examples: `selected_payload`, `winner_no_payload`, `selected_backend_no_payload`, `pair_missing`. 
+`sample_id`: Sample key for this sequence-output row. 
+`blast_payload`: Type of sequence sent to BLAST (`contig`, `singlet`, `no_payload`, `pair_missing`)
+`reason`: Why that sequence-output choice happened. Legacy examples `contigs_present`, `singlets_only`, `cap3_no_output`, `pair_missing`. Selected/all compare examples: `selected_payload`, `winner_no_payload`, `selected_backend_no_payload`, `pair_missing`. 
 `payload_ids`: Mapping of rewritten FASTA ids to original ids, eg `sample|contig|cap3_relaxed1=contig1`
 
 ### Diagnostic Tab 
@@ -423,7 +423,7 @@ Status glossary cross-link: for the full trigger-to-status routing matrix (`merg
     - selected_engine
         - Merge overlap engine used (merge rows) or cap3 (CAP3 rows).
     - contig_len
-        - Max contig length produced by that backend row (blank if no payload).
+        - Max contig length produced by that backend row (blank if no usable sequence output).
     - warnings
         - Merge warning text or caught exception text for failed run.
      - dup_policy
@@ -454,13 +454,13 @@ Status glossary cross-link: for the full trigger-to-status routing matrix (`merg
     - winner_reason
         - Concise human-readable explanation of why the winner row was selected (populated on the selected/winner row; blank for non-winner rows).
     - payload_fasta
-        - Path to the backend payload FASTA produced by that row; populated when a payload exists and used by compare-row Details/open-file actions.
+        - Path to the backend sequence-output FASTA produced by that row; populated when a sequence output exists and used by compare-row Details/open-file actions.
 
 - Compare tab Details panel is now row-scoped by `(sample_id, assembler_id)` instead of only `sample_id`, so selecting two rows for the same sample but different backends shows backend-specific reasons/artifacts instead of collapsing them together.
 
 - In all/selected modes, winners are chosen per sample with deterministic ranking keys (in order):
     - success tier (`assembled` and `merged` are equivalent success outcomes and appear as green/success states in compare status semantics),
-    - payload rank (`contig` > `contig_alt` > `singlet` > `none`),
+    - sequence rank (`payload_rank`: `contig` > `contig_alt` > `singlet` > `none`),
     - ambiguity penalty (`0` before `1`),
     - normalized length (descending),
     - assembler id tie-break (ascending).
@@ -581,7 +581,7 @@ Why it matters in MicroSeq
 
 It provides a fast, explicit, interpretable paired-read merge path (with clear failure categories like overlap too short, identity too low, quality too low, ambiguous overlap).
 
-In “compare-driven” operation (Selected / All assemblers), MicroSeq can run this backend side-by-side with CAP3 and pick the best payload deterministically.
+In “compare-driven” operation (Selected / All assemblers), MicroSeq can run this backend side-by-side with CAP3 and pick the best sequence output deterministically.
 
 *Scientific references for the method class*
 Overlap-based merging of paired reads is a standard approach in sequencing pipelines; FLASH and PEAR are widely cited examples of the overlap-then-merge paradigm (candidate overlap scoring + merge selection).

@@ -253,7 +253,7 @@ candidate.
 
 After `ambiguous_overlap`, policy controls output behavior:
 
-- `strict`: keep ambiguous outcome; no forced merge payload.
+- `strict`: keep ambiguous outcome; no forced merged sequence output.
 - `singlets`: emit singlets (`ambiguous_overlap_singlets`).
 - `best_guess`: force top-1 candidate and emit one consensus (`merged_best_guess`).
 - `topk`: emit `alt1..altK` consensus sequences (`ambiguous_topk`), where `K=ambiguous_top_k`
@@ -265,7 +265,7 @@ validated by BLAST/taxonomy and collapsed into sample-level resolution state.
 
 ## 3) Validate (BLAST + taxonomy)
 
-MicroSeq runs BLAST/taxonomy against payloads and ranks best hit per hypothesis deterministically:
+MicroSeq runs BLAST/taxonomy against sequences sent to BLAST and ranks best hit per hypothesis deterministically:
 
 1. `bitscore` (desc)
 2. `pident` (desc)
@@ -303,13 +303,13 @@ The latest contract updates are mainly about **predictability** and **traceabili
    - It maps `qseqid -> original source sequence id`.
    - You can now audit where each BLAST input came from without overloading hypothesis logic.
 
-3. **Payload size and structural ambiguity are now separated**
+3. **Sequence-output size and structural ambiguity are now separated**
    - `payload_entity_n` tracks how many concrete sequence entities were emitted.
    - `structural_hypothesis_n` tracks decision branches.
-   - Result: a sample can have multiple payload entities and still be structurally unambiguous.
+   - Result: a sample can have multiple sequence records and still be structurally unambiguous.
 
-4. **Multi-entity payloads are advisory by default**
-   - Non-`contig_alt` multi-entity payloads add `multi_payload` to `warning_flags`.
+4. **Multi-entity sequence outputs are advisory by default**
+   - Non-`contig_alt` multi-entity sequence outputs add `multi_payload` to `warning_flags`.
    - This is non-blocking unless other safety/review conditions escalate.
 
 5. **Rank-aware missing taxonomy is explicit**
@@ -331,7 +331,7 @@ The latest contract updates are mainly about **predictability** and **traceabili
 | Trace QC `FAIL` (sticky) | `needs_review` | `trace_fail` |
 | Safety escalation (e.g. high conflict) | `needs_review` | safety flag value |
 
-## No-hit and missing-payload policy
+## No-hit and missing-sequence policy
 
 MicroSeq drives review queue population from blast-input contract rows, then joins taxonomy evidence when present.
 
@@ -363,11 +363,11 @@ This keeps output Geneious-like for routine samples while preserving full proven
 
 | Trigger condition | Status label emitted (`merged`, `ambiguous_overlap`, `high_conflict`, `quality_low`, `cap3_unverified`) | IUPAC involvement (`yes/no`, only after a single structural path is selected) | Routing/next action | Primary artifact field(s) to inspect (`merge_status`, `status`, `hypothesis_map`, `review_reason`, `warning_flags`) |
 | --- | --- | --- | --- | --- |
-| One unique top feasible overlap candidate (passes overlap + anchoring gates) | `merged` | no (only after a single structural path is selected) | Emit merged sequence payload; continue to validate/rank hits on that single path | `merge_status`; sample `status` |
+| One unique top feasible overlap candidate (passes overlap + anchoring gates) | `merged` | no (only after a single structural path is selected) | Emit merged sequence output; continue to validate/rank hits on that single path | `merge_status`; sample `status` |
 | Top-1 and top-2 feasible candidates are tie-equivalent under ambiguity thresholds | `ambiguous_overlap` | no (only after a single structural path is selected) | Branch hypotheses (`best_guess`/`topk`) or hold as strict ambiguity for review routing | `merge_status`; `hypothesis_map`; `review_reason` |
 | Overlap exists but disagreement burden exceeds configured high-confidence conflict guardrail | `high_conflict` | no (only after a single structural path is selected) | Route by configured conflict action (typically CAP3 fallback or explicit review escalation) | `merge_status`; sample `status`; `warning_flags`; `review_reason` |
 | Candidate is structurally feasible but blocked by quality policy (`quality_mode=blocking`) | `quality_low` | no (only after a single structural path is selected) | Do not accept fast merge; route to CAP3 fallback or review path per policy | `merge_status`; sample `status`; `warning_flags` |
-| CAP3 fallback output fails verification contract (for example, missing source-read representation) | `cap3_unverified` | no (only after a single structural path is selected) | Keep singlet/no-payload fallback and escalate to review if required | sample `status`; `review_reason`; `warning_flags` |
+| CAP3 fallback output fails verification contract (for example, missing source-read representation) | `cap3_unverified` | no (only after a single structural path is selected) | Keep singlet/no-usable-sequence fallback and escalate to review if required | sample `status`; `review_reason`; `warning_flags` |
 
 ## Why this method instead of manual IUPAC consensus curation
 
@@ -414,7 +414,7 @@ Required columns:
 
 Interpretation notes:
 
-- `payload_n` / `payload_entity_n` are payload counts, **not** structural branch counts.
+- `payload_n` / `payload_entity_n` are sequence-record counts, **not** structural branch counts.
 - `structural_hypothesis_n` is the number of structural alternatives considered by resolution logic.
 - `warning_flags` contains all non-blocking warnings (semicolon-separated, deduplicated, sorted).
 

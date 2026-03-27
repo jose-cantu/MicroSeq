@@ -28,16 +28,16 @@ Use this table first, then follow the linked docs for mode-specific details.
 | `qc/overlap_audit.tsv` | Overlap diagnostics (enabled paths) | Candidate overlap decisions and gating outcomes. | Shows why merges succeed/fail for specific samples. |
 | `qc/overlap_audit_engines.tsv` | Compare assemblers/engine audit | Per-engine overlap diagnostics (ungapped/biopython/edlib, etc.). | Explains backend differences in structural outcomes. |
 | `qc/review_queue.tsv` | Resolution funnel | Samples queued for manual review + reasons/warnings. | Focuses analyst effort on actionable ambiguity/safety cases. |
-| `asm/<sample>/<sample>_paired.fasta` | Paired assembly prep | Per-sample concatenated paired FASTA fed to assembler. | Exact per-sample sequence payload entering assembly. |
+| `asm/<sample>/<sample>_paired.fasta` | Paired assembly prep | Per-sample concatenated paired FASTA fed to assembler. | Exact per-sample sequence input entering assembly. |
 | `asm/<sample>/<sample>_paired.fasta.qual` | Paired assembly prep | QUAL companion file for CAP3 scoring. | Preserves quality-aware assembly behavior. |
 | `asm/<sample>/*.cap.contigs` | CAP3 assembly | Assembled contigs. | Main structural consensus output when overlaps are accepted. |
 | `asm/<sample>/*.cap.singlets` | CAP3 assembly | Unassembled singlet sequences. | Captures residual reads when contig assembly is partial/absent. |
 | `asm/<sample>/*.cap.info` | CAP3 assembly metadata | CAP3 summary details (clipping/overlap stats). | Primary diagnostic for CAP3 acceptance/removal behavior. |
 | `asm/assembly_summary.tsv` | Assembly aggregation | Per-sample assembly status plus synchronized resolution fields. | High-level per-sample status table for reporting and troubleshooting. |
-| `asm/blast_inputs.fasta` | Assembly -> BLAST handoff | Final sequence payload sent to BLAST (contigs/singlets by policy). | Defines exactly what was queried downstream. |
-| `asm/blast_inputs.tsv` | Assembly -> BLAST manifest | Manifest of payload selection, reasons, IDs, hypothesis/source mapping. | End-to-end provenance from structures to BLAST payload IDs. |
+| `asm/blast_inputs.fasta` | Assembly -> BLAST handoff | Final sequence sent to BLAST (contigs/singlets by policy). | Defines exactly what was queried downstream. |
+| `asm/blast_inputs.tsv` | Assembly -> BLAST manifest | Manifest of sequence-output selection, reasons, IDs, hypothesis/source mapping. | End-to-end provenance from structures to BLAST input sequence IDs. |
 | `asm/compare_assemblers.tsv` | Compare mode | Cross-backend comparison summary for selected assemblers/profiles. | Supports backend/profile selection with explicit evidence. |
-| `asm/compare/<backend_or_profile>/<sample>/*` | Compare mode per-backend outputs | Backend/profile-specific payloads, merge reports, captured stdout/stderr. | Deep debugging of why one assembler/profile was selected or rejected. |
+| `asm/compare/<backend_or_profile>/<sample>/*` | Compare mode per-backend outputs | Backend/profile-specific sequence outputs, merge reports, captured stdout/stderr. | Deep debugging of why one assembler/profile was selected or rejected. |
 | `asm/selection_trace/*.selection_trace.tsv` | Compare + selector trace | Structured decision trace for backend/profile selection. | Reproducible explanation of automated selection decisions. |
 | `hits.tsv` | `microseq blast` | Raw BLAST hits table. | Core homology evidence before taxonomy joins. |
 | `hits_tax.tsv` | `microseq add-taxonomy` | BLAST hits with taxonomy columns appended. | Interpretable taxonomic output for downstream summarization. |

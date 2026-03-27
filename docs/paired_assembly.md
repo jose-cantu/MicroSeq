@@ -41,7 +41,7 @@ microseq assembly --mode paired \
 
 * I would recommend just defaulting to `--dup-policy error` unless otherwise. 
 * `--dup-policy merge` merges duplicate orientations before CAP3; swap to `keep-first`, `keep-last`, or `keep-separate` as needed.
-* Outputs land in `results/paired_cap3/<sample>/` with `*.cap.contigs`, `*.cap.singlets`, and a pairing report, plus `asm/blast_inputs.fasta`/`asm/blast_inputs.tsv` for BLAST payload tracking. 
+* Outputs land in `results/paired_cap3/<sample>/` with `*.cap.contigs`, `*.cap.singlets`, and a pairing report, plus `asm/blast_inputs.fasta`/`asm/blast_inputs.tsv` for BLAST input sequence tracking. 
 3) **Require wells + custom primer regex** (when filenames include plate codes and unusual primer names):
 
 ```bash
@@ -86,20 +86,20 @@ Need to test if bug fixed: Note on minimize it may still lock the main GUI I cha
 * For plate runs, enable well enforcement to avoid mixing reads across wells; the manifest reflects the enforced well key.
 * Use **keep-separate** when you intentionally want per-orientation CAP3 outputs (e.g., troubleshooting primer performance) without merging reads.
 
-## BLAST inputs and payload tracking
+## BLAST inputs and sequence tracking
 
 Paired mode now writes two BLAST-oriented artifacts:
 
 * `asm/blast_inputs.fasta` – the sequences submitted to BLAST, with rewritten IDs.
-* `asm/blast_inputs.tsv` – a per-sample manifest showing what payload was selected and why.
+* `asm/blast_inputs.tsv` – a per-sample manifest showing which sequence output was selected and why.
 
 ### Contig -> singlet fallback order
 
-For each paired sample, MicroSeq chooses the first available payload in the order:
+For each paired sample, MicroSeq chooses the first available sequence output in the order:
 
 1) CAP3 contigs (`*.cap.contigs`)
 2) CAP3 singlets (`*.cap.singlets`)
-3) No payload (empty assembly output)
+3) No usable sequence produced (empty assembly output)
 
 ### FASTA header rewrite
 
@@ -117,9 +117,9 @@ sampleA|singlet|cap3_s1
 | `sample_id` | The paired sample key (includes `_1`, `_2`, … in keep‑separate mode). |
 | `blast_payload` | One of `contig`, `singlet`, `no_payload`, or `pair_missing`. |
 | `payload_ids` | A semicolon‑delimited mapping of rewritten IDs to original CAP3/read IDs. |
-| `reason` | Why that payload was chosen (see taxonomy below). |
+| `reason` | Why that sequence output was chosen (see taxonomy below). |
 
-Example payload mapping:
+Example sequence ID mapping:
 
 ```
 payload_ids: sampleA|contig|cap3_c1=Contig1;sampleA|contig|cap3_c2=Contig2
@@ -137,7 +137,7 @@ payload_ids: sampleA|contig|cap3_c1=Contig1;sampleA|contig|cap3_c2=Contig2
 MicroSeq combines the pairing report (`qc/pairing_report.tsv`) with the original
 paired FASTA filenames. If a sample has only one orientation (forward **or**
 reverse) after pairing detection and well enforcement, it is marked as
-`pair_missing` and kept in `blast_inputs.tsv` without any BLAST payload.
+`pair_missing` and kept in `blast_inputs.tsv` without any sequence sent to BLAST.
 
 ## Paired assembly outputs (current version)
 
@@ -153,9 +153,9 @@ The paired pipeline now produces the following key files under the run folder:
 * `asm/assembly_summary.tsv` : per-sample CAP3 summary + status.
 * `asm/cap3_run_metadata.txt` : CAP3 executable path, version, and full per-sample command lines.
 * `asm/paired_contigs.fasta` : merged contigs-only FASTA (for contigs-only BLAST).
-* `asm/blast_inputs.fasta` : contigs+singlets BLAST payload FASTA.
-* `asm/blast_inputs.tsv` : payload manifest with `blast_payload`, `reason`, and `payload_ids`.
-  It now also includes `payload_entity_n`, `hypothesis_map` (`qseqid -> structural_hypothesis`), and `source_id_map` (`qseqid -> original source id`) so users can distinguish structural decision branches from raw payload provenance.
+* `asm/blast_inputs.fasta` : contigs+singlets BLAST input sequence FASTA.
+* `asm/blast_inputs.tsv` : BLAST input sequence manifest with `blast_payload`, `reason`, and `payload_ids`.
+  It now also includes `payload_entity_n`, `hypothesis_map` (`qseqid -> structural_hypothesis`), and `source_id_map` (`qseqid -> original source id`) so users can distinguish structural decision branches from raw sequence-record provenance.
 
 
 ### GUI Color Legend
@@ -286,7 +286,7 @@ microseq assembly --mode paired \
   --enforce-well
 ```
 
-Outputs include`asm/blast_inputs.tsv` plus CAP3 contigs and singlets; the manifest records which input reads built each payload with the enforced well code.
+Outputs include`asm/blast_inputs.tsv` plus CAP3 contigs and singlets; the manifest records which input reads built each sequence output with the enforced well code.
 
 Single mode either does forward/reverse and simply runs CAP3 on the merged FASTA; use this when you know each file is already single-direction only.
 
