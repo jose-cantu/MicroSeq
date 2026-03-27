@@ -13,6 +13,8 @@ For version control, please see the changelog I have attached. [CHANGELOG](https
 For the docs that go into more detail, such as for example how to use the GUI I have attached it here. [GUI walkthrough](https://jose-cantu.github.io/MicroSeq/gui/)
 You can also just select docs view and it will take you to the landing page for full detailed documentation. =) 
 For the resolution model used to collapse multiple hypotheses into sample-level outcomes, see [Workflow Resolution Funnel](docs/workflow_resolution.md).
+For a very quick demo on how to use MicroSeq here is a link here to get you started. I use the paired demo test data in my test directory. 
+[Quick MicroSeq walkthrough](https://www.youtube.com/watch?v=64dGTM4HDcE) 
 
 ---
 
