@@ -765,58 +765,95 @@ def _summarize_paired_candidates(
 
     return "; ".join(parts)
 
-def _suggest_pairing_patterns(directory: Path) -> str: 
-    """ Suggest custom --fwd-pattern/--rev-pattern examples based on filesnames."""
-    token_rx = re.compile(r"([A-Za-z0-9]+[FR])", re.I)
-    fwd_tokens: Counter[str] = Counter() 
-    rev_tokens: Counter[str] = Counter() 
-    names: list[str] = [] 
+def _suggest_pairing_patterns_for_suffixes(
+    directory: Path,
+    *,
+    suffixes: Sequence[str],
+    context_label: str,
+    fallback_message: str,
+) -> str:
+    """Suggest --fwd-pattern/--rev-pattern examples by scanning filename tokens."""
 
-    for fp in iter_seq_files(directory):
+    token_rx = re.compile(r"([A-Za-z0-9]+[FR])", re.I)
+    fwd_tokens: Counter[str] = Counter()
+    rev_tokens: Counter[str] = Counter()
+    names: list[str] = []
+
+    allowed_suffixes = {s.lower() for s in suffixes}
+    files: list[Path] = []
+    if directory.is_file():
+        if directory.suffix.lower() in allowed_suffixes:
+            files = [directory]
+    else:
+        for suffix in allowed_suffixes:
+            files.extend(sorted(directory.rglob(f"*{suffix}")))
+
+    for fp in sorted(set(files)):
         names.append(fp.name)
         for tok in token_rx.findall(fp.name):
             tok = tok.upper()
             if tok.endswith("F"):
-                fwd_tokens[tok] += 1 
+                fwd_tokens[tok] += 1
             elif tok.endswith("R"):
-                rev_tokens[tok] += 1 
+                rev_tokens[tok] += 1
 
     def _common(counter: Counter[str]) -> str | None:
-        return counter.most_common(1)[0][0] if counter else None 
+        return counter.most_common(1)[0][0] if counter else None
 
     fwd = _common(fwd_tokens)
-    rev = _common(rev_tokens) 
+    rev = _common(rev_tokens)
 
     suggestions: list[str] = []
-    # Concrete regex examples based on the most common tokens MicroSeq detected.
     if fwd or rev:
         suggestions.append(
-                "Example flag: --fwd-pattern "
-            f"'{fwd or 'FORWARD_TOKEN'}' --rev-pattern '{rev or 'REVERSE_TOKEN'}'" 
-        ) 
+            f"{context_label} Example flag: --fwd-pattern "
+            f"'{fwd or 'FORWARD_TOKEN'}' --rev-pattern '{rev or 'REVERSE_TOKEN'}'"
+        )
         suggestions.append(
             "Regex variant (case-insensitive): "
             f"--fwd-pattern '(?i){fwd or '27F'}' --rev-pattern '(?i){rev or '1492R'}'"
         )
 
-    # Offer rename guidance using the detected tokens and the first few filenames as context.
-
     if names:
         rename_hint = (
-            "Rename option: include primer tokens in filenames so MicroSeq can auto-detect "
-            f"mates (e.g., sample_{fwd or '27F'}.fasta / sample_{rev or '1492R'}.fasta); "
+            f"{context_label} Rename option: include forward/reverse primer labels in filenames "
+            f"(e.g., sample_{fwd or '27F'}.fastq / sample_{rev or '1492R'}.ab1); "
             "examples seen: " + ", ".join(names[:3])
         )
         suggestions.append(rename_hint)
 
     if not suggestions:
-        # Fallback message when no obvious tokens are present.
-        suggestions.append(
-            "No primer-like tokens detected; rename files to include forward/reverse labels "
-            "(e.g., sample_27F / sample_1492R) or pass --fwd-pattern/--rev-pattern explicitly."
-        )
+        suggestions.append(fallback_message)
 
     return " ".join(suggestions)
+
+
+def _suggest_pairing_patterns(directory: Path) -> str:
+    """Suggest pairing labels for raw GUI inputs (AB1/FASTQ)."""
+
+    return _suggest_pairing_patterns_for_suffixes(
+        directory,
+        suffixes=(".fastq", ".ab1"),
+        context_label="Raw input naming suggestions:",
+        fallback_message=(
+            "Raw input naming suggestions: No forward/reverse primer labels detected in AB1/FASTQ filenames; "
+            "rename files to include labels (e.g., sample_27F / sample_1492R) or pass --fwd-pattern/--rev-pattern explicitly."
+        ),
+    )
+
+
+def _suggest_pairing_patterns_staged(directory: Path) -> str:
+    """Provide staged/internal pairing guidance without raw-input fallback wording."""
+
+    return _suggest_pairing_patterns_for_suffixes(
+        directory,
+        suffixes=(".fasta", ".fa", ".fna", ".fas"),
+        context_label="Staged/internal pairing status:",
+        fallback_message=(
+            "Staged/internal pairing status: Pairing suggestions are based on raw input filenames; "
+            "staged FASTA appears downstream of conversion. Use --fwd-pattern/--rev-pattern if pairing labels are non-standard."
+        ),
+    )
 
 def _collect_pairing_catalog(
     directory: Path,
@@ -3181,7 +3218,7 @@ def run_full_pipeline(
         )
         if not paired_samples:
            summary = _summarize_paired_candidates(assembly_input, fwd_pattern, rev_pattern, enforce_same_well=enforce_same_well, well_pattern=well_pattern)
-           suggestions = _suggest_pairing_patterns(assembly_input)
+           suggestions = _suggest_pairing_patterns_staged(assembly_input)
            raise ValueError(
                 f"No paired reads detected in {assembly_input}; {summary}. "
                 "If your primer names differ, provide --fwd-pattern/--rev-pattern."

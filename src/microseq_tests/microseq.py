@@ -6,7 +6,7 @@ from microseq_tests.utility.progress import stage_bar
 from microseq_tests.utility.merge_hits import merge_hits 
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
-from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, run_full_pipeline, _summarize_paired_candidates, _suggest_pairing_patterns, _collect_pairing_catalog, _write_overlap_audit)
+from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, run_full_pipeline, _summarize_paired_candidates, _suggest_pairing_patterns_staged, _collect_pairing_catalog, _write_overlap_audit)
 from microseq_tests.utility.utils import setup_logging, load_config, expand_db_path
 from microseq_tests.assembly.pairing import DupPolicy 
 from microseq_tests.blast.run_blast import run_blast
@@ -301,7 +301,7 @@ def main() -> None:
                     enforce_same_well=args.enforce_well,
                     well_pattern=args.well_pattern,
                 ) 
-                suggestions = _suggest_pairing_patterns(pathlib.Path(args.input))
+                suggestions = _suggest_pairing_patterns_staged(pathlib.Path(args.input))
                 print(summary)
                 if suggestions: 
                     print(suggestions)

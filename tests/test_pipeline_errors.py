@@ -55,6 +55,38 @@ def test_paired_error_includes_suggestions(tmp_path: Path, monkeypatch: pytest.M
     assert "Example flag" in message
 
 
+def test_suggest_pairing_patterns_reads_fastq_and_ab1(tmp_path: Path):
+    (tmp_path / "S1_27F.fastq").write_text("@r1\nA\n+\n!\n", encoding="utf-8")
+    (tmp_path / "S1_1492R.ab1").write_text("", encoding="utf-8")
+
+    suggestions = pipeline._suggest_pairing_patterns(tmp_path)
+
+    assert "Example flag" in suggestions
+    assert "Raw input naming suggestions:" in suggestions
+    assert "No forward/reverse primer labels detected" not in suggestions
+
+
+def test_suggest_pairing_patterns_ignores_fasta_only_inputs(tmp_path: Path):
+    (tmp_path / "S1_27F.fasta").write_text(">r1\nA\n", encoding="utf-8")
+    (tmp_path / "S1_1492R.fasta").write_text(">r2\nA\n", encoding="utf-8")
+
+    suggestions = pipeline._suggest_pairing_patterns(tmp_path)
+
+    assert "Raw input naming suggestions:" in suggestions
+    assert "No forward/reverse primer labels detected" in suggestions
+
+
+def test_suggest_pairing_patterns_staged_reads_fasta_without_raw_fallback(tmp_path: Path):
+    (tmp_path / "S1_27F.fasta").write_text(">r1\nA\n", encoding="utf-8")
+    (tmp_path / "S1_1492R.fasta").write_text(">r2\nA\n", encoding="utf-8")
+
+    suggestions = pipeline._suggest_pairing_patterns_staged(tmp_path)
+
+    assert "Staged/internal pairing status:" in suggestions
+    assert "Example flag" in suggestions
+    assert "No forward/reverse primer labels detected" not in suggestions
+
+
 def test_selected_mode_preserves_pair_missing_when_compare_pairing_report_lists_all(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
