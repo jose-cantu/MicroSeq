@@ -2,11 +2,12 @@
 from __future__ import annotations
 import argparse, pathlib, logging, shutil, glob, sys, subprocess, os 
 import pandas as pd 
+from microseq_tests.assembly import paired_assembly
 from microseq_tests.utility.progress import stage_bar 
 from microseq_tests.utility.merge_hits import merge_hits 
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
-from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, run_full_pipeline, _summarize_paired_candidates, _suggest_pairing_patterns_staged, _collect_pairing_catalog, _write_overlap_audit)
+from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, run_full_pipeline, _summarize_paired_candidates, _suggest_pairing_patterns_staged, _collect_pairing_catalog, _write_overlap_audit, stage_paired_fastas_from_fastq_dir, run_pairing_report, run_assembly_summary)
 from microseq_tests.utility.utils import setup_logging, load_config, expand_db_path
 from microseq_tests.assembly.pairing import DupPolicy 
 from microseq_tests.blast.run_blast import run_blast
@@ -76,7 +77,35 @@ def main() -> None:
         help="Folder with *.fastq / *.fq; scanned recursively",
     )
     p_fq.add_argument("-o", "--output_fasta", required=True, metavar="FASTA",
-                      help="Output FASTA file path") 
+                      help="Output FASTA file path")
+
+    # ---- FASTQ dir -> per read FASTA staging ------------------------------------
+    p_stage_paired_fasta = sp.add_parser("stage-paired-fasta", help="Convert FASTQ folder into per file FASTA staging directory for paired assembly.")
+    p_stage_paired_fasta.add_argument("-i", "--input_dir", required=True, metavar="DIR", help="Folder with *.fastq files (scanned recursively).")
+    p_stage_paired_fasta.add_argument("-o", "--output_dir", required=True, metavar="DIR", help="Destination folder for per file *.fasta (and *.qual).")
+    p_stage_paired_fasta.add_argument("--cap3_qual", action="store_true", default=True, help="ALso emit QUAL files alongside FASTA (default: on).")
+    p_stage_paired_fasta.add_argument("--no-cap3-qual", dest="cap3_qual", action="store_false", help="Disable QUAL output; Fasta only.")
+
+    # CLI command that I'm adding in that writes canonical pairing report 
+    p_pairing_report = sp.add_parser("pairing-report", help="Write canonical pairing_report.tsv")
+    p_pairing_report.add_argument("-i", "--input", required=True, help="Paired input directory (ex: qc/paired_fasta)")
+    p_pairing_report.add_argument("-o", "--output", required=True, help="Output TSV path")
+    p_pairing_report.add_argument("--dup-policy", choices=[policy.value for policy in DupPolicy], default="error")
+    p_pairing_report.add_argument("--fwd-pattern", default = None, help="Optional custom forward primer regex/pattern")
+    p_pairing_report.add_argument("--rev-pattern", default = None, help="Optional custom reverse primer regex/pattern")
+    p_pairing_report.add_argument("--enforce_well", action="store_true")
+    p_pairing_report.add_argument("--well-pattern")
+
+    # Adding CLI subcommand that writes the canonical assembly summary I have setup in the GUI 
+    p_assembly_summary = sp.add_parser("assembly-summary", help="Writes the canonical asm/assembly_summary.tsv")
+    p_assembly_summary.add_argument("--asm-dir", required=True, help="Assembly output directory (asm in this case)")
+    p_assembly_summary.add_argument("--pairing-input-dir", required=True, help="Input used for pairing catalog (example: qc/paired_fasta)")
+    p_assembly_summary.add_argument("-o", "--output", required=True, help="Output TSV path")
+    p_assembly_summary.add_argument("--dup-policy", choices=[policy.value for policy in DupPolicy], default="error")
+    p_assembly_summary.add_argument("--fwd-pattern", default=None, help="Optional custom forward primer regex/pattern")
+    p_assembly_summary.add_argument("--rev-pattern", default=None, help="Optional custom reverse primer pattern/regex")
+    p_assembly_summary.add_argument("--enforce-well", action="store_true")
+    p_assembly_summary.add_argument("--well-pattern")
     
     # assembly 
     p_asm = sp.add_parser("assembly", help="De novo assembly via CAP3")
@@ -263,8 +292,6 @@ def main() -> None:
             sanger=args.sanger,
             summary_tsv=args.combined_tsv,
             link_raw=args.link_raw,
-            mee_max=args.mee_max,
-            mee_min_len=args.mee_min_len,
             trace_qc_flags=args.trace_qc_flags,
 
         )
@@ -286,8 +313,43 @@ def main() -> None:
                 args.input_dir,
                 args.output_fasta,
                 )
-        print("FASTQ -> FASTA exit-code:", rc) 
+        print("FASTQ -> FASTA exit-code:", rc)
 
+    elif args.cmd == "stage-paired-fasta":
+        written_fasta_paths = stage_paired_fastas_from_fastq_dir(
+            args.input_dir,
+            args.output_dir,
+            use_qual=args.cap3_qual,
+        )
+        if not written_fasta_paths:
+            raise ValueError(f"No FASTA files generated from {args.input_dir}")
+        print(
+            f"Paired FASTA staging ready: {args.output_dir} "
+            f"({len(written_fasta_paths)} files)"
+        )
+    
+    elif args.cmd == "pairing-report":
+        out_path = run_pairing_report(
+            args.input,
+            args.output,
+            dup_policy=DupPolicy(args.dup_policy),
+            fwd_pattern=args.fwd_pattern,
+            rev_pattern=args.rev_pattern,
+            enforce_same_well=args.enforce_well,
+            well_pattern=args.well_pattern)
+        print(f"Pairing report ready: {out_path}")
+
+    elif args.cmd == "assembly-summary":
+        out_path = run_assembly_summary(
+            args.asm_dir,
+            args.pairing_input_dir,
+            args.output,
+            dup_policy=DupPolicy(args.dup_policy),
+            fwd_pattern=args.fwd_pattern,
+            rev_pattern=args.rev_pattern,
+            enforce_same_well=args.enforce_well,
+            well_pattern=args.well_pattern)
+        print(f"Assembly summary ready: {out_path}") 
 
     elif args.cmd == "assembly":
         if args.preview_pairs and args.mode != "paired":

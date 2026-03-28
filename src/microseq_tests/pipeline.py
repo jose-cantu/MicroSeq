@@ -41,7 +41,7 @@ from microseq_tests.trimming.primer_trim import trim_primer_fastqs, update_trim_
 
 from microseq_tests.assembly.de_novo_assembly import de_novo_assembly
 
-from microseq_tests.assembly.paired_assembly import assemble_pairs, _build_keep_separate_pairs, _write_combined_fasta, write_process_logs 
+from microseq_tests.assembly.paired_assembly import assemble_pairs, _build_keep_separate_pairs, _write_combined_fasta, write_process_logs, _write_pairing_report 
 
 from microseq_tests.assembly.overlap_utils import (
     AlignedOverlapCandidate,
@@ -57,7 +57,7 @@ from microseq_tests.assembly.overlap_backends import (
     resolve_overlap_engine_strategy,
 )
 from microseq_tests.assembly.pairing import  (
-        DETECTORS, DupPolicy, _extract_well, _strip_well_token, extract_sid_orientation, iter_seq_files, make_pattern_detector) 
+        DETECTORS, DupPolicy, _extract_well, _strip_well_token, extract_sid_orientation, group_pairs, iter_seq_files, make_pattern_detector,) 
 from microseq_tests.assembly.cap3_report import parse_cap3_reports
 from microseq_tests.assembly.cap3_profiles import resolve_cap3_profile
 from microseq_tests.assembly.registry import list_assemblers, get_assembler_spec
@@ -84,8 +84,11 @@ __all__ = [
     "run_postblast",
     "run_ab1_to_fastq",
     "run_fastq_to_fasta",
+    "stage_paired_fastas_from_fastq_dir",
     "run_full_pipeline",
     "run_compare_assemblers",
+    "run_pairing_report",
+    "run_assembly_summary",
 ]
 
 PathLike = Union[str, Path]
@@ -396,8 +399,6 @@ def run_trim(
     *,
     summary_tsv: PathLike | None = None,
     link_raw: bool = False,
-    mee_max: float | None = None,
-    mee_min_len: int | None = None, 
     primer_cfg_override: dict | None = None,
     trace_qc_flags: str = "auto",
 
@@ -574,6 +575,37 @@ def run_assembly(fasta_in: PathLike, out_dir: PathLike, *, threads: int | None =
 
 def run_paired_assembly(input_dir: PathLike, output_dir: PathLike, *, dup_policy: DupPolicy = DupPolicy.ERROR, cap3_options=None, fwd_pattern: str | None = None, rev_pattern: str | None = None, pairing_report: PathLike | None = None, enforce_same_well: bool = False, well_pattern: str | re.Pattern[str] | None = None, use_qual: bool = True, on_stage=None, on_progress=None) -> list[Path]:
     return assemble_pairs(Path(input_dir), Path(output_dir), dup_policy=dup_policy, cap3_options=cap3_options, fwd_pattern=fwd_pattern, rev_pattern=rev_pattern, pairing_report=pairing_report, enforce_same_well=enforce_same_well, well_pattern=well_pattern, use_qual=use_qual, on_stage=on_stage, on_progress=on_progress )
+
+def stage_paired_fastas_from_fastq_dir(input_fastq_dir: PathLike, output_fasta_dir: PathLike, *, use_qual: bool = True,) -> list[Path]:
+    """
+    Converting each FASTQ in input_dir (recursively) into one FASTA in output_dir. 
+    Returns list of written FASTA paths. Writes .qual alongside FASTA when 
+    use_qual=True. 
+    """
+    input_fastq_dir = Path(input_fastq_dir)
+    output_fasta_dir = Path(output_fasta_dir)
+    output_fasta_dir.mkdir(parents=True, exist_ok=True)
+
+    written_fasta_paths: list[Path] = [] 
+    for input_fastq_path in sorted(input_fastq_dir.rglob("*.fastq")):
+        output_fasta_path = output_fasta_dir / f"{input_fastq_path.stem}.fasta" 
+
+        if use_qual:
+            fasta_and_qual_paths = write_fasta_and_qual_from_fastq(
+                input_fastq_path,
+                output_fasta_path,
+            )
+            if fasta_and_qual_paths is None:
+                continue 
+            written_fasta_paths.append(fasta_and_qual_paths[0])
+        else:
+            records = list(SeqIO.parse(input_fastq_path, "fastq"))
+            if not records:
+                continue
+            SeqIO.write(records, output_fasta_path, "fasta")
+            written_fasta_paths.append(output_fasta_path)
+
+    return written_fasta_paths  
 
 # ───────────────────────────────────────────────────────── BLAST
 
@@ -3002,8 +3034,6 @@ def run_full_pipeline(
     well_pattern: str | re.Pattern[str] | None = None, 
     metadata: Path | None = None,
     summary_tsv: Path | None = None,
-    mee_max: float | None = None,
-    mee_min_len: int | None = None,
     collapse_replicates: bool = False,
     replicate_id_th: float | None = None,
     min_replicate_size: int | None = None,
@@ -3144,30 +3174,7 @@ def run_full_pipeline(
         return lambda p: on_progress(off + p * step // 100)
 
     if using_paired:
-        def _fastq_to_paired_fastas(
-            source_dir: Path,
-            dest_dir: Path,
-            *,
-            use_qual: bool,
-        ) -> list[Path]:
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            written: list[Path] = []
-            for fq in sorted(source_dir.rglob("*.fastq")): 
-                out_fp = dest_dir / f"{fq.stem}.fasta"
-                if use_qual:
-                    result = write_fasta_and_qual_from_fastq(fq, out_fp)
-                    if result is None:
-                        continue
-                    written.append(result[0])
-                else:
-                    records = list(SeqIO.parse(fq, "fastq"))
-                    if not records:
-                        continue
-                    out_fp.parent.mkdir(parents=True, exist_ok=True)
-                    SeqIO.write(records, out_fp, "fasta")
-                    written.append(out_fp)
-    
-            return written
+
 
         assembly_input = infile
         pretrim_fasta_dir: Path | None = None
@@ -3192,10 +3199,10 @@ def run_full_pipeline(
             pretrim_fastq_dir = out_dir / "passed_qc_fastq"
             if any(pretrim_fastq_dir.glob("*.fastq")):
                 pretrim_fasta_dir = out_dir / "qc" / "paired_fasta_pretrim"
-                _fastq_to_paired_fastas(pretrim_fastq_dir, pretrim_fasta_dir, use_qual=cap3_use_qual)
+                stage_paired_fastas_from_fastq_dir(pretrim_fastq_dir, pretrim_fasta_dir, use_qual=cap3_use_qual)
 
             fasta_dir = out_dir / "qc" / "paired_fasta"
-            generated_fastas = _fastq_to_paired_fastas(fastq_dir, fasta_dir, use_qual=cap3_use_qual)
+            generated_fastas = stage_paired_fastas_from_fastq_dir(fastq_dir, fasta_dir, use_qual=cap3_use_qual)
             if not generated_fastas:
                 raise ValueError(f"No FASTA files generated from {fastq_dir}")
             assembly_input = fasta_dir
@@ -3664,3 +3671,101 @@ def run_fastq_to_fasta(
     except Exception:
         L.exception("FASTQ->FASTA failed")
         return 1
+
+
+def run_pairing_report(
+    input_dir: PathLike,
+    output_tsv: PathLike,
+    *,
+    fwd_pattern: str | None = None,
+    rev_pattern: str | None = None,
+    dup_policy: DupPolicy = DupPolicy.ERROR,
+    enforce_same_well: bool = False,
+    well_pattern: str | re.Pattern[str] | None = None,
+) -> Path:
+    """
+    Write the canonical pairing report TSV for a staged paired-input directory.
+
+    This reuses MicroSeq's pairing logic and returns the output TSV path.
+
+    """
+    # Normalize input directory as a path object 
+    input_dir = Path(input_dir)
+
+    # Normalize tsv output as a path object 
+    output_tsv = Path(output_tsv) 
+
+    # Ensure parent directory exists before writing 
+    output_tsv.parent.mkdir(parents=True, exist_ok=True)
+
+    # Reuse same pairing registry used by core codebase here 
+    paired_samples, pairing_metadata = group_pairs(
+        input_dir,
+        dup_policy=dup_policy,
+        fwd_pattern=fwd_pattern,
+        rev_pattern=rev_pattern,
+        enforce_same_well=enforce_same_well,
+        well_pattern=well_pattern,
+        return_metadata=True,
+    )
+
+    # Reuse the canonical TSV writer for pairing reports 
+    _write_pairing_report(paired_samples, pairing_metadata, output_tsv)
+
+    # Return path that was written 
+    return output_tsv 
+
+
+def run_assembly_summary(
+    asm_dir: PathLike,
+    pairing_input_dir: PathLike,
+    output_tsv: PathLike,
+    *,
+    fwd_pattern: str | None = None,
+    rev_pattern: str | None = None, 
+    dup_policy: DupPolicy = DupPolicy.ERROR,
+    enforce_same_well: bool = False,
+    well_pattern: str | re.Pattern[str] | None = None,
+) -> Path:
+    """
+    Write the canonical assembly summary TSV for a paired assembly run.
+
+    This reuses MicroSeq's summary parser and returns the output TSV path.
+
+    """
+    # Normalize the assembly directory path.
+    asm_dir = Path(asm_dir)
+
+    # Normalize the staged pairing-input directory path.
+    pairing_input_dir = Path(pairing_input_dir)
+
+    # Normalize the output TSV path.
+    output_tsv = Path(output_tsv)
+
+    # Ensure the parent directory exists before writing.
+    output_tsv.parent.mkdir(parents=True, exist_ok=True)
+
+    # Reconstruct the same pairing catalog used to interpret per-sample outputs.
+    paired_samples, missing_samples = _collect_pairing_catalog(
+        pairing_input_dir,
+        fwd_pattern=fwd_pattern,
+        rev_pattern=rev_pattern,
+        dup_policy=dup_policy,
+        enforce_same_well=enforce_same_well,
+        well_pattern=well_pattern,
+    )
+
+    # Keep both assembled and pair-missing sample IDs in the final summary.
+    sample_ids = sorted(set(paired_samples) | set(missing_samples))
+
+    # Reuse the canonical summary writer from cap3_report.py.
+    parse_cap3_reports(
+        asm_dir,
+        sample_ids,
+        output_tsv=output_tsv,
+        missing_samples=missing_samples,
+    )
+
+    # Return the concrete path that was written.
+    return output_tsv 
+   

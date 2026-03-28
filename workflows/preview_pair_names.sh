@@ -7,10 +7,11 @@ Usage:
   preview_pair_names.sh <input_dir>
 
 What it does:
-  - scans *.ab1 files in <input_dir>
+  - recursively scans sequence-like files under <input_dir>
   - checks whether forward/reverse primer labels look canonically delimited
   - reports CURRENT / STATUS / PRIMER_LABEL / ISSUE / SUGGESTED
   - optionally renames files in place
+  - recommends the actual MicroSeq paired preview step afterward
 
 Current default primer labels:
   Forward: 27F, 8F, 515F
@@ -18,9 +19,9 @@ Current default primer labels:
 
 Notes:
   - this script ignores well matching
-  - it is a filename hygiene helper, not the authoritative pairing detector
-  - after renaming, confirm with:
-      microseq assembly --mode paired -i <input_dir> -o <preview_out> --dup-policy error --dry-run
+  - this script is a filename hygiene helper, not the authoritative pairing step
+  - after preview/rename, run the actual MicroSeq preview:
+      microseq assembly --mode paired -i <input_dir> -o <preview_out> --dup-policy error --preview-pairs
 EOF
 }
 
@@ -28,11 +29,18 @@ INPUT_DIR="${1:-}"
 [[ -n "$INPUT_DIR" ]] || { usage; exit 1; }
 [[ -d "$INPUT_DIR" ]] || { echo "Error: input_dir not found: $INPUT_DIR" >&2; exit 1; }
 
-shopt -s nullglob
-FILES=( "$INPUT_DIR"/*.ab1 "$INPUT_DIR"/*.AB1 )
-shopt -u nullglob
+# GUI-like broad discovery for common sequence-bearing file types.
+mapfile -t FILES < <(
+  find "$INPUT_DIR" -type f \
+    \( -iname '*.ab1' -o -iname '*.seq' -o -iname '*.fastq' -o -iname '*.fq' \
+       -o -iname '*.fasta' -o -iname '*.fa' -o -iname '*.fas' \) \
+    | LC_ALL=C sort
+)
 
-(( ${#FILES[@]} > 0 )) || { echo "Error: no .ab1 files found in $INPUT_DIR" >&2; exit 1; }
+(( ${#FILES[@]} > 0 )) || {
+  echo "Error: no supported files found under $INPUT_DIR" >&2
+  exit 1
+}
 
 FWD_LABELS=(27F 8F 515F)
 REV_LABELS=(1492R 806R 926R)
@@ -40,11 +48,22 @@ REV_LABELS=(1492R 806R 926R)
 TMP_MAP="$(mktemp)"
 trap 'rm -f "$TMP_MAP"' EXIT
 
+# Print nothing at all when there are no matches.
+emit_found_lines() {
+  local -n arr_ref=$1
+  if (( ${#arr_ref[@]} > 0 )); then
+    printf '%s\n' "${arr_ref[@]}"
+  fi
+}
+
+# Canonical delimiter policy for this helper:
+# primer labels should be separated by "_" or "-" or appear at string boundaries.
+# "+" is intentionally NOT treated as canonical, so A+1492R... becomes FIXABLE.
 detect_safe_primer_label() {
   local stem="$1"
   local found=()
-
   local label
+
   for label in "${FWD_LABELS[@]}"; do
     if [[ "$stem" =~ (^|[_-])${label}([_-]|$) ]]; then
       found+=("forward:${label}")
@@ -57,14 +76,15 @@ detect_safe_primer_label() {
     fi
   done
 
-  printf '%s\n' "${found[@]}"
+  emit_found_lines found
 }
 
+# Relaxed detection: substring-only. Used to identify likely fixable cases.
 detect_relaxed_primer_label() {
   local stem="$1"
   local found=()
-
   local label
+
   for label in "${FWD_LABELS[@]}"; do
     if [[ "$stem" == *"$label"* ]]; then
       found+=("forward:${label}")
@@ -77,7 +97,7 @@ detect_relaxed_primer_label() {
     fi
   done
 
-  printf '%s\n' "${found[@]}"
+  emit_found_lines found
 }
 
 canonicalize_not_delimited() {
@@ -99,8 +119,9 @@ canonicalize_not_delimited() {
     newstem="${prefix}_${primer_label}"
   fi
 
-  newstem="${newstem//__/_}"
-  newstem="${newstem//--/-}"
+  # light cleanup
+  while [[ "$newstem" == *__* ]]; do newstem="${newstem//__/_}"; done
+  while [[ "$newstem" == *--* ]]; do newstem="${newstem//--/-}"; done
   newstem="${newstem#_}"
   newstem="${newstem#-}"
   newstem="${newstem%_}"
@@ -109,8 +130,8 @@ canonicalize_not_delimited() {
   printf '%s\n' "$newstem"
 }
 
-printf '%-42s %-10s %-18s %-38s %s\n' "CURRENT" "STATUS" "PRIMER_LABEL" "ISSUE" "SUGGESTED"
-printf '%-42s %-10s %-18s %-38s %s\n' "-------" "------" "------------" "-----" "---------"
+printf '%-50s %-10s %-18s %-38s %s\n' "CURRENT" "STATUS" "PRIMER_LABEL" "ISSUE" "SUGGESTED"
+printf '%-50s %-10s %-18s %-38s %s\n' "-------" "------" "------------" "-----" "---------"
 
 NEEDS_APPLY=0
 
@@ -153,7 +174,7 @@ for path in "${FILES[@]}"; do
     ISSUE="no forward/reverse primer label detected"
   fi
 
-  printf '%-42s %-10s %-18s %-38s %s\n' "$base" "$STATUS" "$PRIMER_LABEL" "$ISSUE" "$SUGGESTED"
+  printf '%-50s %-10s %-18s %-38s %s\n' "$base" "$STATUS" "$PRIMER_LABEL" "$ISSUE" "$SUGGESTED"
   printf '%s\t%s\t%s\n' "$path" "$base" "$SUGGESTED" >> "$TMP_MAP"
 done
 
@@ -164,8 +185,11 @@ echo "  FIXABLE = primer label found but jammed into the sample name; suggested 
 echo "  REVIEW  = missing or ambiguous primer label; inspect manually"
 
 echo
-echo "Recommended authoritative check after preview:"
-echo "  microseq assembly --mode paired -i \"$INPUT_DIR\" -o \"${INPUT_DIR%/}_pair_preview\" --dup-policy error --dry-run"
+echo "Recommended authoritative MicroSeq preview:"
+echo "  microseq assembly --mode paired -i \"$INPUT_DIR\" -o \"${INPUT_DIR%/}_pair_preview\" --dup-policy error --preview-pairs"
+echo
+echo "Then run:"
+echo "  bash workflows/paired_ab1_pipeline.sh \"$INPUT_DIR\" gg2 4"
 
 if (( NEEDS_APPLY == 0 )); then
   echo
@@ -209,6 +233,8 @@ echo
 echo "Renames applied."
 echo "Audit log: $RENAME_LOG"
 echo
-echo "Now run the pipeline bash script I have paired_ab1_pipeline.sh"
-echo "you can also do a dry run before hand as a sanity check for assembly like so but I'll leave that up to you as the user..."
-echo "  microseq assembly --mode paired -i \"$INPUT_DIR\" -o \"${INPUT_DIR%/}_pair_preview\" --dup-policy error --dry-run"
+echo "Now run:"
+echo "  microseq assembly --mode paired -i \"$INPUT_DIR\" -o \"${INPUT_DIR%/}_pair_preview\" --dup-policy error --preview-pairs"
+echo
+echo "Then run:"
+echo "  bash workflows/paired_ab1_pipeline.sh \"$INPUT_DIR\" gg2 4"

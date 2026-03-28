@@ -48,7 +48,7 @@ trace_qc:
   enable_mixture_inference: false
   mixture_suspect_threshold: 0.10
 primer_trim:
-  mode: off
+  mode: "off"
   stage: post_quality
   preset: ""
   max_mismatch: 2

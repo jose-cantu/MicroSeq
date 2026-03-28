@@ -1,0 +1,2 @@
+read_id	left_trim_bases	right_trim_bases	final_len	mean_q
+BTR+1492R	140	27	835	37.18

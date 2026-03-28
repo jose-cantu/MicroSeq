@@ -1,0 +1,2 @@
+read_id	left_trim_bases	right_trim_bases	final_len	mean_q
+BTF+27F	24	28	692	31.34

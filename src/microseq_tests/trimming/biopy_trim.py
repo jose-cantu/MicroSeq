@@ -172,8 +172,6 @@ def _trim_all(
     per_base_q: int,
     file_q_threshold: float,
     min_len: int,
-    mee_max: float | None,
-    mee_min_len: int | None,
     min_reads_kept: int | None,
     max_drop_fraction: float | None,
     passed_dir: Path,
@@ -185,7 +183,7 @@ def _trim_all(
     trace_qc_apply_thresholds: bool | None,
     bar,
 ) -> None:
-    _ = (mee_max, mee_min_len, min_reads_kept, max_drop_fraction)
+    _ = (min_reads_kept, max_drop_fraction)
     policy_desc = (
         f"{method}:cutoff_q={cutoff_q}" if method != "legacy_window" else f"legacy_window:window={window_size},q={per_base_q}"
     )
@@ -274,8 +272,6 @@ def trim_folder(
     per_base_q: int = 20,
     file_q_threshold: float = 20.0,
     min_len: int = 200,
-    mee_max: float | None = None,
-    mee_min_len: int | None = None,
     min_reads_kept: int | None = None,
     max_drop_fraction: float | None = None,
     combined_tsv: str | Path | None = None,
@@ -313,8 +309,6 @@ def trim_folder(
             per_base_q=per_base_q,
             file_q_threshold=file_q_threshold,
             min_len=min_len,
-            mee_max=mee_max,
-            mee_min_len=mee_min_len,
             min_reads_kept=min_reads_kept,
             max_drop_fraction=max_drop_fraction,
             passed_dir=passed_dir,

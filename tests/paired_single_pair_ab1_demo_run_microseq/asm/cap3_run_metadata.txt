@@ -1,0 +1,6 @@
+cap3_executable	cap3
+cap3_version	cap3 10.2011
+sample_id	cap3_command	cap3_stdout_log	cap3_stderr_log
+A+	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=563 identity=0.9982
+BT_+	merge_two_reads engine=biopython strategy=cascade order=['biopython', 'ungapped', 'edlib'] orientation=revcomp overlap=240 identity=0.9368
+BT_+	cap3 BT_+_paired.fasta -o 100 -p 95 -s 900 -k 0 -y 100	/home/jason/MicroSeq/tests/paired_single_pair_ab1_demo_run_microseq/asm/logs/cap3/BT__cap3_default.stdout.log	/home/jason/MicroSeq/tests/paired_single_pair_ab1_demo_run_microseq/asm/logs/cap3/BT__cap3_default.stderr.log
