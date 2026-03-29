@@ -89,6 +89,7 @@ __all__ = [
     "run_compare_assemblers",
     "run_pairing_report",
     "run_assembly_summary",
+    "run_overlap_audit",
 ]
 
 PathLike = Union[str, Path]
@@ -3768,4 +3769,73 @@ def run_assembly_summary(
 
     # Return the concrete path that was written.
     return output_tsv 
-   
+
+# Wrap the canoincal overlap-audit writer in helper function 
+def run_overlap_audit(
+    pairing_input_dir: PathLike,
+    output_tsv: PathLike,
+    *,
+    fwd_pattern: str | None = None,
+    rev_pattern: str | None = None,
+    dup_policy: DupPolicy = DupPolicy.ERROR,
+    enforce_same_well: bool = False,
+    well_pattern: str | re.Pattern[str] | None = None, 
+    pretrim_input_dir: PathLike | None = None,
+    primer_trim_report: PathLike | None = None,
+) -> Path: 
+    # Normalize staged pairing input directory 
+    pairing_input_dir = Path(pairing_input_dir)
+
+    # Normalize requested output TSV path 
+    output_tsv = Path(output_tsv)
+
+    # Ensure the output directory exists before writing 
+    output_tsv.parent.mkdir(parents=True, exist_ok=True)
+
+    # Reconstruct same paired sample catalog used in the paired workflow 
+    paired_samples, _missing_samples = _collect_pairing_catalog(
+        pairing_input_dir,
+        fwd_pattern=fwd_pattern,
+        rev_pattern=rev_pattern,
+        dup_policy=dup_policy,
+        enforce_same_well=enforce_same_well,
+        well_pattern=well_pattern,
+    )
+
+    # Default ot no pretrim catalog unless a valid pretrim input directory exists 
+    pretrim_paired_samples = None 
+
+    # If a pretrim staged FASTA directory exists, reconstruct its pairing catalog too 
+    if pretrim_input_dir is not None: 
+        pretrim_input_dir = Path(pretrim_input_dir)
+        if pretrim_input_dir.exists():
+            pretrim_paired_samples, _ = _collect_pairing_catalog(
+                pretrim_input_dir,
+                fwd_pattern=fwd_pattern,
+                rev_pattern=rev_pattern,
+                dup_policy=dup_policy,
+                enforce_same_well=enforce_same_well,
+                well_pattern=well_pattern,
+            )
+    # Default to an empty primer trim summary map unless a report path exists 
+    primer_trim_bases_by_sample: dict[str, dict[str, int]] = {} 
+
+    # If primer_trim_report.tsv exists, load the per sample trimmed base totals 
+    if primer_trim_report is not None:
+        primer_trim_report = Path(primer_trim_report)
+        if primer_trim_report.exists():
+            primer_trim_bases_by_sample = _collect_primer_trim_bases_by_sample(
+                primer_trim_report
+            )
+
+    # Reuse the canonical overlap audit writer 
+    _write_overlap_audit(
+        paired_samples,
+        output_tsv,
+        pretrim_paired_samples=pretrim_paired_samples,
+        primer_trim_bases_by_sample=primer_trim_bases_by_sample,
+    )
+
+    # Return the concrete TSV path for caller logging and wrapper use 
+    return output_tsv
+

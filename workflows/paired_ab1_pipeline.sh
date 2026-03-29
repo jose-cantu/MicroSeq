@@ -27,6 +27,16 @@ DUP_POLICY="${DUP_POLICY:-error}"
 FWD_PATTERN="${FWD_PATTERN:-27F}"
 REV_PATTERN="${REV_PATTERN:-1492R}"
 
+# Create a one run scoped session id for this wrapper I made 
+# If the user already exported MICROSEQ_SESSION_ID outside the script, keep it then.
+RUN_SESSION_ID="${MICROSEQ_SESSION_ID:-$(date +%Y%m%d-%H%M%S)-paired-wrapper}"
+
+# Export it once so every later MicroSeq command inherits the same session id 
+export MICROSEQ_SESSION_ID="$RUN_SESSION_ID"
+
+# Show session id being used for this whole wrapper run for my user 
+echo "MICROSEQ_SESSION_ID=$MICROSEQ_SESSION_ID"
+
 [[ -n "$INPUT_DIR" && -n "$DB_KEY" && -n "$BLAST_THREADS" ]] || { usage; exit 1; }
 [[ -d "$INPUT_DIR" ]] || { echo "Error: input_dir not found: $INPUT_DIR" >&2; exit 1; }
 [[ "$DB_KEY" =~ ^(gg2|silva|ncbi)$ ]] || { echo "Error: db_key must be one of: gg2 | silva | ncbi" >&2; exit 1; }
@@ -76,7 +86,17 @@ microseq assembly-summary \
   -o "$OUT_DIR/asm/assembly_summary.tsv" \
   --dup-policy "$DUP_POLICY" \
   --fwd-pattern "$FWD_PATTERN" \
-  --rev-pattern "$REV_PATTERN" 
+  --rev-pattern "$REV_PATTERN"
+
+# Write canonical overlap audit using MicroSeq 
+microseq overlap-audit \
+  -i "$PAIRED_FASTA_DIR" \
+  -o "$OUT_DIR/qc/overlap_audit.tsv" \
+  --dup-policy "$DUP_POLICY" \
+  --fwd-pattern "$FWD_PATTERN" \
+  --rev-pattern "$REV_PATTERN" \
+  --pretrim-input-dir "$OUT_DIR/qc/paired_fasta_pretrim" \
+  --primer-trim-report "$OUT_DIR/qc/primer_trim_report.tsv" 
 
 echo "[4/6] build BLAST input FASTA"
 BLAST_INPUT="$OUT_DIR/asm/blast_inputs.fasta"

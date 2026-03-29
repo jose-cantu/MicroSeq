@@ -1,3 +1,3 @@
-sid  	F_path                                                                                               	R_path                                                                                                 	detector                
-A+   	tests/paired_single_pair_ab1_demo_run_microseq/qc/paired_fasta/A+_27F_2026-01-29_C07_trimmed.fasta   	tests/paired_single_pair_ab1_demo_run_microseq/qc/paired_fasta/A+_1492R_2026-01-29_E07_trimmed.fasta   	F:detector | R:detector 
-BT_+ 	tests/paired_single_pair_ab1_demo_run_microseq/qc/paired_fasta/BT_+_27F_2026-03-10_F03_trimmed.fasta 	tests/paired_single_pair_ab1_demo_run_microseq/qc/paired_fasta/BT_+_1492R_2026-03-10_G03_trimmed.fasta 	F:detector | R:detector 
+sid	F_path	R_path	detector
+A+	tests/paired_single_pair_ab1_demo_run_microseq/qc/paired_fasta/A+_27F_2026-01-29_C07_trimmed.fasta	tests/paired_single_pair_ab1_demo_run_microseq/qc/paired_fasta/A+_1492R_2026-01-29_E07_trimmed.fasta	F:detector | R:detector
+BT_+	tests/paired_single_pair_ab1_demo_run_microseq/qc/paired_fasta/BT_+_27F_2026-03-10_F03_trimmed.fasta	tests/paired_single_pair_ab1_demo_run_microseq/qc/paired_fasta/BT_+_1492R_2026-03-10_G03_trimmed.fasta	F:detector | R:detector

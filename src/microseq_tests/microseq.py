@@ -7,7 +7,7 @@ from microseq_tests.utility.progress import stage_bar
 from microseq_tests.utility.merge_hits import merge_hits 
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
-from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, run_full_pipeline, _summarize_paired_candidates, _suggest_pairing_patterns_staged, _collect_pairing_catalog, _write_overlap_audit, stage_paired_fastas_from_fastq_dir, run_pairing_report, run_assembly_summary)
+from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, run_full_pipeline, _summarize_paired_candidates, _suggest_pairing_patterns_staged, _collect_pairing_catalog, _write_overlap_audit, stage_paired_fastas_from_fastq_dir, run_pairing_report, run_assembly_summary, run_overlap_audit)
 from microseq_tests.utility.utils import setup_logging, load_config, expand_db_path
 from microseq_tests.assembly.pairing import DupPolicy 
 from microseq_tests.blast.run_blast import run_blast
@@ -106,6 +106,20 @@ def main() -> None:
     p_assembly_summary.add_argument("--rev-pattern", default=None, help="Optional custom reverse primer pattern/regex")
     p_assembly_summary.add_argument("--enforce-well", action="store_true")
     p_assembly_summary.add_argument("--well-pattern")
+   
+    # CLI subcommand writes canonical overlap audit tsv (same design in my GUI) 
+    p_overlap_audit = sp.add_parser("overlap-audit", help="Writes canonical qc/overlap_audit.tsv. Helps diagnose why no overlap from looking at stats.")
+    p_overlap_audit.add_argument("-i", "--input", required=True, help="Staged pairing input directory ie qc/paired_fasta.")
+    p_overlap_audit.add_argument("-o", "--output", required=True, help="Output TSV path")
+    p_overlap_audit.add_argument("--dup-policy", choices=[policy.value for policy in DupPolicy],
+                                 default="error")
+    p_overlap_audit.add_argument("--fwd-pattern", default=None, help="Optional custom forward primer/label/regex pattern")
+    p_overlap_audit.add_argument("--rev-pattern", default=None, help="Optional custom reverse primer label/regex pattern.") 
+    p_overlap_audit.add_argument("--enforce-well", action="store_true")
+    p_overlap_audit.add_argument("--well-pattern")
+    p_overlap_audit.add_argument("--pretrim-input-dir", default=None, help="Optional qc/primer_trim_report.tsv")
+    p_overlap_audit.add_argument("--primer-trim-report", default=None, help="Optional qc/primer_trim_report.tsv file.")
+
     
     # assembly 
     p_asm = sp.add_parser("assembly", help="De novo assembly via CAP3")
@@ -349,7 +363,21 @@ def main() -> None:
             rev_pattern=args.rev_pattern,
             enforce_same_well=args.enforce_well,
             well_pattern=args.well_pattern)
-        print(f"Assembly summary ready: {out_path}") 
+        print(f"Assembly summary ready: {out_path}")
+
+    elif args.cmd == "overlap-audit":
+        out_path = run_overlap_audit(
+            args.input,
+            args.output,
+            dup_policy=DupPolicy(args.dup_policy),
+            fwd_pattern=args.fwd_pattern,
+            rev_pattern=args.rev_pattern,
+            enforce_same_well=args.enforce_well,
+            well_pattern=args.well_pattern,
+            pretrim_input_dir=args.pretrim_input_dir,
+            primer_trim_report=args.primer_trim_report
+        )
+        print(f"Overlap audit ready: {out_path}")
 
     elif args.cmd == "assembly":
         if args.preview_pairs and args.mode != "paired":
