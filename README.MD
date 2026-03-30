@@ -6,7 +6,7 @@
 **MicroSeq** is an end‑to‑end microbial sequence‑analysis toolkit that scales from a single laptop to a multi‑node HPC cluster.
 It automates everything from raw trace files (AB1) or FASTQ reads all the way to BIOM/CSV tables that are ready for downstream statistics or visualisation.
 
-*Current status as of March 2026*: CLI workflow is feature‑complete and battle‑tested internally; I have workflow scripts that I plan to update along with a guide on how to use them in the future on a high performace cluster very soon; the PySide6 GUI is currently present in v1.0. Rust speed‑ups  for alignment and I/O are planned for v2.0. Note that the GUI I plan on making small revisions to it left based on the roadmap that I have in my project section next to the pull requestion and actions tabs on the right. The roadmap is also below in the roadmap section, close to the end with the link that takes you to project. 
+*Current status as of March 2026*: CLI workflow is feature‑complete and battle‑tested internally; the CLI workflow and HPC bash-wrapper path are now documented alongside the GUI workflow. The CLI is suitable for headless and cluster execution; the PySide6 GUI is currently present in v1.0. Rust speed‑ups  for alignment and I/O are planned for v2.0. Note that the GUI I plan on making small revisions to it left based on the roadmap that I have in my project section next to the pull requestion and actions tabs on the right. The roadmap is also below in the roadmap section, close to the end with the link that takes you to project. 
 
 For version control, please see the changelog I have attached. [CHANGELOG](https://github.com/jose-cantu/MicroSeq/blob/master/CHANGELOG.MD)
 
@@ -15,6 +15,8 @@ You can also just select docs view and it will take you to the landing page for 
 For the resolution model used to collapse multiple hypotheses into sample-level outcomes, see [Workflow Resolution Funnel](docs/workflow_resolution.md).
 For a very quick demo on how to use MicroSeq here is a link here to get you started. I use the paired demo test data in my test directory. 
 [Quick MicroSeq walkthrough](https://www.youtube.com/watch?v=64dGTM4HDcE) 
+
+Reference to the bash-wrapper script I made you can go here[workflow](https://github.com/jose-cantu/MicroSeq/tree/master/workflows) and use the `paired_ab1_pipeline.sh` for the full pipeline in MicroSeq minus the biom output. Use `preview_pair_names.sh` beforehand to get a sanity check to make sure your F/R pairing are named correctly in MicroSeq. It will resolve them for you if not. You will find the documentation of how to use them in the readme under workflow for CLI usage.  
 
 ---
 
