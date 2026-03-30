@@ -102,7 +102,7 @@ Practical notes:
 | **Primer trim mode** | Chooses whether primer-like sequence search is **Off**, **Detect**, or **Clip**. |
 | **Primer trim stage** | Chooses whether primer-like sequence search happens **Pre-quality** or **Post-quality**. |
 | **Duplicate policy** | Controls what happens when multiple forward or reverse files map to the same sample. |
-| **Enforce well codes** | Requires matching plate well labels such as `A1`–`H12` in paired mode. |
+| **Enforce well codes** | Requires matching plate well labels such as `A1` to `H12` in paired mode. |
 | **BIOM** | Includes BIOM output during post-BLAST processing when that output is desired. |
 
 ### BLAST controls: adjustable ranges and defaults
@@ -111,10 +111,10 @@ The BLAST dials are adjustable in the GUI.
 
 | Dial | Allowed range | Default |
 | --- | --- | --- |
-| Identity (%) | 50–100 | 97 |
-| Q-cov (%) | 10–100 | 80 |
-| Max hits | 1–500 | 5 |
-| Threads | 1–32 | 4 |
+| Identity (%) | 50 to 100 | 97 |
+| Q-cov (%) | 10 to 100 | 80 |
+| Max hits | 1 to 500 | 5 |
+| Threads | 1 to 32 | 4 |
 
 ### Fast vs Comprehensive
 
@@ -137,8 +137,8 @@ Use this when you expect near full-length isolate reads and want routine classif
 | --- | --- |
 | Algorithm | Fast (megablast) |
 | Identity (%) | 97 |
-| Q-cov (%) | 85–90 |
-| Max hits | 3–5 |
+| Q-cov (%) | 85 to 90 |
+| Max hits | 3 to 5 |
 | Threads | 4 for a typical local run, or match your HPC allocation |
 
 Why:
@@ -155,8 +155,8 @@ Use this when only part of the 16S region is present and total query coverage is
 | --- | --- |
 | Algorithm | Fast (megablast) first |
 | Identity (%) | 97 |
-| Q-cov (%) | 70–80 |
-| Max hits | 5–10 |
+| Q-cov (%) | 70 to 80 |
+| Max hits | 5 to 10 |
 | Threads | Same logic as full-length; hardware-dependent |
 
 Why:
@@ -181,8 +181,8 @@ For these cases, use starting settings like:
 | Setting | Recommended start |
 | --- | --- |
 | Algorithm | Comprehensive (blastn) |
-| Identity (%) | 95–97 |
-| Q-cov (%) | 80–90 |
+| Identity (%) | 95 to 97 |
+| Q-cov (%) | 80 to 90 |
 | Max hits | 5 |
 | Threads | Hardware-dependent |
 
@@ -191,8 +191,8 @@ For these cases, use starting settings like:
 | Setting | Recommended start |
 | --- | --- |
 | Algorithm | Comprehensive (blastn) |
-| Identity (%) | 95–97 |
-| Q-cov (%) | 60–75 |
+| Identity (%) | 95 to 97 |
+| Q-cov (%) | 60 to 75 |
 | Max hits | 10 |
 | Threads | Hardware-dependent |
 
@@ -299,8 +299,8 @@ Use this when the 16S region is shorter, the organism may be divergent, or you w
 4. Start with these BLAST settings for a shorter routine partial 16S read:
    * **Algorithm**: Fast (megablast) first
    * **Identity**: 97
-   * **Q-cov**: 70–80
-   * **Max hits**: 5–10
+   * **Q-cov**: 70 to 80
+   * **Max hits**: 5 to 10
 5. Switch to **Comprehensive (blastn)** up front when:
    * the region is short enough that megablast may be brittle
    * you expect divergence
@@ -308,9 +308,9 @@ Use this when the 16S region is shorter, the organism may be divergent, or you w
    * the first pass is weak and you want higher sensitivity
 6. For harder cases, start with:
    * **Algorithm**: Comprehensive (blastn)
-   * **Identity**: 95–97
-   * **Q-cov**: 60–75 for shorter regions, or 80–90 for harder full-length cases
-   * **Max hits**: 5–10
+   * **Identity**: 95 to 97
+   * **Q-cov**: 60 to 75 for shorter regions, or 80–90 for harder full-length cases
+   * **Max hits**: 5 to 10
 7. Run **Full Pipeline** or the specific stage you need.
 
 Interpretation rule of thumb:
