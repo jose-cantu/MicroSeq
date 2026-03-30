@@ -1,398 +1,235 @@
 ---
-layout: page 
-title: Paired CAP3 assembly 
+layout: page
+title: Paired CAP3 assembly
 permalink: /paired-assembly/
 ---
 
+> Use this page to understand what paired mode means biologically and how MicroSeq decides what sequence, if any, should move forward to BLAST.
+>
+> For command examples and wrapper usage, see [CLI Workflows](cli_workflow_tutorial.md).
+> For button-by-button GUI use, see [GUI Walkthrough](gui_usage.md).
+> For the canonical artifact table, see [Output Artifacts Reference](output_artifacts.md).
+> For ambiguity routing and sample-level resolution states, see [Workflow Resolution Funnel](workflow_resolution.md).
+> For algorithm and design tradeoffs, see [MicroSeq design: algorithm and architecture choices for Sanger assembly](design_algorithm_choices.md).
 
-> See also: [Workflow Resolution Funnel](workflow_resolution.md) for how ambiguous hypotheses are collapsed into sample-level resolution states.
-> Ambiguous overlap decision rules (feasibility gates, tie conditions, and policy behaviors such as `topk`/`best_guess`) are documented in the Workflow Resolution Funnel section “Assemble -> Validate handoff: how `ambiguous_overlap` is decided.”
-> For the cross-workflow output table in one place, see [Output Artifacts Reference](output_artifacts.md).
+## Scope and cross-links
 
-MicroSeq now ships a forward/reverse pairing workflow that works in both the CLI and GUI.
-It can auto-detect primer tokens in filenames, enforce plate well consistency, and run CAP3 per sample with duplicate-handling policies.
+This page is the semantic reference for paired forward/reverse assembly in MicroSeq.
+It focuses on the biological meaning of pairing, contigs, singlets, overlap failure,
+and BLAST handoff. It does **not** try to teach the wrapper flow or the GUI.
 
-## What changed
+In microbiology terms, paired mode starts from one practical question:
+do these forward and reverse reads from the same sample support one defensible
+consensus sequence, or do they only support partial evidence?
 
-* **Primer token registry + suggestions.** Filenames are scanned with mid/prefix/suffix detectors by default; you can also provide your own regex via `--fwd-pattern/--rev-pattern`.
-  When pairing fails, MicroSeq will summarise which detectors matched and suggest concrete regexes to try.
-* **Well-aware pairing.** Plate positions such as `A1`–`H12` can be required with `--enforce-well`; mismatched or missing wells are skipped with an explicit report.
-* **Duplicate policies.** Choose whether duplicate forward/reverse files error, keep-first, keep-last, merge, or **keep-separate** (runs CAP3 per duplicate and preserves separate outputs).
-* **Generalised inputs.** Mixed FASTA, FASTQ, or AB1 inputs are normalised to per-read FASTA before pairing so you can point at a folder or a merged FASTA file.
-* **Contig traceability.**  Blast inputs are rewritten with sample aware IDs and tracked in `asm/blast_inputs.tsv` so CAP3 contigs/singlets can be traced back to the original IDs. 
-**GUI support.** The GUI now stages multi-file selections, exposes single vs paired assembly, known synthetic flank presets (trim context), advanced regex toggles, duplicate policy selector, well enforcement, and a pairing preview dialog. Pairing-token presets such as 27F/1492R remain available for forward/reverse matching and are separate from trim presets.
-* **BLAST input manifest.** Paired assemblies now emit `asm/blast_inputs.fasta` and `asm/blast_inputs.tsv` so you can trace BLAST inputs back to CAP3 contigs/singlets and see which samples were missing mates.
+## Paired-mode semantic model
 
-## Migration note
+In paired mode, MicroSeq normalizes the input reads, groups files into forward/reverse
+pairs, runs paired assembly logic, and then chooses the sequence output that will
+represent that sample downstream.
 
-If you still have historical settings using `primer_trim.preset: 16S_27F_1492R`, update to custom synthetic flank sequences (Detect/Clip) or run trim mode Off for standard 16S pipelines. 27F/1492R pairing tokens remain unchanged for paired matching.
+At the sample level, the main outcomes are:
 
-## CLI tutorial: guaranteed forward/reverse pairing
+| Outcome | What it means biologically | What MicroSeq does downstream |
+| --- | --- | --- |
+| `contig` | Forward and reverse reads support one merged consensus sequence. | Sends the contig to BLAST. |
+| `singlet` | A valid pair existed, but assembly did not yield a defended merged contig; at least one standalone sequence remains usable. | Sends singlet sequence(s) to BLAST according to handoff policy. |
+| `no_payload` | The sample reached assembly, but no usable sequence output survived for downstream search. | Records the sample in the manifest; sends no sequence to BLAST. |
+| `pair_missing` | Only one orientation survived pairing detection or well enforcement, so no true paired assembly was possible. | Records the sample in the manifest; sends no sequence to BLAST. |
 
-1) **Prepare inputs.** Place your forward/reverse FASTA (or FASTQ/AB1) files under one directory. Default detectors recognise tokens like `_27F_` / `-1492R-` anywhere in the filename.
-2) **Run paired assembly with defaults** (auto-detection + CAP3):
+For microbiology workflows, the key practical idea is this:
+paired mode is not just “run CAP3.” It is a structural decision layer that asks
+whether two directional reads support a single sample-level sequence interpretation.
 
-```bash
-microseq assembly --mode paired \
-  -i data/paired_reads/ \
-  -o results/paired_cap3 \
-  --dup-policy merge
-```
+## Pairing rules: tokens/primer label, wells, duplicate policy
 
-* I would recommend just defaulting to `--dup-policy error` unless otherwise. 
-* `--dup-policy merge` merges duplicate orientations before CAP3; swap to `keep-first`, `keep-last`, or `keep-separate` as needed.
-* Outputs land in `results/paired_cap3/<sample>/` with `*.cap.contigs`, `*.cap.singlets`, and a pairing report, plus `asm/blast_inputs.fasta`/`asm/blast_inputs.tsv` for BLAST input sequence tracking. 
-3) **Require wells + custom primer regex** (when filenames include plate codes and unusual primer names):
+MicroSeq pairs files deterministically from filenames.
+It strips known forward/reverse tokens/primer labels from the name, resolves a sample ID,
+and optionally checks plate well codes. This favors reproducibility over guesswork.
 
-```bash
-microseq assembly --mode paired \
-  -i plates/run1/ \
-  -o results/well_enforced \
-  --fwd-pattern "(27F|8F|customF)" \
-  --rev-pattern "(1492R|806R|customR)" \
-  --enforce-well --well-pattern "(?i)[A-H](?:0?[1-9]|1[0-2])" \
-  --dup-policy keep-separate
-```
+### Core pairing rules
 
-* Custom regex detectors are tried before the built-in registry so edge-case primer strings can still be paired.
-* `--enforce-well` buckets pairs by plate position; files without wells or with mismatched wells are dropped and called out in the report.
-* `--dup-policy keep-separate` emits separate CAP3 runs per duplicate orientation instead of merging them.
+| Concept | Rule | Why it matters |
+| --- | --- | --- |
+| Sample ID | Forward and reverse files pair only if the remaining sample ID matches after token/primer-label stripping. | Prevents accidental cross-sample pairing. |
+| Token/primer-label position | Primer labels can appear at the front, middle, or end of the filename. | Lets labs keep existing naming conventions. |
+| Well codes | Wells matter only when well enforcement is enabled. | Useful for plate exports where cross-well swaps are risky. |
+| Duplicate policy | Controls what happens when multiple forwards or reverses map to the same sample. | Makes duplicate handling explicit instead of silent. |
 
-4) **Diagnose failures quickly.** When no pairs are found, MicroSeq prints a summary of how many files matched each detector, which orientations are missing, and concrete `--fwd-pattern/--rev-pattern` suggestions extracted from filenames. Apply those regexes and re-run.
+### Filename examples
 
-## GUI tutorial: pairing with presets, wells, and duplicate handling
+These pair successfully because the sample ID resolves to `KD001` in both files:
 
-0) In your local terminal you will need to first activate MicroSeq in the conda environemnt. So open the termimal and Conda activate MicroSeq by first doing `conda activate MicroSeq`.
-1) **Launch and pick inputs.** Next, you will type in`microseq-gui` and that will open the gui (wait a few moments it will open), choose **Assembly** and toggle **Paired**. Browse to a folder or select multiple files; the GUI now stages your selection into a temporary folder so CAP3 sees a consistent path.
-2) **Primer detection.** Use the primer-set dropdown to pick common token/primers or type your own forward/reverse regex. Toggle **Advanced regex** if you need case-insensitive or grouped patterns. The GUI will auto-detect tokens from filenames and surface them in the pairing preview dialog.
-3) **Well enforcement.** Check **Enforce well codes** to require plate positions (A1–H12 by default). You can edit the regex if your lab uses a different format.
-4) **Duplicate policy.** Choose whether duplicates **Error**, **Keep first**, **Keep last**, **Merge**, or **Keep separate**. The choice persists between sessions via QSettings.
-5) **Preview pairs.** Click **Preview pairs** to see which files were detected as forward/reverse, which detector matched, any missing mates, and suggested regexes. Fix naming if needed, then proceed.
-Going into more detail on this feature. The preview pair uses the same detector that i have built in for pairing assembly. You can use your custom F/R primer labels then the built in detector patterns. 
-How the F/R is recognized: each file name is parsed to a sample ID, the orientation F/R and then optionally the well codes A1 - H12. 
-Detected Column shows the resolved orientation per file. 
-Issues Column: reports why a name is non canonical by MicroSeq standards. (For example missing F/R label, primer label not delimited -/_ or well mismatch when well match enforcement is on). 
-Suggested rename column: proposes the canonical so filenames stay reproducible across runs. 
-Manual helper actions: These were created if you wanted to rename outside of the GUI (Copy rename map, Copy rename commands, or Open container folder). 
-Need to test if bug fixed: Note on minimize it may still lock the main GUI I changed it to modeless beahvior to refactor this behavior in the chance it still does this, avoid using minimize for now and just close the window instead. I will patch it in a future release. 
+* `KD001_27F.ab1` ↔ `KD001_1492R.ab1`
+* `27F_KD001_A01.ab1` ↔ `1492R_KD001_A01.ab1`
+* `KD001_A01_27F.ab1` ↔ `KD001_A01_1492R.ab1`
 
+These do **not** pair because the resolved sample IDs differ:
 
-6) **Run assembly.** The GUI launches CAP3 per paired sample, rewrites BLAST input headers, and writes `asm/blast_inputs.tsv` for traceability. Logs include the pairing report so you can audit wells, detectors, and duplicate handling.
+* `KD001_27F.ab1` ↔ `KD004_1492R.ab1`
 
-## Tips
+These only pair when well enforcement is **off**:
 
-* Keep forward/reverse tokens adjacent to underscores or dashes so the detectors can split the sample ID cleanly.
-* When supplying regexes, wrap alternatives in parentheses (e.g., `(27F|8F)`), and include trailing `F`/`R` so orientations are unambiguous.
-* For plate runs, enable well enforcement to avoid mixing reads across wells; the manifest reflects the enforced well key.
-* Use **keep-separate** when you intentionally want per-orientation CAP3 outputs (e.g., troubleshooting primer performance) without merging reads.
+* `KD001_A01_27F.ab1` ↔ `KD001_B01_1492R.ab1`
 
-## BLAST inputs and sequence tracking
+### What duplicate policy means
 
-Paired mode now writes two BLAST-oriented artifacts:
+| Policy | Meaning |
+| --- | --- |
+| `error` | Stop and force the duplicate to be resolved explicitly. |
+| `keep-first` | Keep the first matching file per orientation. |
+| `keep-last` | Keep the last matching file per orientation. |
+| `merge` | Merge duplicate same-orientation inputs before downstream paired assembly. |
+| `keep-separate` | Preserve duplicate branches as separate paired hypotheses. |
 
-* `asm/blast_inputs.fasta` – the sequences submitted to BLAST, with rewritten IDs.
-* `asm/blast_inputs.tsv` – a per-sample manifest showing which sequence output was selected and why.
+For most routine isolate work, `error` is the safest default because it prevents
+silent mixing of repeated reactions or mislabeled files.
+
+## Assembly -> BLAST handoff semantics
+
+This is the most important downstream contract in paired mode:
+`asm/blast_inputs.fasta` is what BLAST actually saw, and `asm/blast_inputs.tsv`
+is the audit trail explaining why each sequence was selected.
+
+### Main handoff artifacts
+
+| Artifact | Meaning |
+| --- | --- |
+| `asm/blast_inputs.fasta` | Final sequence records sent to BLAST. |
+| `asm/blast_inputs.tsv` | Per-sample manifest linking sequence choice to assembly outcome. |
 
 ### Contig -> singlet fallback order
 
-For each paired sample, MicroSeq chooses the first available sequence output in the order:
+For each paired sample, MicroSeq chooses the first available sequence output in this order:
 
-1) CAP3 contigs (`*.cap.contigs`)
-2) CAP3 singlets (`*.cap.singlets`)
-3) No usable sequence produced (empty assembly output)
+1. CAP3 contigs (`*.cap.contigs`)
+2. CAP3 singlets (`*.cap.singlets`)
+3. No usable sequence output
 
 ### FASTA header rewrite
 
-Each BLAST record is rewritten so the sample ID is embedded in the query ID:
+BLAST query IDs are rewritten so the sample and payload type remain visible:
 
-```
+```text
 sampleA|contig|cap3_c1
 sampleA|singlet|cap3_s1
 ```
 
 ### `blast_inputs.tsv` columns
 
-| Column | Description |
+| Column | Meaning |
 | --- | --- |
-| `sample_id` | The paired sample key (includes `_1`, `_2`, … in keep‑separate mode). |
+| `sample_id` | Paired sample key. In `keep-separate` mode this can include branch suffixes such as `_1`, `_2`, and so on. |
 | `blast_payload` | One of `contig`, `singlet`, `no_payload`, or `pair_missing`. |
-| `payload_ids` | A semicolon‑delimited mapping of rewritten IDs to original CAP3/read IDs. |
-| `reason` | Why that sequence output was chosen (see taxonomy below). |
-
-Example sequence ID mapping:
-
-```
-payload_ids: sampleA|contig|cap3_c1=Contig1;sampleA|contig|cap3_c2=Contig2
-```
+| `payload_ids` | Mapping from rewritten BLAST IDs back to original CAP3 or read IDs. |
+| `reason` | Why that output was chosen. |
 
 ### `blast_payload` and `reason` taxonomy
 
-* `contig` -> `contigs_present` (contigs found, used for BLAST)
-* `singlet` -> `singlets_only` (no contigs, but singlets found)
-* `no_payload` -> `cap3_no_output` (no contigs or singlets produced)
-* `pair_missing` -> `pair_missing` (no valid forward/reverse pair)
+| `blast_payload` | `reason` | Interpretation |
+| --- | --- | --- |
+| `contig` | `contigs_present` | A merged consensus sequence was available and used. |
+| `singlet` | `singlets_only` | No contig survived, but at least one standalone sequence remained usable. |
+| `no_payload` | `cap3_no_output` | Assembly produced no usable sequence output for BLAST. |
+| `pair_missing` | `pair_missing` | No valid forward/reverse pair existed after pairing rules were applied. |
 
-### How `pair_missing` is determined
+### How `pair_missing` is assigned
 
-MicroSeq combines the pairing report (`qc/pairing_report.tsv`) with the original
-paired FASTA filenames. If a sample has only one orientation (forward **or**
-reverse) after pairing detection and well enforcement, it is marked as
-`pair_missing` and kept in `blast_inputs.tsv` without any sequence sent to BLAST.
+MicroSeq uses `qc/pairing_report.tsv` together with the staged paired inputs.
+If a sample has only one surviving orientation after token/primer-label detection
+and optional well enforcement, it is marked as `pair_missing`. The sample remains visible in
+`asm/blast_inputs.tsv`, but no sequence is sent to BLAST.
 
-## Paired assembly outputs (current version)
+For microbiology interpretation, this matters because `pair_missing` is not a
+taxonomic failure. It is a structural or input-state failure: the sample never had
+a valid paired assembly opportunity.
 
-The paired pipeline now produces the following key files under the run folder:
+## CAP3 diagnostics and overlap-failure interpretation
 
-* `qc/pairing_report.tsv` : resolved forward/reverse pairs, detectors, and wells.
-* `qc/overlap_audit.tsv` : optional overlap diagnostics (only when enabled).
-* `asm/<sample>/<sample>_paired.fasta` : concatenated per-sample FASTA input to CAP3.
-* `asm/<sample>/<sample>_paired.fasta.qual` : concatenated QUALs required for correct CAP3 scoring.
-* `asm/<sample>/*.cap.contigs` : CAP3 contigs.
-* `asm/<sample>/*.cap.singlets` : CAP3 singlets.
-* `asm/<sample>/*.cap.info` : CAP3 run summary (overlaps saved/removed, clip info).
-* `asm/assembly_summary.tsv` : per-sample CAP3 summary + status.
-* `asm/cap3_run_metadata.txt` : CAP3 executable path, version, and full per-sample command lines.
-* `asm/paired_contigs.fasta` : merged contigs-only FASTA (for contigs-only BLAST).
-* `asm/blast_inputs.fasta` : contigs+singlets BLAST input sequence FASTA.
-* `asm/blast_inputs.tsv` : BLAST input sequence manifest with `blast_payload`, `reason`, and `payload_ids`.
-  It now also includes `payload_entity_n`, `hypothesis_map` (`qseqid -> structural_hypothesis`), and `source_id_map` (`qseqid -> original source id`) so users can distinguish structural decision branches from raw sequence-record provenance.
+When a sample does not produce a contig, the main question is whether the problem
+came from the reads themselves, from overlap geometry, or from an assembly gate
+that was too strict. The three most useful places to look are:
 
+* `asm/assembly_summary.tsv`
+* `qc/overlap_audit.tsv`
+* `asm/<sample>/*.cap.info`
 
-### GUI Color Legend
+### Common paired outcomes
 
-Use this legend when reading GUI output tables:
+| Status or outcome | Practical meaning | First place to look |
+| --- | --- | --- |
+| `assembled` | A contig was produced and selected. | `asm/assembly_summary.tsv` |
+| `singlets_only` | The sample had usable sequence evidence, but not a defended merged contig. | `*.cap.singlets`, `qc/overlap_audit.tsv` |
+| `pair_missing` | One direction was absent after pairing logic. | `qc/pairing_report.tsv` |
+| `cap3_no_output` | CAP3 did not produce usable contigs or singlets for handoff. | `*.cap.info` |
+| `ambiguous_overlap` | More than one plausible overlap candidate was near-tied, so MicroSeq refused to force a single merge. | `qc/overlap_audit.tsv`, `workflow_resolution.md` |
+| `quality_low` | Overlap existed, but quality evidence did not support a safe merge. | `qc/overlap_audit.tsv`, QUAL files |
 
-* **status**
-  * `assembled` -> green
-  * `singlets_only` -> yellow
-  * `cap3_no_output` -> orange
-  * `pair_missing` -> red
-  * `overlap_*` -> light blue
-* **trace_qc**
-  * `PASS` -> green
-  * `WARN` -> yellow
-  * `FAIL` -> red
-  * `NA` -> gray
+### CAP3 overlap-removal gates
 
-The GUI also exposes this legend in header tooltips on the **status** and **trace_qc** columns for in-table reference.
+CAP3 overlap acceptance is a conjunction of multiple filters, so it helps to know
+which gate actually failed before relaxing parameters.
 
-For a quick-reference version, see [GUI Color Legend](gui_color_legend.md).
-
-## Diagnosing singlets and overlap failures
-
-Use the CAP3 logs, `assembly_summary.tsv`, and `overlap_audit.tsv` to identify
-which overlap gate is binding before relaxing parameters. CAP3 overlap acceptance
-is a conjunction of multiple filters, so the most reliable “relaxation” is the
-one that targets the gate that actually failed.
-
-### CAP3 overlap removal gates
-
-* **Clipping range failures (`-y`)**: CAP3 logs messages like “No overlap is found
-  in the given 5’ clipping range…”. This usually indicates that clipping removed
-  the true overlap; increase `-y` or relax upstream trimming before lowering `-o`.
-* **Difference score (`-b/-d`)**: mismatches contribute `max(0, min(q1,q2) - b)`
-  and CAP3 removes overlaps when the total exceeds `d`.
-* **Difference cap (`-e`)**: overlaps are removed when observed differences
-  exceed the configured mismatch tolerance (`e`).
-* **Similarity score (`-s`)**: CAP3 computes a quality-weighted similarity score
-  (using `-m/-n/-g`) and removes overlaps below `s`.
-* **Hard gates (`-o`, `-p`)**: minimum overlap length and minimum percent identity.
+* **Clipping range failures (`-y`)**: CAP3 can miss a real overlap if clipping removed too much useful end sequence.
+* **Difference score (`-b/-d`)**: Too many quality-weighted mismatches can cause CAP3 to reject the overlap.
+* **Difference cap (`-e`)**: CAP3 rejects overlaps with more differences than the allowed mismatch tolerance.
+* **Similarity score (`-s`)**: Low quality-weighted similarity can reject an overlap even when some sequence similarity exists.
+* **Hard gates (`-o`, `-p`)**: Minimum overlap length and minimum percent identity still must be met.
 
 ### Why QUAL propagation matters
 
-QUAL is required for correct CAP3 scoring. Without `.qual` files CAP3 treats every base as Q=10, which distorts clipping,
-difference scoring, and similarity scoring. Always run strict profiles *with*
-QUALs first, then re-evaluate how many singlets remain before tuning profiles.
-This is the error model that CAP3 uses to assess if the two reads should be assembled together or not.
-
-### CAP3 built-in defaults vs wrapper defaults
-
-CAP3 ships with **built-in** defaults (e.g., `-o 40`, `-p 90`, `-s 900`, and a
-per‑base quality of 10 when no `.qual` file is provided). Those are compiled
-into CAP3 and applied whenever options are omitted. Wrapper tools may impose
-their own defaults or presets, so “CAP3 defaults” can mean either the built‑in
-CAP3 defaults or the wrapper’s configured defaults. To avoid confusion, MicroSeq
-uses explicit CAP3 profiles and logs the exact arguments and CAP3 version used.
-
-### CAP3 profiles in MicroSeq
-
-The CLI argument `--cap3-profile` is derived from the profile names defined in
-`CAP3_PROFILES` (via `CAP3_PROFILES.keys()`), so every profile key in
-`cap3_profiles.py` becomes a valid command-line choice (currently: `strict`,
-`diagnostic`, `relaxed`). The selected profile expands into explicit CAP3
-arguments before running CAP3.
+QUAL is required for correct CAP3 scoring.
+Without `.qual` files, CAP3 treats every base as Q=10, which distorts clipping,
+mismatch penalties, and similarity scoring. For Sanger data, that can change
+whether two reads are judged mergeable at all.
 
 ### Audit-driven relaxation strategy
 
-* If the audit shows overlap length just below `-o`, adjust `-o` (small steps).
-* If the audit shows a valid overlap but CAP3 reports a clipping-range failure,
-  increase `-y` or adjust trimming before changing `-o`.
-* If length/identity look fine but overlaps are removed, suspect quality-weighted
-  gates (`-b/-d/-e/-s`) rather than `-o/-p`, and avoid over-relaxing unless audit
-  evidence supports it.
+Use the audit to target the gate that failed instead of relaxing everything at once:
 
-### Near-miss cohort approach
-
-Define “near-miss” thresholds such as:
-
-* overlap length within 5–15 bp of `-o`
-* percent identity within 1–3% of `-p`
-
-Then run a small structured sweep on only those samples to determine which gate
-is binding, instead of relaxing global thresholds blindly.
+* If overlap length is just below threshold, adjust overlap length first.
+* If the overlap looks real but clipping removed too much end sequence, revisit clipping before lowering identity.
+* If overlap length and identity look acceptable but CAP3 still rejects the merge, inspect quality-weighted gates before broad relaxation.
 
 ### Validation criteria for rescued contigs
 
-* Forward and reverse singlet BLAST top hits agree taxonomically.
-* Contig BLAST agrees with both singlets.
-* Contig aligns back to each singlet without implausible mismatch clusters in
-  the overlap region.
+If you rescue a borderline case by relaxing a gate, the strongest validation pattern is:
 
-### Rescue vs. do-not-relax checklist
+* forward and reverse singlet top hits still agree taxonomically,
+* the rescued contig BLAST result agrees with both singlets,
+* and the overlap region does not show implausible clusters of disagreement.
 
-* **Rescue first**: clipping range (`-y`) and overlap length (`-o`) when audits
-  show real overlaps were clipped or narrowly too short.
-* **Relax cautiously**: identity (`-p`) only for near-miss cases with strong
-  supporting evidence.
-* **Do not relax by default**: quality-disagreement gates (`-b/-d/-e`) and
-  similarity score (`-s`), which protect against mis-merges in mixed templates.
+That keeps the rescue biologically interpretable instead of merely computationally permissive.
 
-## Mock Example workflows to get an idea how to use it 
+## Short FAQ on pairing rules
 
-### 96-well plate with standard 16S primers (paired mode)
-*Folder layout:* `plates/2025-05-plateA/` contains files like `A01__27F.ab1`, `A01__1492R.ab1`, … `H12__1492R.ab1`.
+### How can I tell whether files were auto-paired correctly?
 
-1) Preview the pairs to validate wells and primer detection:
+Use `qc/pairing_report.tsv`.
+MicroSeq pairs files by resolved sample ID after stripping forward/reverse tokens/primer labels,
+with wells participating only when well enforcement is enabled.
 
-```bash
-microseq assembly --mode paired \
-  -i plates/2025-05-plateA/ \
-  --dup-policy merge \
-  --enforce-well \
-  --fwd-pattern "(27F|8F|515F)" \
-  --rev-pattern "(1492R|806R)" \
-  --dry-run
-```
+### What does `pair_missing` mean in practice?
 
-The dry-run prints how many files matched each detector, which wells are missing mates, and suggests regex tweaks if a primer name is unexpected.
+It means one orientation was missing after pairing logic.
+It does **not** mean BLAST failed. It means the sample never reached true paired assembly.
 
-2) Run for real and collect per-sample contigs:
+### What is a singlet?
 
-```bash
-microseq assembly --mode paired \
-  -i plates/2025-05-plateA/ \
-  -o results/plateA_cap3 \
-  --dup-policy merge \
-  --enforce-well
-```
+A singlet is a standalone sequence record that survived assembly processing when
+a defended merged contig was not produced. In practice, it means the sample still
+has usable sequence evidence, but the forward/reverse pair did not support one
+clean consensus contig.
 
-Outputs include`asm/blast_inputs.tsv` plus CAP3 contigs and singlets; the manifest records which input reads built each sequence output with the enforced well code.
+### When should I care about well enforcement?
 
-Single mode either does forward/reverse and simply runs CAP3 on the merged FASTA; use this when you know each file is already single-direction only.
+Use it when filenames come from plate-based exports and cross-well mismatches are a real risk.
+Leave it off when sample IDs are already unique and wells are not biologically meaningful.
 
-## Real World Example to Pilot and test run yourself
+## Related docs
 
-### Paired assembly example in tests directory
-
-So using the CLI you can do the same thing that was done in the demo example of the GUI of the Full Pipeline run which will be done in four steps below. 
-This keeps outputs in the same `tests/paired_ab1_demo_run/10292025_1080497_microseq/` tree the GUI uses to keep it consistent. Note you can easily just put this in bash script if you wish just changed it for your purposes. I have preferences for using dup policy being error given the settings i have for it. 
-
-```bash
-# set paths first 
-# Here we will be input and output 
-INPUT=tests/paired_ab1_demo_run/10292025_1080497 
-OUTPUT=tests/paired_ab1_demo_run/10292025_1080497_microseq 
-
-# step 1) QC + Trim Sanger traces 
-microseq trim -i "$INPUT" --sanger --workdir "$OUT" 
-
-# Step 2) Pair + assembly with CAP3 
-microseq assembly --mode paired \
-   -i "$OUTPUT/qc/paired_fasta" \
-   -o "$OUTPUT/asm" 
-   --dup-policy error 
-
-# Step 3) Blast assembled contigs against Greengenes2 
-microseq blast -i "$OUTPUT/asm/blast_inputs.fasta" -d gg2 -o "$OUTPUT/hits.tsv"
-
-# Step 4) Join taxonomy 
-microseq add_taxonomy -i "$OUTPUT/hits.tsv" -d gg2 -o "$OUTPUT/hits_tax.tsv"
-```
-
-Notes:
-
-* Step 1 writes `qc/pairing_report.tsv`, per-read quality stats, length, avg Phred, and trimmed FASTAS. `--sanger` triggers AB1-> FASTQ path. 
-* Step 2 reuses the trimmed forward/reverse FASTAS under `qc/paired_fastas/` so CAP3 sees quality-filtered reads; from there adjust `dup-policy` if you need anther option based on your situation. 
-* Step 3/4 match the GUI's **Full Pipeline** path CAP3 -> BLAST -> Taxonony. I will reference using `microseq postblast` in a separate tutorial doc on how to use it and its uses cases. This is if you want a BIOM/CSV table from `hits_tax.tsv`.  
-
-For now I will also keep the single file mode example under here. I will reference it in a separate file just for the CLI at a certain point should I feel it necessary. 
-
-### Single mode ab1 example using the test directory dataset 
-
-For the single direction ab1 demo run using the CLI so cd to `tests/reverse_orientation_only_ab1_demo_run/`, the CLI sequence below mirors what is being run in the GUI when single mode full pipeline example is being used from the GUI tutorial. 
-
-```bash
-# set paths here 
-INPUT=tests/reverse_orientation_only_ab1_demo_run
-OUTPUT=tests/reverse_orientation_only_ab1_demo_run_microseq 
-
-# step 1) QC + trim Sanger traces 
-microseq trim -i "$INPUT" --sanger --workdir "$OUTPUT" 
-
-# step 2) Single Mode treat this as an optional step the best practice is to not use CAP3 for non paired reads..... I may remove this this the GUI version when single is used skips CAP3 altogether and is there as a highlighter only to understand they are using single orientation only. 
-microseq assembly --mode single \
-   -i "$OUTPUT/reads.fasta" \
-   -o "$OUTPUT/asm" 
-
-# step 3) Blast QC-passed reads 
-microseq blast -i "$OUTPUT/reads.fasta" -d gg2 -o "$OUTPUT/hits.tsv" 
-
-# Step 4) Join Taxonomy 
-microseq add_taxonomy -i "$OUTPUT/hits.tsv" -d gg2 -o "$OUTPUT/hits_tax.tsv"
-```
-
-Some Notes to consider:
-
-* Step 1 produces the same layout the GUI writes so you have `raw_ab1/`, `raw_fastq/`, `passed_qc_fastq/`, `failed_qc_fastq/`, `qc/trim_summary.tsv`, and `reads.fasta` (the canonical merged FASTA used by later steps). 
-* Step 2 is honestly optional at this point I don't bother using it in the GUI and go straight to readings my reads.fasta that's already QC-passed. So feel free to skips it.
-* Step 3 matches the GUI **Full Pipeline** for single mode (BLAST + Taxonomy on the QC passed reads) unless you chose CAP3 for whatever reason. 
-
-## Frequently Asked Questions 
-
-### What happens to forward/reverse reads in single mode? 
-
-`microseq assembly --mode single` skips the pairing detector entirely. Any reads you give it including mixed forward/reverse orientations are treated as independent sequences and passed stright to CAP3 as as single pool; so no `pairing_report.tsv` is emitted for example. If you need pairing orientation awareness matching then use the well and paired mode commands instead so MicroSeq can build explicit F/R pairs before assembly. 
-
-### How can I make sure that the files are auto-paired correctly? 
-
-MicroSeq buckets files by sample ID after stripping the primer tokens. With the default dectectors I have setup (or you can use the custom `--fwd-pattern/--rev-pattern`), names like `KD001_27F.*` and `KD001_1492R.*` form a pair because of the shared prefix `KD001` remains once the tokens are removed. In contrast, `KD001_27F*` and `KD004_1492R` stay separate because their prefixes differ. MicroSeq does not attempt to cross-numnber pairs its unreliable.
-
-Lets consider a mock scenario below:
-
-**Mock-Scenario For My Reader**
-
-* Forward reads: `KD001_27F`, `KD002_27F`, `KD003_27F`
-* Reverse reads: `KD004_1492R`, `KD005_1492R`, `KD006_1492R`
-
-These do not auto-pair because the prefixes (`KD001` vs `KD004`) don’t match. Rename to shared sample IDs (e.g., `KD001_27F` with `KD001_1492R`) so MicroSeq can align them. If your primer labels differ from the defaults, point `--fwd-pattern/--rev-pattern` at your tokens (for example, `--fwd-pattern "27F" --rev-pattern "1492R"`).
-
-**Primer token position examples (all auto-pair because the sample ID matches)** 
-
-* Primer in the middle: `KD001_27F_A01.ab1` ↔ `KD001_1492R_B01.ab1`
-* Primer in the front: `27F_KD001_A01.ab1` ↔ `1492R_KD001_B01.ab1` 
-* Primer in the end:   `KD001_A01_27F.ab1` ↔ `KD001_B01_1492R.ab1`
-
-The default detectors cover the front/middle/end placements; use custom regex if your primer token labeling differs. Remember all of this hinges on the shared sample ID which in this case is `KD001`.
-
-This means MicroSeq also strips well tokens (`A01-H12`) from sample IDs even when primer tokens sit at the front or end of the filename, so 27F_KD001_A01.ab1` and `KD001_B01_1492R.ab1` still resolve to the shared sample ID `KD001` with well enforcement turned off. 
-
-Well codes only influence pairing when `--enforce-well` is enabled: files must then share both the sample ID **and** the same plate position (e.g., `A01`). Leave well enforcement off when sample IDs are already unique and wells are irrelevant; turn it on for plate exports where cross-well swaps would be problematic. 
-
-
-
-
-
-
-## Design notes
-
-For algorithm/architecture rationale and tradeoffs (fast overlap vs CAP3 fallback vs reference-guided alternatives), see `docs/design_algorithm_choices.md`.
+* [CLI Workflows](cli_workflow_tutorial.md) for wrapper commands and headless runs
+* [GUI Walkthrough](gui_usage.md) for button-by-button GUI usage
+* [Output Artifacts Reference](output_artifacts.md) for the canonical file table
+* [Workflow Resolution Funnel](workflow_resolution.md) for ambiguity routing and sample-level resolution states
+* [MicroSeq design: algorithm and architecture choices for Sanger assembly](design_algorithm_choices.md) for algorithm tradeoffs

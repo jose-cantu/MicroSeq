@@ -24,8 +24,7 @@ Well enformcement off              Requries A1-H12 plate well labeling so when e
 
 ## Linux/Wayland stability mode
 
-If you are on Linux Wayland and see maximize crashes (`xdg_surface buffer ... does not match configured state`), MicroSeq now defaults to `QT_QPA_PLATFORM=xcb` for stability.
-
+If you are on Linux Wayland and see maximize crashes (`xdg_surface buffer ... does not match configured state`), MicroSeq now defaults to `QT_QPA_PLATFORM=xcb` for stability. (These are for users on Windows running WSL or Linux users. MacOS people can ignore this section). 
 Override options:
 
 * `MICROSEQ_QT_BACKEND=wayland microseq-gui` (opt into native Wayland)
