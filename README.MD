@@ -16,7 +16,9 @@ For the resolution model used to collapse multiple hypotheses into sample-level 
 For a very quick demo on how to use MicroSeq here is a link here to get you started. I use the paired demo test data in my test directory. 
 [Quick MicroSeq walkthrough](https://www.youtube.com/watch?v=64dGTM4HDcE) 
 
-Reference to the bash-wrapper script I made you can go here[workflow](https://github.com/jose-cantu/MicroSeq/tree/master/workflows) and use the `paired_ab1_pipeline.sh` for the full pipeline in MicroSeq minus the biom output. Use `preview_pair_names.sh` beforehand to get a sanity check to make sure your F/R pairing are named correctly in MicroSeq. It will resolve them for you if not. You will find the documentation of how to use them in the readme under workflow for CLI usage.  
+Reference to the bash-wrapper script I made you can go here[workflow](https://github.com/jose-cantu/MicroSeq/tree/master/workflows) and use the `paired_ab1_pipeline.sh` for the full pipeline in MicroSeq minus the biom output. Use `preview_pair_names.sh` beforehand to get a sanity check to make sure your F/R pairing are named correctly in MicroSeq. It will resolve them for you if not. You will find the documentation of how to use them in the readme under workflow for CLI usage. 
+
+For **hpc/cluster usage** refer to this doc here I wrote up. [hpc_workflow](https://jose-cantu.github.io/MicroSeq/cli-workflows/) 
 
 ---
 
