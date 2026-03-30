@@ -29,6 +29,14 @@ except Exception:  # allow use without PySide
             return None
 import shutil
 
+from microseq_tests.blast_params import (
+    BLAST_IDENTITY_DEFAULT,
+    BLAST_QCOV_DEFAULT,
+    BLAST_MAX_HITS_DEFAULT,
+    BLAST_THREADS_DEFAULT,
+    validate_blast_params, 
+)
+
 # pull the existing implementation functions
 from microseq_tests.trimming.quality_trim import  trim_fastq_inputs
 from microseq_tests.trimming.ab1_to_fastq import ab1_folder_to_fastq as ab1_to_fastq, build_ab1_output_key_map
@@ -615,14 +623,21 @@ def run_blast_stage(
     fasta_in: PathLike,
     db_key: str,
     out_tsv: PathLike,
-    identity: float = 97.0,
-    qcov: float = 80.0,
-    max_target_seqs: int = 5,
-    threads: int = 1,
+    identity: float = BLAST_IDENTITY_DEFAULT,
+    qcov: float = BLAST_QCOV_DEFAULT,
+    max_target_seqs: int = BLAST_MAX_HITS_DEFAULT,
+    threads: int = BLAST_THREADS_DEFAULT,
     on_progress=None,
     blast_task: str = "megablast",
     stop_cb: Callable[[], bool] | None = None,
 ) -> int:
+    identity, qcov, max_target_seqs, threads = validate_blast_params(
+        identity=identity,
+        qcov=qcov,
+        max_target_seqs=max_target_seqs,
+        threads=threads,
+    )
+
     from microseq_tests.blast.run_blast import BlastOptions # local import keeps AB1 safe 
      
 
@@ -3016,10 +3031,10 @@ def run_full_pipeline(
     *,
     mode: str = "single", 
     postblast: bool = False,
-    identity: int = 97,
-    qcov: int = 80,
-    max_target_seqs: int = 5,
-    threads: int = 4,
+    identity: float = BLAST_IDENTITY_DEFAULT,
+    qcov: float = BLAST_QCOV_DEFAULT,
+    max_target_seqs: int = BLAST_MAX_HITS_DEFAULT,
+    threads: int = BLAST_THREADS_DEFAULT,
     blast_task: str = "megablast", 
     dup_policy: DupPolicy = DupPolicy.ERROR, 
     cap3_options=None,

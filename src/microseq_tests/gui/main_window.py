@@ -25,6 +25,21 @@ from microseq_tests.primer_catalog import pairing_label_sets, build_primer_cfg_o
 from microseq_tests.assembly.registry import list_assemblers
 from microseq_tests.trimming.ab1_trace_utils import coerce_ints, decode_basecalls, extract_ab1_trace_bundle, trim_called_arrays
 
+from microseq_tests.blast_params import (
+    BLAST_IDENTITY_MIN,
+    BLAST_IDENTITY_MAX,
+    BLAST_IDENTITY_DEFAULT,
+    BLAST_QCOV_MIN,
+    BLAST_QCOV_MAX,
+    BLAST_QCOV_DEFAULT,
+    BLAST_MAX_HITS_MIN,
+    BLAST_MAX_HITS_MAX,
+    BLAST_MAX_HITS_DEFAULT,
+    BLAST_THREADS_MIN,
+    BLAST_THREADS_MAX,
+    BLAST_THREADS_DEFAULT,
+)
+
 PRIMER_SETS: dict[str, tuple[list[str], list[str]]] = pairing_label_sets()
 TRIM_PRESETS: list[str] = sorted(trim_presets())
 
@@ -849,25 +864,25 @@ class MainWindow(QMainWindow):
 
         # label place holder and browse button wired to file picker
         self.id_spin = QSpinBox()
-        self.id_spin.setRange(50, 100) # for simplicity I set spinbox ID % 50-100 threshold
-        self.id_spin.setValue(97) # identity 97% default
+        self.id_spin.setRange(int(BLAST_IDENTITY_MIN), int(BLAST_IDENTITY_MAX)) # for simplicity I set spinbox ID % 50-100 threshold
+        self.id_spin.setValue(int(BLAST_IDENTITY_DEFAULT)) # identity 97% default
         self.id_spin.setSuffix(" % ID")
 
         self.threads_spin = QSpinBox()
-        self.threads_spin.setRange(1, 32)
-        self.threads_spin.setValue(4)
+        self.threads_spin.setRange(BLAST_THREADS_MIN, BLAST_THREADS_MAX)
+        self.threads_spin.setValue(BLAST_THREADS_DEFAULT)
         self.threads_spin.setSuffix(" CPU")
 
         # ----- alignment coverage (% of query aligned)
         self.qcov_spin = QSpinBox()
-        self.qcov_spin.setRange(10, 100)
-        self.qcov_spin.setValue(80)
+        self.qcov_spin.setRange(int(BLAST_QCOV_MIN), int(BLAST_QCOV_MAX))
+        self.qcov_spin.setValue(int(BLAST_QCOV_DEFAULT))
         self.qcov_spin.setSuffix(" % Q-cov")
 
         # -------- max target hits
         self.hits_spin = QSpinBox()
-        self.hits_spin.setRange(1, 500)
-        self.hits_spin.setValue(5)
+        self.hits_spin.setRange(BLAST_THREADS_MIN, BLAST_THREADS_MAX)
+        self.hits_spin.setValue(BLAST_THREADS_DEFAULT)
         self.hits_spin.setSuffix(" hits")
 
         # -------- Assembly Mode ----------------------------------------
@@ -2232,6 +2247,9 @@ class MainWindow(QMainWindow):
             run_full_pipeline,
             self._input_path,
             self.db_box.currentText(),
+            identity=self.id_spin.value(),
+            qcov=self.qcov_spin.value(),
+            max_target_seqs=self.hits_spin.value(),
             threads=self.threads_spin.value(),
             postblast=self.biom_chk.isChecked(),
             metadata=None,   # Trim → Convert → BLAST → Tax
@@ -2269,6 +2287,9 @@ class MainWindow(QMainWindow):
             run_full_pipeline,
             self._input_path,
             self.db_box.currentText(),
+            identity=self.id_spin.value(),
+            qcov=self.qcov_spin.value(),
+            max_target_seqs=self.hits_spin.value(),
             threads=self.threads_spin.value(),
             postblast=self.biom_chk.isChecked(), # source of truth decide via checkbox
             metadata=self.meta_path,      # None or Path run the Post-BLAST stage too

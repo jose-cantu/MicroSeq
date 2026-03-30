@@ -8,6 +8,34 @@ from microseq_tests.utility.merge_hits import merge_hits
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
 from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, run_full_pipeline, _summarize_paired_candidates, _suggest_pairing_patterns_staged, _collect_pairing_catalog, _write_overlap_audit, stage_paired_fastas_from_fastq_dir, run_pairing_report, run_assembly_summary, run_overlap_audit, run_blast_inputs)
+from microseq_tests.blast_params import (BLAST_IDENTITY_DEFAULT, BLAST_QCOV_DEFAULT, BLAST_MAX_HITS_DEFAULT, BLAST_THREADS_DEFAULT, validate_identity, validate_qcov, validate_max_target_seqs, validate_threads)
+
+# --------
+def _identity_arg(v: str) -> float:
+    try:
+        return validate_identity(v)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
+
+def _qcov_arg(v: str) -> float:
+    try:
+        return validate_qcov(v)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
+
+def _max_hits_arg(v: str) -> int:
+    try:
+        return validate_max_target_seqs(v)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
+
+def _threads_arg(v: str) -> int:
+    try:
+        return validate_threads(v)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
+# --------
+
 from microseq_tests.utility.utils import setup_logging, load_config, expand_db_path
 from microseq_tests.assembly.pairing import DupPolicy 
 from microseq_tests.blast.run_blast import run_blast
@@ -156,12 +184,12 @@ def main() -> None:
     p_blast.add_argument("-i", "--input", required=True)
     p_blast.add_argument("-d", "--db", choices=db_choices, required=True)
     p_blast.add_argument("-o", "--output", required=True)
-    p_blast.add_argument("--identity", type=float, default=97.0, help="percent-identity threshold (default: %(default)s) you can adjust value based on needs of project")
-    p_blast.add_argument("--qcov", type=float, default=80.0, help="query coverage %% (default: %(default)s) again you can adjust value based on needs of project")
-    p_blast.add_argument("--max_target_seqs", type=int, default=5, help="How many DB hits to retain per query (passed to BLAST")
+    p_blast.add_argument("--identity", type=_identity_arg, default=BLAST_IDENTITY_DEFAULT, help="percent-identity threshold (default: %(default)s) you can adjust value based on needs of project")
+    p_blast.add_argument("--qcov", type=_qcov_arg, default=BLAST_QCOV_DEFAULT, help="query coverage %% (default: %(default)s) again you can adjust value based on needs of project")
+    p_blast.add_argument("--max_target_seqs", type=_max_hits_arg, default=BLAST_MAX_HITS_DEFAULT, help="How many DB hits to retain per query (passed to BLAST")
     p_blast.add_argument("--log-missing", metavar="PATH", help="Append sample IDs that yield zero hits to this file for review.")
     p_blast.add_argument("--clean-titles", action="store_true", help="Strip the accession & extra fields from stitle," "leaves a tidy Genus-Species handy label {use for SILVA & NCBI DB not necessary for GG2}")
-    p_blast.add_argument("--threads", type=int, default=4, help="CPU threads to pass to blastn (-num_threads)")
+    p_blast.add_argument("--threads", type=_threads_arg, default=BLAST_THREADS_DEFAULT, help="CPU threads to pass to blastn (-num_threads)")
     p_blast.add_argument("--relaxed", action="store_true", help="Run BLAST at loose cutoffs then report at " "--identity/--qcov") 
     p_blast.add_argument("--relaxed-id", type=float, default=80.0, help="Search percent-identity when --relaxed (default 80)") 
     p_blast.add_argument("--relaxed-qcov", type=float, default=0.0, help="Search qcov_hsp_perc when --relaxed (default 0)")
