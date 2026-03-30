@@ -9,13 +9,11 @@ They are intentionally minimal: no monolithic pipeline subcommand is required. E
 For paired AB1 data, use this order:
 
 1. `preview_pair_names.sh`
-2. authoritative MicroSeq paired preview
-3. `paired_ab1_pipeline.sh`
+2. `paired_ab1_pipeline.sh`
 
 This separates:
 
-- **filename cleanup**
-- **pairing validation**
+- **filename cleanup/validation**
 - **full analysis**
 
 which makes pairing failures easier to diagnose before you commit to the full run.
