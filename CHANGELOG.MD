@@ -78,6 +78,7 @@ Note due to feedback from colleagues in the lab I'm in I will make some revision
 - Advanced regex fields now store stripped strings or `None` (not bound methods).
 - BLAST-only completion no longer reports `.` as an output path.
 - GUI cancellation now interrupts background pipeline stages.
+- Updated the GUI range for max_hits so its not the same as threads being as 1 - 32 but instead it being at 1-500 as it rightly should. 
 
 
 ---
