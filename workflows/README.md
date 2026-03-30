@@ -43,8 +43,8 @@ What it does:
 
 Current default primer labels checked by the helper:
 
-- Forward: `27F`, `8F`, `515F`
-- Reverse: `1492R`, `806R`, `926R`
+- Forward: `27F`, `8F`
+- Reverse: `1492R`
 
 Important notes:
 
