@@ -881,8 +881,8 @@ class MainWindow(QMainWindow):
 
         # -------- max target hits
         self.hits_spin = QSpinBox()
-        self.hits_spin.setRange(BLAST_THREADS_MIN, BLAST_THREADS_MAX)
-        self.hits_spin.setValue(BLAST_THREADS_DEFAULT)
+        self.hits_spin.setRange(BLAST_MAX_HITS_MIN, BLAST_MAX_HITS_MAX)
+        self.hits_spin.setValue(BLAST_MAX_HITS_DEFAULT)
         self.hits_spin.setSuffix(" hits")
 
         # -------- Assembly Mode ----------------------------------------
