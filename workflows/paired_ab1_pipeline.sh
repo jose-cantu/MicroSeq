@@ -25,9 +25,9 @@ Examples:
   paired_ab1_pipeline.sh /home/jason/MicroSeq/tests/paired_single_pair_ab1_demo_run gg2 4
   paired_ab1_pipeline.sh /home/jason/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497 gg2 4 run_strict
   paired_ab1_pipeline.sh /home/jason/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497 gg2 4 \
-    --identity 99 --qcov 90 --max-hits 1
+    --identity 99 --qcov 90 --max-hits 5
   paired_ab1_pipeline.sh /home/jason/MicroSeq/tests/paired_ab1_demo_run/10292025_1080497 gg2 4 run_strict \
-    --identity 99 --qcov 90 --max-hits 1
+    --identity 99 --qcov 90 --max-hits 10
 EOF
 }
 
@@ -215,7 +215,7 @@ Key outputs:
   trim summary      : $OUT_DIR/qc/trim_summary.tsv
   pairing report    : $OUT_DIR/qc/pairing_report.tsv
   assembly summary  : $OUT_DIR/asm/assembly_summary.tsv
-  blast payload map : $OUT_DIR/asm/blast_inputs.tsv
+  blast input sequences : $OUT_DIR/asm/blast_inputs.tsv
   blast hits        : $OUT_DIR/hits.tsv
   hits + taxonomy   : $OUT_DIR/hits_tax.tsv
 EOF
