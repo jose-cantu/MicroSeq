@@ -90,6 +90,7 @@ __all__ = [
     "run_pairing_report",
     "run_assembly_summary",
     "run_overlap_audit",
+    "run_blast_inputs",
 ]
 
 PathLike = Union[str, Path]
@@ -3838,4 +3839,56 @@ def run_overlap_audit(
 
     # Return the concrete TSV path for caller logging and wrapper use 
     return output_tsv
+
+# Wrap canonical paired BLAST-input builder in one helper 
+def run_blast_inputs(
+    asm_dir: PathLike,
+    pairing_input_dir: PathLike,
+    output_fasta: PathLike,
+    output_tsv: PathLike,
+    *,
+    fwd_pattern: str | None = None,
+    rev_pattern: str | None = None,
+    dup_policy: DupPolicy = DupPolicy.ERROR,
+    enforce_same_well: bool = False,
+    well_pattern: str | re.Pattern[str] | None = None,
+) -> tuple[Path, Path]:
+
+    # Normalize assembly directory path 
+    asm_dir = Path(asm_dir)
+
+    # Normalize staged pairing input directory path 
+    pairing_input_dir = Path(pairing_input_dir)
+
+    # Normalize the two output paths. 
+    output_fasta = Path(output_fasta)
+    output_tsv = Path(output_tsv) 
+
+    # Ensure destination exists before start of writing 
+    output_fasta.parent.mkdir(parents=True, exist_ok=True)
+    output_tsv.parent.mkdir(parents=True, exist_ok=True)
+
+    # Reconstruct same pairing catalog used in paired workflow 
+    paired_samples, missing_samples = _collect_pairing_catalog(
+        pairing_input_dir,
+        fwd_pattern=fwd_pattern,
+        rev_pattern=rev_pattern,
+        dup_policy=dup_policy,
+        enforce_same_well=enforce_same_well,
+        well_pattern=well_pattern,
+    )
+
+    # Reuse the canonical internal BLAST input writer 
+    _build_blast_inputs(
+        asm_dir,
+        paired_samples,
+        missing_samples,
+        output_fasta,
+        output_tsv,
+    )
+
+    # Return both written artifact paths 
+    return output_fasta, output_tsv 
+
+
 

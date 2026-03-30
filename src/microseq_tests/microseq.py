@@ -7,7 +7,7 @@ from microseq_tests.utility.progress import stage_bar
 from microseq_tests.utility.merge_hits import merge_hits 
 import microseq_tests.trimming.biopy_trim as biopy_trim
 # ── pipeline wrappers (return rc int, handle logging) ──────────────
-from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, run_full_pipeline, _summarize_paired_candidates, _suggest_pairing_patterns_staged, _collect_pairing_catalog, _write_overlap_audit, stage_paired_fastas_from_fastq_dir, run_pairing_report, run_assembly_summary, run_overlap_audit)
+from microseq_tests.pipeline import ( run_trim,run_ab1_to_fastq, run_fastq_to_fasta, run_assembly, run_paired_assembly, run_full_pipeline, _summarize_paired_candidates, _suggest_pairing_patterns_staged, _collect_pairing_catalog, _write_overlap_audit, stage_paired_fastas_from_fastq_dir, run_pairing_report, run_assembly_summary, run_overlap_audit, run_blast_inputs)
 from microseq_tests.utility.utils import setup_logging, load_config, expand_db_path
 from microseq_tests.assembly.pairing import DupPolicy 
 from microseq_tests.blast.run_blast import run_blast
@@ -120,7 +120,18 @@ def main() -> None:
     p_overlap_audit.add_argument("--pretrim-input-dir", default=None, help="Optional qc/primer_trim_report.tsv")
     p_overlap_audit.add_argument("--primer-trim-report", default=None, help="Optional qc/primer_trim_report.tsv file.")
 
-    
+    # Adding CLI subcommand writes canonical blast_inputs.fasta and blast_inputs.tsv files 
+    p_blast_inputs = sp.add_parser("blast-inputs", help="This aids the selection and creates the blast_inputs file asm/blast_inputs.fasta and asm/blast_inputs.tsv that is then used for blasting in MicroSeq.")
+    p_blast_inputs.add_argument("--asm-dir", required=True, help="Assembly output directory (for example: asm)")
+    p_blast_inputs.add_argument("--pairing-input-dir", required=True, help="Input used for pairing catalog (for example: qc/paired_fasta)")
+    p_blast_inputs.add_argument("--output-fasta", required=True, help="Output FASTA path")
+    p_blast_inputs.add_argument("--output-tsv", required=True, help="Output TSV path")
+    p_blast_inputs.add_argument("--dup-policy", choices=[policy.value for policy in DupPolicy], default="error")
+    p_blast_inputs.add_argument("--fwd-pattern", default=None, help="Optional custom forward primer regex")
+    p_blast_inputs.add_argument("--rev-pattern", default=None, help="Optional custom reverse primer regex")
+    p_blast_inputs.add_argument("--enforce-well", action="store_true")
+    p_blast_inputs.add_argument("--well-pattern")
+
     # assembly 
     p_asm = sp.add_parser("assembly", help="De novo assembly via CAP3")
     p_asm.add_argument("-i", "--input", required=True)
@@ -378,6 +389,21 @@ def main() -> None:
             primer_trim_report=args.primer_trim_report
         )
         print(f"Overlap audit ready: {out_path}")
+
+    # Dispatch the canonical BLAST-input builder.
+    elif args.cmd == "blast-inputs":
+        fasta_path, tsv_path = run_blast_inputs(
+            args.asm_dir,
+            args.pairing_input_dir,
+            args.output_fasta,
+            args.output_tsv,
+            dup_policy=DupPolicy(args.dup_policy),
+            fwd_pattern=args.fwd_pattern,
+            rev_pattern=args.rev_pattern,
+            enforce_same_well=args.enforce_well,
+            well_pattern=args.well_pattern,
+        )
+        print(f"BLAST inputs ready: {fasta_path} | {tsv_path}")
 
     elif args.cmd == "assembly":
         if args.preview_pairs and args.mode != "paired":

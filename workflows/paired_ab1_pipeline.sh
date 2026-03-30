@@ -100,49 +100,16 @@ microseq overlap-audit \
 
 echo "[4/6] build BLAST input FASTA"
 BLAST_INPUT="$OUT_DIR/asm/blast_inputs.fasta"
-: > "$BLAST_INPUT"
+# Write canonical BLAST input FASTA + manifest using MicroSeq's 
+microseq blast-inputs \
+  --asm-dir "$OUT_DIR/asm" \
+  --pairing-input-dir "$PAIRED_FASTA_DIR" \
+  --output-fasta "$OUT_DIR/asm/blast_inputs.fasta" \
+  --output-tsv "$OUT_DIR/asm/blast_inputs.tsv" \
+  --dup-policy "$DUP_POLICY" \
+  --fwd-pattern "$FWD_PATTERN" \
+  --rev-pattern "$REV_PATTERN"
 
-found_payload=0
-shopt -s nullglob
-
-for sample_dir in "$OUT_DIR"/asm/*/; do
-  [[ -d "$sample_dir" ]] || continue
-  sample_id="$(basename "$sample_dir")"
-
-  contig_files=( "$sample_dir"/*.cap.contigs )
-  singlet_files=( "$sample_dir"/*.cap.singlets )
-
-  payload_kind=""
-  payload_file=""
-
-  if (( ${#contig_files[@]} > 0 )) && [[ -s "${contig_files[0]}" ]]; then
-    payload_kind="contig"
-    payload_file="${contig_files[0]}"
-  elif (( ${#singlet_files[@]} > 0 )) && [[ -s "${singlet_files[0]}" ]]; then
-    payload_kind="singlet"
-    payload_file="${singlet_files[0]}"
-  else
-    continue
-  fi
-
-  awk -v sample_id="$sample_id" -v payload_kind="$payload_kind" '
-    /^>/ {
-      original_id = substr($0, 2)
-      print ">" sample_id "|" payload_kind "|" original_id
-      next
-    }
-    { print }
-  ' "$payload_file" >> "$BLAST_INPUT"
-
-  found_payload=1
-done
-
-shopt -u nullglob
-
-[[ "$found_payload" -eq 1 ]] || {
-  echo "Error: no contig/singlet payloads found under $OUT_DIR/asm" >&2
-  exit 1
-}
 
 echo "[5/6] BLAST"
 microseq blast \
