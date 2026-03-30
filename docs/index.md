@@ -2,9 +2,7 @@
 layout: page
 title: MicroSeq Docs
 ---
-* In the future this will be treating as a landing page for labmates so they can have quick links through all the documentation. For now I'm just referencing the GUI since this is a work in progress. 
-
-> **MicroSeq GUI preview** click and run Sanger Software tool. 
+* This is the landing page for MicroSeq meant to be used as a bird eyeview of all the docs present that I wrote under these different docs. So please do take a look to better understand my tool, MicroSeq. =)  
 
 * [GUI Walkthrough](gui_usage.md)
 * [GUI Table Reference](gui_table_reference.md)
@@ -14,10 +12,5 @@ title: MicroSeq Docs
 * [CLI Workflows](cli_workflow_tutorial.md)
 * [Workflow Resolution Funnel](workflow_resolution.md) *(includes resolution-contract fields like `review_action`, `advisory_reason`, `payload_entity_n`, `source_id_map` and what they mean in practice)*
 * [MicroSeq's Design: Questions & Answers](microseq_design_questions.md)
-
-
-```bash 
-# launch the GUI from MicroSeq conda env 
-microseq-gui 
-```
+* [Scientific References & Further Reading](scientific_references.md)
 
